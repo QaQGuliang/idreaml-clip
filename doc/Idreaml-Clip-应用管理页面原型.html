@@ -1,0 +1,1060 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Idreaml Clip - 理梦剪藏</title>
+  <style>
+    :root {
+      --bg: #f5f7fb;
+      --panel: rgba(255,255,255,.86);
+      --panel-solid: #ffffff;
+      --text: #15171a;
+      --sub: #747b86;
+      --line: #e7eaf0;
+      --primary: #6c5ce7;
+      --primary-soft: #efedff;
+      --danger: #e74c3c;
+      --shadow: 0 18px 55px rgba(35, 39, 47, .14);
+      --radius-xl: 24px;
+      --radius-lg: 18px;
+      --radius-md: 14px;
+    }
+
+    * { box-sizing: border-box; }
+
+    html, body {
+      margin: 0;
+      min-height: 100%;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+        "PingFang SC", "Microsoft YaHei", sans-serif;
+      background:
+        radial-gradient(circle at 12% 12%, rgba(108,92,231,.14), transparent 30%),
+        radial-gradient(circle at 88% 18%, rgba(92,188,231,.13), transparent 28%),
+        var(--bg);
+      color: var(--text);
+    }
+
+    body {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      padding: 28px;
+    }
+
+    button, input {
+      font: inherit;
+    }
+
+    .app-shell {
+      width: min(1180px, 100%);
+      height: min(780px, calc(100vh - 56px));
+      min-height: 680px;
+      display: grid;
+      grid-template-columns: 230px 1fr;
+      background: var(--panel);
+      backdrop-filter: blur(18px);
+      border: 1px solid rgba(255,255,255,.8);
+      border-radius: 30px;
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .sidebar {
+      padding: 22px 16px;
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      background: rgba(250,251,253,.78);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 4px 8px 20px;
+    }
+
+    .brand-mark {
+      width: 38px;
+      height: 38px;
+      border-radius: 13px;
+      background: linear-gradient(135deg, #7768f3, #5744d6);
+      display: grid;
+      place-items: center;
+      color: white;
+      font-weight: 800;
+      box-shadow: 0 8px 20px rgba(108,92,231,.28);
+    }
+
+    .brand-name {
+      line-height: 1.1;
+    }
+
+    .brand-name strong {
+      display: block;
+      font-size: 16px;
+      letter-spacing: .2px;
+    }
+
+    .brand-name span {
+      color: var(--sub);
+      font-size: 12px;
+    }
+
+    .nav-title {
+      color: #9aa1ab;
+      font-size: 11px;
+      font-weight: 700;
+      padding: 14px 12px 8px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+
+    .nav-item {
+      border: 0;
+      width: 100%;
+      background: transparent;
+      color: #4b515b;
+      display: flex;
+      align-items: center;
+      gap: 11px;
+      padding: 11px 12px;
+      border-radius: 12px;
+      cursor: pointer;
+      margin: 2px 0;
+      transition: .18s ease;
+      text-align: left;
+    }
+
+    .nav-item:hover { background: #f0f2f7; }
+    .nav-item.active {
+      background: var(--primary-soft);
+      color: var(--primary);
+      font-weight: 700;
+    }
+
+    .nav-item .icon { width: 22px; text-align: center; }
+
+    .sidebar-bottom {
+      margin-top: auto;
+      display: grid;
+      gap: 10px;
+    }
+
+    .sync-card {
+      background: #fff;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 13px;
+    }
+
+    .sync-card .top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .sync-card .label {
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #25b864;
+      box-shadow: 0 0 0 4px rgba(37,184,100,.1);
+    }
+
+    .sync-card .meta {
+      color: var(--sub);
+      font-size: 11px;
+      line-height: 1.45;
+    }
+
+    .main {
+      min-width: 0;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .topbar {
+      padding: 22px 26px 14px;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+    }
+
+    .page-title {
+      min-width: 145px;
+    }
+
+    .page-title strong {
+      display: block;
+      font-size: 22px;
+    }
+
+    .page-title span {
+      color: var(--sub);
+      font-size: 12px;
+    }
+
+    .search-wrap {
+      flex: 1;
+      position: relative;
+    }
+
+    .search-wrap input {
+      width: 100%;
+      height: 46px;
+      border: 1px solid var(--line);
+      border-radius: 14px;
+      outline: none;
+      padding: 0 44px 0 42px;
+      background: rgba(255,255,255,.9);
+      color: var(--text);
+      transition: .2s ease;
+    }
+
+    .search-wrap input:focus {
+      border-color: rgba(108,92,231,.42);
+      box-shadow: 0 0 0 4px rgba(108,92,231,.08);
+    }
+
+    .search-icon {
+      position: absolute;
+      left: 15px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #8b929c;
+      pointer-events: none;
+    }
+
+    .shortcut {
+      position: absolute;
+      right: 11px;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #8f96a1;
+      border: 1px solid var(--line);
+      padding: 4px 7px;
+      border-radius: 8px;
+      font-size: 11px;
+      background: #fafbfc;
+    }
+
+    .ghost-btn, .primary-btn {
+      border: 0;
+      border-radius: 13px;
+      height: 42px;
+      padding: 0 14px;
+      cursor: pointer;
+      transition: .18s ease;
+    }
+
+    .ghost-btn {
+      background: #fff;
+      color: #4f5661;
+      border: 1px solid var(--line);
+    }
+
+    .ghost-btn:hover { background: #f8f9fb; }
+
+    .primary-btn {
+      background: var(--primary);
+      color: white;
+      box-shadow: 0 8px 18px rgba(108,92,231,.24);
+    }
+
+    .content {
+      padding: 0 26px 26px;
+      min-height: 0;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 320px;
+      gap: 18px;
+      flex: 1;
+    }
+
+    .history-panel, .detail-panel {
+      min-height: 0;
+      background: rgba(255,255,255,.78);
+      border: 1px solid var(--line);
+      border-radius: 20px;
+      overflow: hidden;
+    }
+
+    .history-panel {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .filter-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 14px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .filter-chip {
+      border: 0;
+      background: #f4f5f8;
+      color: #646b75;
+      padding: 8px 12px;
+      border-radius: 999px;
+      cursor: pointer;
+      font-size: 12px;
+    }
+
+    .filter-chip.active {
+      color: var(--primary);
+      background: var(--primary-soft);
+      font-weight: 700;
+    }
+
+    .filter-spacer { flex: 1; }
+
+    .count {
+      color: var(--sub);
+      font-size: 12px;
+      margin-right: 4px;
+    }
+
+    .list {
+      padding: 10px;
+      overflow-y: auto;
+      min-height: 0;
+    }
+
+    .clip-item {
+      display: grid;
+      grid-template-columns: 34px 1fr auto;
+      gap: 12px;
+      padding: 13px;
+      border-radius: 15px;
+      cursor: pointer;
+      transition: .16s ease;
+      border: 1px solid transparent;
+      margin-bottom: 5px;
+    }
+
+    .clip-item:hover { background: #f8f9fb; }
+    .clip-item.active {
+      background: #f7f5ff;
+      border-color: #e2dcff;
+    }
+
+    .clip-type {
+      width: 34px;
+      height: 34px;
+      border-radius: 10px;
+      background: #f0f2f7;
+      display: grid;
+      place-items: center;
+      font-size: 15px;
+      color: #69717c;
+    }
+
+    .clip-item.active .clip-type {
+      background: #e9e5ff;
+      color: var(--primary);
+    }
+
+    .clip-main { min-width: 0; }
+
+    .clip-preview {
+      font-size: 13px;
+      line-height: 1.45;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      margin-bottom: 5px;
+    }
+
+    .clip-meta {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      color: #9aa0a9;
+      font-size: 11px;
+    }
+
+    .source-pill {
+      background: #f1f3f6;
+      color: #7a818c;
+      padding: 2px 6px;
+      border-radius: 6px;
+    }
+
+    .item-actions {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .icon-btn {
+      border: 0;
+      width: 30px;
+      height: 30px;
+      border-radius: 9px;
+      background: transparent;
+      cursor: pointer;
+      color: #9aa0aa;
+    }
+
+    .icon-btn:hover {
+      background: #eef0f4;
+      color: #4d535c;
+    }
+
+    .icon-btn.fav.active { color: #f1a60d; }
+
+    .detail-panel {
+      display: flex;
+      flex-direction: column;
+      padding: 18px;
+    }
+
+    .detail-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    .detail-head strong { font-size: 14px; }
+
+    .tag {
+      font-size: 11px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      color: var(--primary);
+      background: var(--primary-soft);
+    }
+
+    .detail-content {
+      flex: 1;
+      min-height: 240px;
+      background: #f8f9fb;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      padding: 15px;
+      white-space: pre-wrap;
+      overflow: auto;
+      line-height: 1.55;
+      font-size: 13px;
+      color: #343941;
+    }
+
+    .detail-meta {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+      margin: 14px 0;
+    }
+
+    .meta-box {
+      border: 1px solid var(--line);
+      border-radius: 12px;
+      padding: 10px;
+      background: #fff;
+    }
+
+    .meta-box span {
+      display: block;
+      color: var(--sub);
+      font-size: 10px;
+      margin-bottom: 4px;
+    }
+
+    .meta-box strong {
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .detail-actions {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px;
+    }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 32px;
+      transform: translate(-50%, 16px);
+      background: #20242a;
+      color: white;
+      padding: 10px 16px;
+      border-radius: 12px;
+      font-size: 12px;
+      opacity: 0;
+      pointer-events: none;
+      transition: .22s ease;
+      box-shadow: 0 10px 28px rgba(0,0,0,.22);
+    }
+
+    .toast.show {
+      opacity: 1;
+      transform: translate(-50%, 0);
+    }
+
+    .empty {
+      padding: 50px 20px;
+      text-align: center;
+      color: var(--sub);
+      font-size: 13px;
+    }
+
+    .settings-modal {
+      position: fixed;
+      inset: 0;
+      background: rgba(18,22,28,.26);
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 20px;
+    }
+
+    .settings-modal.show { display: flex; }
+
+    .settings-card {
+      width: min(520px, 100%);
+      background: white;
+      border-radius: 22px;
+      box-shadow: var(--shadow);
+      padding: 22px;
+    }
+
+    .settings-card h3 {
+      margin: 0 0 18px;
+      font-size: 18px;
+    }
+
+    .setting-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 14px 0;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .setting-row:last-of-type { border-bottom: 0; }
+
+    .setting-row strong {
+      display: block;
+      font-size: 13px;
+      margin-bottom: 3px;
+    }
+
+    .setting-row span {
+      color: var(--sub);
+      font-size: 11px;
+    }
+
+    .switch {
+      width: 44px;
+      height: 24px;
+      background: #d9dde4;
+      border-radius: 999px;
+      position: relative;
+      cursor: pointer;
+      flex: 0 0 auto;
+    }
+
+    .switch::after {
+      content: "";
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: white;
+      position: absolute;
+      left: 3px;
+      top: 3px;
+      box-shadow: 0 2px 6px rgba(0,0,0,.16);
+      transition: .2s ease;
+    }
+
+    .switch.on {
+      background: var(--primary);
+    }
+
+    .switch.on::after {
+      left: 23px;
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      margin-top: 18px;
+    }
+
+    @media (max-width: 980px) {
+      .app-shell {
+        grid-template-columns: 84px 1fr;
+      }
+      .brand-name, .nav-item span:not(.icon), .nav-title, .sync-card { display: none; }
+      .brand { justify-content: center; }
+      .nav-item { justify-content: center; }
+      .content { grid-template-columns: 1fr; }
+      .detail-panel { display: none; }
+    }
+
+    @media (max-width: 680px) {
+      body { padding: 0; }
+      .app-shell {
+        width: 100vw;
+        height: 100vh;
+        min-height: 0;
+        border-radius: 0;
+        grid-template-columns: 1fr;
+      }
+      .sidebar { display: none; }
+      .topbar {
+        padding: 16px;
+        flex-wrap: wrap;
+      }
+      .page-title { min-width: auto; }
+      .search-wrap { order: 3; flex-basis: 100%; }
+      .content { padding: 0 16px 16px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <aside class="sidebar">
+      <div class="brand">
+        <div class="brand-mark">I</div>
+        <div class="brand-name">
+          <strong>Idreaml Clip</strong>
+          <span>理梦剪藏</span>
+        </div>
+      </div>
+
+      <div class="nav-title">剪切板</div>
+      <button class="nav-item active" data-view="all">
+        <span class="icon">▣</span><span>全部历史</span>
+      </button>
+      <button class="nav-item" data-view="favorite">
+        <span class="icon">★</span><span>我的收藏</span>
+      </button>
+
+      <div class="nav-title">管理</div>
+      <button class="nav-item" id="syncNav">
+        <span class="icon">↻</span><span>云同步</span>
+      </button>
+      <button class="nav-item" id="settingsNav">
+        <span class="icon">⚙</span><span>设置</span>
+      </button>
+
+      <div class="sidebar-bottom">
+        <div class="sync-card">
+          <div class="top">
+            <span class="label">Gitee 云同步</span>
+            <span class="status-dot"></span>
+          </div>
+          <div class="meta">已连接 · 2 分钟前同步<br/>仓库：idreaml-clip-data</div>
+        </div>
+        <button class="ghost-btn" id="pauseBtn">暂停记录</button>
+      </div>
+    </aside>
+
+    <main class="main">
+      <header class="topbar">
+        <div class="page-title">
+          <strong>剪切板历史</strong>
+          <span>本地优先 · 自动保存</span>
+        </div>
+
+        <div class="search-wrap">
+          <span class="search-icon">⌕</span>
+          <input id="searchInput" placeholder="搜索剪切板内容..." />
+          <span class="shortcut">Ctrl K</span>
+        </div>
+
+        <button class="ghost-btn" id="syncBtn">立即同步</button>
+      </header>
+
+      <section class="content">
+        <div class="history-panel">
+          <div class="filter-row">
+            <button class="filter-chip active" data-filter="all">全部</button>
+            <button class="filter-chip" data-filter="favorite">收藏</button>
+            <button class="filter-chip" data-filter="today">今天</button>
+            <div class="filter-spacer"></div>
+            <span class="count" id="countText">0 条记录</span>
+          </div>
+
+          <div class="list" id="clipList"></div>
+        </div>
+
+        <aside class="detail-panel">
+          <div class="detail-head">
+            <strong>内容详情</strong>
+            <span class="tag">TEXT</span>
+          </div>
+
+          <div class="detail-content" id="detailContent">请选择一条剪切板记录</div>
+
+          <div class="detail-meta">
+            <div class="meta-box">
+              <span>创建时间</span>
+              <strong id="detailTime">-</strong>
+            </div>
+            <div class="meta-box">
+              <span>来源设备</span>
+              <strong id="detailDevice">-</strong>
+            </div>
+          </div>
+
+          <div class="detail-actions">
+            <button class="primary-btn" id="copyBtn">复制内容</button>
+            <button class="ghost-btn" id="favoriteBtn">收藏</button>
+          </div>
+        </aside>
+      </section>
+    </main>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <div class="settings-modal" id="settingsModal">
+    <div class="settings-card">
+      <h3>设置</h3>
+
+      <div class="setting-row">
+        <div>
+          <strong>开机自动启动</strong>
+          <span>登录系统后自动启动 Idreaml Clip</span>
+        </div>
+        <div class="switch on"></div>
+      </div>
+
+      <div class="setting-row">
+        <div>
+          <strong>自动记录剪切板</strong>
+          <span>后台持续保存文本剪切板历史</span>
+        </div>
+        <div class="switch on"></div>
+      </div>
+
+      <div class="setting-row">
+        <div>
+          <strong>Git 云同步</strong>
+          <span>将本地历史同步到用户自己的仓库</span>
+        </div>
+        <div class="switch on"></div>
+      </div>
+
+      <div class="setting-row">
+        <div>
+          <strong>历史保存数量</strong>
+          <span>当前：10,000 条</span>
+        </div>
+        <button class="ghost-btn">修改</button>
+      </div>
+
+      <div class="modal-actions">
+        <button class="primary-btn" id="closeSettings">完成</button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const clips = [
+      {
+        id: 1,
+        content: "SELECT id, content, created_at FROM clipboard_item ORDER BY created_at DESC LIMIT 100;",
+        time: "刚刚",
+        device: "Windows · DESKTOP-01",
+        source: "IDEA",
+        favorite: true,
+        today: true
+      },
+      {
+        id: 2,
+        content: "https://gitee.com/api/v5",
+        time: "2 分钟前",
+        device: "Windows · DESKTOP-01",
+        source: "Chrome",
+        favorite: false,
+        today: true
+      },
+      {
+        id: 3,
+        content: "Local First + 应用内置 Git 能力 + 本地隐藏 Git 仓库 + 用户自己的远端 Git 仓库。",
+        time: "8 分钟前",
+        device: "Windows · DESKTOP-01",
+        source: "ChatGPT",
+        favorite: true,
+        today: true
+      },
+      {
+        id: 4,
+        content: "flutter create idreaml_clip",
+        time: "16 分钟前",
+        device: "Windows · DESKTOP-01",
+        source: "Terminal",
+        favorite: false,
+        today: true
+      },
+      {
+        id: 5,
+        content: "{\n  \"provider\": \"gitee\",\n  \"syncEnabled\": true,\n  \"historyLimit\": 10000\n}",
+        time: "32 分钟前",
+        device: "macOS · MacBook Pro",
+        source: "VS Code",
+        favorite: false,
+        today: true
+      },
+      {
+        id: 6,
+        content: "Idreaml Clip - 理梦剪藏",
+        time: "昨天 22:41",
+        device: "macOS · MacBook Pro",
+        source: "Notes",
+        favorite: true,
+        today: false
+      },
+      {
+        id: 7,
+        content: "跨平台、本地优先、可选 Git 云同步的剪切板管理器",
+        time: "昨天 18:20",
+        device: "Linux · ThinkPad",
+        source: "Firefox",
+        favorite: false,
+        today: false
+      }
+    ];
+
+    let currentFilter = "all";
+    let selectedId = clips[0].id;
+    let paused = false;
+
+    const listEl = document.getElementById("clipList");
+    const searchInput = document.getElementById("searchInput");
+    const countText = document.getElementById("countText");
+    const detailContent = document.getElementById("detailContent");
+    const detailTime = document.getElementById("detailTime");
+    const detailDevice = document.getElementById("detailDevice");
+    const favoriteBtn = document.getElementById("favoriteBtn");
+    const toast = document.getElementById("toast");
+
+    function getFiltered() {
+      const q = searchInput.value.trim().toLowerCase();
+      return clips.filter(item => {
+        const matchesSearch =
+          item.content.toLowerCase().includes(q) ||
+          item.source.toLowerCase().includes(q) ||
+          item.device.toLowerCase().includes(q);
+
+        const matchesFilter =
+          currentFilter === "all" ||
+          (currentFilter === "favorite" && item.favorite) ||
+          (currentFilter === "today" && item.today);
+
+        return matchesSearch && matchesFilter;
+      });
+    }
+
+    function render() {
+      const filtered = getFiltered();
+      countText.textContent = `${filtered.length} 条记录`;
+
+      if (!filtered.length) {
+        listEl.innerHTML = `<div class="empty">没有找到匹配的剪切板记录</div>`;
+        return;
+      }
+
+      listEl.innerHTML = filtered.map(item => `
+        <div class="clip-item ${item.id === selectedId ? "active" : ""}" data-id="${item.id}">
+          <div class="clip-type">T</div>
+          <div class="clip-main">
+            <div class="clip-preview">${escapeHtml(item.content.replace(/\n/g, " "))}</div>
+            <div class="clip-meta">
+              <span>${item.time}</span>
+              <span>·</span>
+              <span class="source-pill">${item.source}</span>
+            </div>
+          </div>
+          <div class="item-actions">
+            <button class="icon-btn fav ${item.favorite ? "active" : ""}" data-action="fav" data-id="${item.id}" title="收藏">★</button>
+            <button class="icon-btn" data-action="delete" data-id="${item.id}" title="删除">×</button>
+          </div>
+        </div>
+      `).join("");
+
+      document.querySelectorAll(".clip-item").forEach(el => {
+        el.addEventListener("click", e => {
+          if (e.target.closest("[data-action]")) return;
+          selectedId = Number(el.dataset.id);
+          updateDetail();
+          render();
+        });
+
+        el.addEventListener("dblclick", e => {
+          if (e.target.closest("[data-action]")) return;
+          selectedId = Number(el.dataset.id);
+          copySelected();
+        });
+      });
+
+      document.querySelectorAll("[data-action='fav']").forEach(btn => {
+        btn.addEventListener("click", () => toggleFavorite(Number(btn.dataset.id)));
+      });
+
+      document.querySelectorAll("[data-action='delete']").forEach(btn => {
+        btn.addEventListener("click", () => deleteClip(Number(btn.dataset.id)));
+      });
+    }
+
+    function updateDetail() {
+      const item = clips.find(x => x.id === selectedId);
+      if (!item) {
+        detailContent.textContent = "请选择一条剪切板记录";
+        detailTime.textContent = "-";
+        detailDevice.textContent = "-";
+        favoriteBtn.textContent = "收藏";
+        return;
+      }
+      detailContent.textContent = item.content;
+      detailTime.textContent = item.time;
+      detailDevice.textContent = item.device;
+      favoriteBtn.textContent = item.favorite ? "取消收藏" : "收藏";
+    }
+
+    function toggleFavorite(id) {
+      const item = clips.find(x => x.id === id);
+      if (!item) return;
+      item.favorite = !item.favorite;
+      selectedId = id;
+      updateDetail();
+      render();
+      showToast(item.favorite ? "已收藏" : "已取消收藏");
+    }
+
+    function deleteClip(id) {
+      const index = clips.findIndex(x => x.id === id);
+      if (index < 0) return;
+      clips.splice(index, 1);
+      if (selectedId === id) selectedId = clips[0]?.id ?? null;
+      updateDetail();
+      render();
+      showToast("已删除该记录");
+    }
+
+    async function copySelected() {
+      const item = clips.find(x => x.id === selectedId);
+      if (!item) return;
+      try {
+        await navigator.clipboard.writeText(item.content);
+        showToast("已复制到系统剪切板");
+      } catch {
+        showToast("原型环境无法访问系统剪切板");
+      }
+    }
+
+    function showToast(message) {
+      toast.textContent = message;
+      toast.classList.add("show");
+      clearTimeout(window.__toastTimer);
+      window.__toastTimer = setTimeout(() => toast.classList.remove("show"), 1600);
+    }
+
+    function escapeHtml(str) {
+      return str.replace(/[&<>"']/g, m => ({
+        "&": "&amp;",
+        "<": "&lt;",
+        ">": "&gt;",
+        '"': "&quot;",
+        "'": "&#039;"
+      })[m]);
+    }
+
+    searchInput.addEventListener("input", render);
+
+    document.querySelectorAll(".filter-chip").forEach(btn => {
+      btn.addEventListener("click", () => {
+        currentFilter = btn.dataset.filter;
+        document.querySelectorAll(".filter-chip").forEach(x => x.classList.remove("active"));
+        btn.classList.add("active");
+        render();
+      });
+    });
+
+    document.querySelectorAll(".nav-item[data-view]").forEach(btn => {
+      btn.addEventListener("click", () => {
+        document.querySelectorAll(".nav-item").forEach(x => x.classList.remove("active"));
+        btn.classList.add("active");
+        currentFilter = btn.dataset.view === "favorite" ? "favorite" : "all";
+        document.querySelectorAll(".filter-chip").forEach(x => {
+          x.classList.toggle("active", x.dataset.filter === currentFilter);
+        });
+        render();
+      });
+    });
+
+    favoriteBtn.addEventListener("click", () => toggleFavorite(selectedId));
+    document.getElementById("copyBtn").addEventListener("click", copySelected);
+
+    document.getElementById("pauseBtn").addEventListener("click", e => {
+      paused = !paused;
+      e.currentTarget.textContent = paused ? "恢复记录" : "暂停记录";
+      showToast(paused ? "已暂停剪切板记录" : "已恢复剪切板记录");
+    });
+
+    document.getElementById("syncBtn").addEventListener("click", e => {
+      e.currentTarget.disabled = true;
+      e.currentTarget.textContent = "同步中...";
+      setTimeout(() => {
+        e.currentTarget.disabled = false;
+        e.currentTarget.textContent = "立即同步";
+        showToast("同步完成 · Gitee");
+      }, 900);
+    });
+
+    const settingsModal = document.getElementById("settingsModal");
+    document.getElementById("settingsNav").addEventListener("click", () => settingsModal.classList.add("show"));
+    document.getElementById("closeSettings").addEventListener("click", () => settingsModal.classList.remove("show"));
+    settingsModal.addEventListener("click", e => {
+      if (e.target === settingsModal) settingsModal.classList.remove("show");
+    });
+
+    document.querySelectorAll(".switch").forEach(sw => {
+      sw.addEventListener("click", () => sw.classList.toggle("on"));
+    });
+
+    document.getElementById("syncNav").addEventListener("click", () => {
+      showToast("云同步：Gitee 已连接");
+    });
+
+    document.addEventListener("keydown", e => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        searchInput.focus();
+      }
+
+      if (e.key === "Escape") {
+        searchInput.blur();
+        settingsModal.classList.remove("show");
+      }
+
+      if (e.key === "Enter" && document.activeElement === searchInput) {
+        const first = getFiltered()[0];
+        if (first) {
+          selectedId = first.id;
+          updateDetail();
+          render();
+        }
+      }
+    });
+
+    updateDetail();
+    render();
+  </script>
+</body>
+</html>

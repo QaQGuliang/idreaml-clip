@@ -1,0 +1,615 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0" />
+<title>Idreaml Clip Prototype</title>
+<style>
+:root{
+  --bg:#f3f5f8;
+  --card:#ffffff;
+  --card2:#f8f9fb;
+  --text:#17191d;
+  --sub:#717784;
+  --line:#e7eaf0;
+  --primary:#6558e8;
+  --primary2:#7c70f4;
+  --soft:#eeecff;
+  --green:#22a75a;
+  --red:#e75252;
+  --yellow:#e7a928;
+  --shadow:0 20px 60px rgba(29,34,45,.16);
+  --shadow2:0 10px 30px rgba(29,34,45,.12);
+}
+*{box-sizing:border-box}
+html,body{margin:0;min-height:100%;font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif;color:var(--text);background:var(--bg)}
+button,input,select{font:inherit}
+button{cursor:pointer}
+.hidden{display:none!important}
+.badge{display:inline-flex;align-items:center;gap:6px;border-radius:999px;padding:5px 9px;font-size:11px;background:#f1f3f7;color:#6d7480}
+.dot{width:7px;height:7px;border-radius:50%;background:var(--green)}
+.icon-btn{width:32px;height:32px;border:0;border-radius:10px;background:transparent;color:#89909a}
+.icon-btn:hover{background:#f0f2f6;color:#49505a}
+.primary{border:0;background:var(--primary);color:#fff;border-radius:12px;padding:10px 15px;font-weight:700;box-shadow:0 8px 20px rgba(101,88,232,.22)}
+.secondary{border:1px solid var(--line);background:#fff;color:#4a505a;border-radius:12px;padding:9px 14px}
+.danger{border:0;background:#fff1f1;color:var(--red);border-radius:12px;padding:9px 14px}
+.switch{width:44px;height:24px;border-radius:99px;background:#d8dce4;position:relative;cursor:pointer;flex:none}
+.switch:after{content:"";position:absolute;width:18px;height:18px;border-radius:50%;background:#fff;left:3px;top:3px;box-shadow:0 2px 6px rgba(0,0,0,.18);transition:.2s}
+.switch.on{background:var(--primary)}
+.switch.on:after{left:23px}
+.kbd{font-size:10px;border:1px solid #dfe3ea;border-bottom-width:2px;border-radius:6px;padding:2px 6px;background:#fafbfc;color:#747b86}
+
+/* desktop scene */
+.scene{min-height:100vh;display:flex;flex-direction:column;background:
+radial-gradient(circle at 16% 15%,rgba(101,88,232,.12),transparent 28%),
+radial-gradient(circle at 85% 12%,rgba(85,183,230,.12),transparent 24%),
+linear-gradient(180deg,#f7f8fb 0%,#eef1f6 100%)}
+.desktop-top{height:38px;display:flex;align-items:center;justify-content:space-between;padding:0 18px;color:#6d7480;font-size:12px;background:rgba(255,255,255,.52);backdrop-filter:blur(14px);border-bottom:1px solid rgba(223,226,234,.8)}
+.desktop-workspace{flex:1;position:relative;padding:40px;overflow:hidden}
+.fake-app{width:min(900px,72vw);height:520px;margin:auto;background:rgba(255,255,255,.72);border:1px solid rgba(255,255,255,.9);border-radius:24px;box-shadow:0 16px 50px rgba(43,49,65,.10);backdrop-filter:blur(10px);overflow:hidden}
+.fake-title{height:44px;border-bottom:1px solid #e9ecf1;display:flex;align-items:center;gap:8px;padding:0 14px;color:#8b919b;font-size:12px}
+.fake-dot{width:10px;height:10px;border-radius:50%;background:#d8dce4}
+.fake-body{display:grid;grid-template-columns:180px 1fr;height:calc(100% - 44px)}
+.fake-side{border-right:1px solid #ebedf2;padding:18px;background:#fafbfc}
+.fake-line{height:10px;background:#e9ecf2;border-radius:6px;margin-bottom:12px}
+.fake-content{padding:28px}
+.fake-code{height:12px;background:#e9ecf2;border-radius:6px;margin-bottom:13px}
+.fake-code.short{width:55%}
+.fake-code.mid{width:77%}
+
+/* launch hint */
+.launch-hint{position:absolute;left:28px;bottom:28px;background:rgba(255,255,255,.9);border:1px solid var(--line);border-radius:16px;padding:14px 16px;box-shadow:var(--shadow2);font-size:12px;color:#555b66}
+.launch-hint strong{display:block;color:#25282d;margin-bottom:5px}
+
+/* quick panel */
+.quick-panel{position:absolute;right:70px;top:82px;width:430px;max-height:650px;background:rgba(255,255,255,.97);border:1px solid rgba(223,226,234,.95);border-radius:22px;box-shadow:0 28px 80px rgba(30,35,47,.24);backdrop-filter:blur(18px);overflow:hidden;animation:pop .18s ease-out}
+@keyframes pop{from{opacity:0;transform:translateY(8px) scale(.98)}to{opacity:1;transform:none}}
+.quick-head{padding:14px 14px 10px;border-bottom:1px solid var(--line)}
+.quick-title-row{display:flex;align-items:center;gap:10px;margin-bottom:11px}
+.logo{width:34px;height:34px;border-radius:11px;background:linear-gradient(135deg,var(--primary2),#4f43c9);display:grid;place-items:center;color:white;font-weight:800;box-shadow:0 7px 16px rgba(101,88,232,.25)}
+.quick-title{flex:1}
+.quick-title strong{display:block;font-size:14px}
+.quick-title span{font-size:10px;color:var(--sub)}
+.quick-search{position:relative}
+.quick-search input{width:100%;height:40px;border:1px solid var(--line);background:#f8f9fb;border-radius:11px;outline:none;padding:0 38px 0 36px;font-size:12px}
+.quick-search input:focus{border-color:#cfc8ff;box-shadow:0 0 0 4px rgba(101,88,232,.07);background:#fff}
+.quick-search .search-glyph{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:#89909a}
+.quick-tabs{display:flex;gap:6px;margin-top:10px}
+.quick-tab{border:0;padding:7px 10px;border-radius:9px;background:transparent;color:#747b85;font-size:11px}
+.quick-tab.active{background:var(--soft);color:var(--primary);font-weight:700}
+.quick-list{padding:8px;overflow:auto;max-height:478px}
+.quick-item{display:grid;grid-template-columns:30px minmax(0,1fr) auto;gap:9px;padding:10px;border-radius:13px;border:1px solid transparent;transition:.14s;margin-bottom:3px}
+.quick-item:hover,.quick-item.active{background:#f7f6ff;border-color:#e6e1ff}
+.quick-type{width:30px;height:30px;border-radius:9px;background:#f0f2f6;display:grid;place-items:center;color:#707783;font-size:12px}
+.quick-item.active .quick-type{background:#e8e4ff;color:var(--primary)}
+.quick-main{min-width:0}
+.quick-preview{font-size:12px;line-height:1.4;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.quick-meta{font-size:10px;color:#9aa0aa;margin-top:4px;display:flex;gap:6px;align-items:center}
+.source{background:#f1f3f6;padding:2px 5px;border-radius:6px}
+.quick-actions{display:flex;align-items:center}
+.star{border:0;background:transparent;color:#bdc2ca;font-size:15px}
+.star.active{color:#e5a326}
+.quick-foot{height:46px;border-top:1px solid var(--line);display:flex;align-items:center;padding:0 12px;gap:10px;background:#fbfcfd}
+.quick-foot span{font-size:10px;color:#8a919b}
+.quick-foot .grow{flex:1}
+.link-btn{border:0;background:transparent;color:var(--primary);font-size:11px;font-weight:700}
+
+/* main app */
+.main-app{position:absolute;inset:24px;background:#fff;border:1px solid var(--line);border-radius:26px;box-shadow:var(--shadow);overflow:hidden;display:grid;grid-template-columns:220px 1fr}
+.main-side{padding:20px 14px;border-right:1px solid var(--line);background:#fafbfc;display:flex;flex-direction:column}
+.brand{display:flex;gap:11px;align-items:center;padding:2px 8px 18px}
+.brand .name strong{display:block;font-size:15px}
+.brand .name span{font-size:10px;color:var(--sub)}
+.nav-label{font-size:10px;color:#a0a6af;text-transform:uppercase;letter-spacing:.08em;padding:12px 10px 6px;font-weight:700}
+.nav{border:0;background:transparent;text-align:left;padding:10px 11px;border-radius:11px;color:#565d67;margin:2px 0;display:flex;gap:9px;align-items:center}
+.nav.active{background:var(--soft);color:var(--primary);font-weight:700}
+.side-bottom{margin-top:auto}
+.side-status{border:1px solid var(--line);background:#fff;border-radius:14px;padding:11px;font-size:10px;color:var(--sub);line-height:1.5}
+.side-status strong{display:flex;align-items:center;gap:6px;color:#333840;font-size:11px;margin-bottom:3px}
+.main-content{display:flex;flex-direction:column;min-width:0}
+.main-top{height:76px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:14px;padding:0 22px}
+.main-title{min-width:180px}
+.main-title strong{display:block;font-size:19px}
+.main-title span{font-size:10px;color:var(--sub)}
+.main-search{flex:1;position:relative}
+.main-search input{width:100%;height:40px;border:1px solid var(--line);border-radius:12px;padding:0 38px 0 36px;outline:none;background:#fafbfc;font-size:12px}
+.main-search .search-glyph{position:absolute;left:13px;top:50%;transform:translateY(-50%);color:#89909a}
+.page{display:none;min-height:0;flex:1}
+.page.active{display:flex}
+.history-page{padding:18px;gap:16px}
+.history-card{flex:1;border:1px solid var(--line);border-radius:18px;overflow:hidden;display:flex;flex-direction:column;min-width:0}
+.toolbar{height:50px;border-bottom:1px solid var(--line);display:flex;align-items:center;padding:0 12px;gap:8px}
+.chip{border:0;border-radius:999px;padding:7px 11px;background:#f3f4f7;color:#6a717c;font-size:11px}
+.chip.active{background:var(--soft);color:var(--primary);font-weight:700}
+.toolbar .grow{flex:1}
+.history-list{overflow:auto;padding:8px}
+.history-item{display:grid;grid-template-columns:34px minmax(0,1fr) 85px 70px;gap:10px;align-items:center;padding:11px 10px;border-radius:12px}
+.history-item:hover{background:#f8f9fb}
+.history-icon{width:34px;height:34px;border-radius:10px;background:#f0f2f6;display:grid;place-items:center;color:#6c7380;font-size:12px}
+.history-text{min-width:0}
+.history-text strong{display:block;font-size:12px;font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.history-text span{font-size:10px;color:#999fa8}
+.history-time,.history-device{font-size:10px;color:#8d949f}
+.detail-card{width:300px;border:1px solid var(--line);border-radius:18px;padding:16px;display:flex;flex-direction:column}
+.detail-card h3{font-size:13px;margin:0 0 10px}
+.detail-box{flex:1;background:#f8f9fb;border:1px solid var(--line);border-radius:13px;padding:12px;font-size:11px;line-height:1.55;white-space:pre-wrap;overflow:auto}
+.detail-actions{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:12px}
+.stack-page{padding:18px;overflow:auto;display:block!important}
+.stack-page:not(.active){display:none!important}
+.section-card{border:1px solid var(--line);border-radius:18px;background:#fff;margin-bottom:14px;overflow:hidden}
+.section-head{padding:15px 16px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between}
+.section-head strong{font-size:13px}
+.section-head span{font-size:10px;color:var(--sub)}
+.setting-row{display:flex;align-items:center;justify-content:space-between;gap:20px;padding:14px 16px;border-bottom:1px solid #eef0f4}
+.setting-row:last-child{border-bottom:0}
+.setting-text strong{display:block;font-size:12px;margin-bottom:3px}
+.setting-text span{display:block;font-size:10px;color:var(--sub);line-height:1.45}
+.select{border:1px solid var(--line);border-radius:10px;padding:8px 10px;background:#fff;color:#4d535d;font-size:11px}
+.provider-row{display:grid;grid-template-columns:44px 1fr auto;gap:12px;align-items:center;padding:14px 16px;border-bottom:1px solid #eef0f4}
+.provider-logo{width:40px;height:40px;border-radius:12px;background:#f1f3f7;display:grid;place-items:center;font-weight:800;color:#555c67}
+.provider-row strong{font-size:12px;display:block;margin-bottom:2px}
+.provider-row span{font-size:10px;color:var(--sub)}
+.device-row{display:grid;grid-template-columns:42px 1fr auto;gap:12px;align-items:center;padding:14px 16px;border-bottom:1px solid #eef0f4}
+.device-icon{width:40px;height:40px;border-radius:12px;background:#f0f2f7;display:grid;place-items:center}
+.device-row strong{font-size:12px}
+.device-row span{display:block;font-size:10px;color:var(--sub);margin-top:3px}
+.privacy-callout{margin:16px;border-radius:14px;padding:14px;background:#fff8e8;border:1px solid #f4dfa5;font-size:11px;color:#675933;line-height:1.55}
+.stat-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;padding:16px}
+.stat{border:1px solid var(--line);border-radius:14px;padding:14px}
+.stat span{font-size:10px;color:var(--sub)}
+.stat strong{display:block;font-size:22px;margin-top:5px}
+.toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,12px);background:#20242b;color:#fff;padding:10px 15px;border-radius:11px;font-size:11px;opacity:0;pointer-events:none;transition:.2s;box-shadow:var(--shadow2);z-index:99}
+.toast.show{opacity:1;transform:translate(-50%,0)}
+
+@media(max-width:900px){
+ .quick-panel{right:24px}
+ .main-app{grid-template-columns:76px 1fr}
+ .brand .name,.nav span,.nav-label,.side-status{display:none}
+ .brand{justify-content:center}
+ .nav{justify-content:center}
+ .detail-card{display:none}
+}
+</style>
+</head>
+<body>
+<div class="scene">
+  <div class="desktop-top">
+    <span>Idreaml Clip 原型 · 快捷剪切板模式</span>
+    <span>Windows / macOS / Linux</span>
+  </div>
+
+  <div class="desktop-workspace">
+    <div class="fake-app">
+      <div class="fake-title">
+        <span class="fake-dot"></span><span class="fake-dot"></span><span class="fake-dot"></span>
+        <span style="margin-left:8px">IntelliJ IDEA · DemoProject</span>
+      </div>
+      <div class="fake-body">
+        <div class="fake-side">
+          <div class="fake-line"></div><div class="fake-line"></div><div class="fake-line"></div>
+          <div class="fake-line" style="width:70%"></div>
+        </div>
+        <div class="fake-content">
+          <div class="fake-code mid"></div><div class="fake-code"></div><div class="fake-code short"></div>
+          <div class="fake-code"></div><div class="fake-code mid"></div><div class="fake-code"></div>
+          <div class="fake-code short"></div><div class="fake-code"></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="launch-hint">
+      <strong>模拟日常使用场景</strong>
+      按 <span class="kbd">Ctrl</span> + <span class="kbd">Shift</span> + <span class="kbd">V</span> 呼出 / 关闭快速剪切板
+    </div>
+
+    <section class="quick-panel" id="quickPanel">
+      <div class="quick-head">
+        <div class="quick-title-row">
+          <div class="logo">I</div>
+          <div class="quick-title">
+            <strong>Idreaml Clip</strong>
+            <span>最近 30 条 · 本地优先</span>
+          </div>
+          <span class="badge"><span class="dot"></span>正在记录</span>
+          <button class="icon-btn" id="closeQuick">×</button>
+        </div>
+
+        <div class="quick-search">
+          <span class="search-glyph">⌕</span>
+          <input id="quickSearch" placeholder="搜索最近记录；输入后可搜索全部历史..." autofocus>
+          <span class="kbd" style="position:absolute;right:10px;top:9px">Esc</span>
+        </div>
+
+        <div class="quick-tabs">
+          <button class="quick-tab active" data-qtab="recent">最近</button>
+          <button class="quick-tab" data-qtab="favorite">收藏</button>
+        </div>
+      </div>
+
+      <div class="quick-list" id="quickList"></div>
+
+      <div class="quick-foot">
+        <span><span class="kbd">↑</span> <span class="kbd">↓</span> 选择</span>
+        <span><span class="kbd">Enter</span> 使用</span>
+        <div class="grow"></div>
+        <button class="link-btn" id="openMain">查看全部历史 →</button>
+      </div>
+    </section>
+
+    <section class="main-app hidden" id="mainApp">
+      <aside class="main-side">
+        <div class="brand">
+          <div class="logo">I</div>
+          <div class="name"><strong>Idreaml Clip</strong><span>理梦剪藏</span></div>
+        </div>
+
+        <div class="nav-label">剪切板</div>
+        <button class="nav active" data-page="history"><b>▣</b><span>全部历史</span></button>
+        <button class="nav" data-page="favorites"><b>★</b><span>收藏</span></button>
+
+        <div class="nav-label">同步</div>
+        <button class="nav" data-page="sync"><b>↻</b><span>云同步</span></button>
+        <button class="nav" data-page="devices"><b>▱</b><span>设备</span></button>
+
+        <div class="nav-label">系统</div>
+        <button class="nav" data-page="privacy"><b>◉</b><span>隐私</span></button>
+        <button class="nav" data-page="settings"><b>⚙</b><span>设置</span></button>
+
+        <div class="side-bottom">
+          <div class="side-status">
+            <strong><span class="dot"></span> Gitee 已连接</strong>
+            2 分钟前同步<br/>本地 286 条历史
+          </div>
+        </div>
+      </aside>
+
+      <div class="main-content">
+        <header class="main-top">
+          <div class="main-title">
+            <strong id="mainTitle">全部历史</strong>
+            <span id="mainSubtitle">长期保存的本地剪切板记录</span>
+          </div>
+          <div class="main-search" id="mainSearchWrap">
+            <span class="search-glyph">⌕</span>
+            <input id="mainSearch" placeholder="搜索全部历史...">
+          </div>
+          <button class="secondary" id="showQuick">打开快速面板</button>
+          <button class="primary" id="syncNow">立即同步</button>
+        </header>
+
+        <div class="page history-page active" id="page-history">
+          <div class="history-card">
+            <div class="toolbar">
+              <button class="chip active">全部</button>
+              <button class="chip">今天</button>
+              <button class="chip">本周</button>
+              <button class="chip">收藏</button>
+              <div class="grow"></div>
+              <span class="badge">286 条记录</span>
+            </div>
+            <div class="history-list" id="historyList"></div>
+          </div>
+          <aside class="detail-card">
+            <h3>内容详情</h3>
+            <div class="detail-box" id="detailBox">请选择一条记录</div>
+            <div style="font-size:10px;color:var(--sub);margin-top:10px" id="detailMeta">-</div>
+            <div class="detail-actions">
+              <button class="primary" id="detailCopy">复制</button>
+              <button class="secondary" id="detailFav">收藏</button>
+            </div>
+          </aside>
+        </div>
+
+        <div class="page stack-page" id="page-favorites">
+          <div class="section-card">
+            <div class="section-head"><strong>收藏内容</strong><span>长期保留，不受自动清理影响</span></div>
+            <div class="history-list" id="favoriteList"></div>
+          </div>
+        </div>
+
+        <div class="page stack-page" id="page-sync">
+          <div class="section-card">
+            <div class="section-head"><strong>云同步</strong><span>用户自己的 Git 仓库</span></div>
+            <div class="provider-row">
+              <div class="provider-logo">G</div>
+              <div><strong>Gitee</strong><span>已连接 · idreaml-clip-data</span></div>
+              <button class="secondary">管理</button>
+            </div>
+            <div class="provider-row">
+              <div class="provider-logo">GH</div>
+              <div><strong>GitHub</strong><span>未连接</span></div>
+              <button class="secondary">连接</button>
+            </div>
+            <div class="provider-row">
+              <div class="provider-logo">GL</div>
+              <div><strong>GitLab</strong><span>未连接</span></div>
+              <button class="secondary">连接</button>
+            </div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-head"><strong>同步策略</strong><span>Git 只作为同步副本，本地数据库为主</span></div>
+            <div class="setting-row">
+              <div class="setting-text"><strong>启用云同步</strong><span>关闭后应用仍可完整本地使用</span></div>
+              <div class="switch on"></div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-text"><strong>启动后自动同步</strong><span>应用启动后执行一次后台同步</span></div>
+              <div class="switch on"></div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-text"><strong>定时同步</strong><span>当前每 10 分钟同步一次</span></div>
+              <select class="select"><option>5 分钟</option><option selected>10 分钟</option><option>30 分钟</option></select>
+            </div>
+          </div>
+        </div>
+
+        <div class="page stack-page" id="page-devices">
+          <div class="section-card">
+            <div class="section-head"><strong>我的设备</strong><span>共 3 台设备</span></div>
+            <div class="device-row">
+              <div class="device-icon">▣</div>
+              <div><strong>DESKTOP-01</strong><span>Windows 11 · 当前设备 · 刚刚活跃</span></div>
+              <span class="badge"><span class="dot"></span>当前</span>
+            </div>
+            <div class="device-row">
+              <div class="device-icon">⌘</div>
+              <div><strong>MacBook Pro</strong><span>macOS · 2 小时前同步</span></div>
+              <button class="secondary">详情</button>
+            </div>
+            <div class="device-row">
+              <div class="device-icon">L</div>
+              <div><strong>ThinkPad</strong><span>Linux · 昨天同步</span></div>
+              <button class="secondary">详情</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="page stack-page" id="page-privacy">
+          <div class="privacy-callout">
+            剪切板可能包含密码、Token、验证码和其他敏感内容。Idreaml Clip 的核心模式是本地优先；云同步关闭时，数据只保存在当前设备。
+          </div>
+
+          <div class="section-card">
+            <div class="section-head"><strong>隐私控制</strong><span>随时暂停记录</span></div>
+            <div class="setting-row">
+              <div class="setting-text"><strong>自动记录剪切板</strong><span>关闭后不再捕获新的剪切板内容</span></div>
+              <div class="switch on" id="recordSwitch"></div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-text"><strong>自动清理历史</strong><span>收藏内容不会被自动清理</span></div>
+              <select class="select"><option>永不</option><option>30 天</option><option selected>90 天</option><option>180 天</option></select>
+            </div>
+            <div class="setting-row">
+              <div class="setting-text"><strong>清空全部历史</strong><span>仅清理本地历史；同步后可传播删除状态</span></div>
+              <button class="danger">清空历史</button>
+            </div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-head"><strong>本地统计</strong><span>不会上传给开发者</span></div>
+            <div class="stat-grid">
+              <div class="stat"><span>本地历史</span><strong>286</strong></div>
+              <div class="stat"><span>收藏</span><strong>18</strong></div>
+              <div class="stat"><span>设备</span><strong>3</strong></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="page stack-page" id="page-settings">
+          <div class="section-card">
+            <div class="section-head"><strong>快速剪切板</strong><span>日常高频使用</span></div>
+            <div class="setting-row">
+              <div class="setting-text"><strong>全局快捷键</strong><span>用于在任何应用上方呼出快速剪切板</span></div>
+              <button class="secondary">Ctrl + Shift + V</button>
+            </div>
+            <div class="setting-row">
+              <div class="setting-text"><strong>快速面板显示数量</strong><span>只影响快捷面板，不影响长期历史</span></div>
+              <select class="select" id="quickCountSelect">
+                <option>20</option><option selected>30</option><option>40</option><option>50</option>
+              </select>
+            </div>
+            <div class="setting-row">
+              <div class="setting-text"><strong>搜索范围</strong><span>无输入时只显示最近记录；输入关键词后搜索全部历史</span></div>
+              <span class="badge">智能搜索</span>
+            </div>
+          </div>
+
+          <div class="section-card">
+            <div class="section-head"><strong>应用行为</strong><span>桌面端体验</span></div>
+            <div class="setting-row">
+              <div class="setting-text"><strong>开机自动启动</strong><span>登录系统后后台启动 Idreaml Clip</span></div>
+              <div class="switch on"></div>
+            </div>
+            <div class="setting-row">
+              <div class="setting-text"><strong>关闭主窗口</strong><span>默认隐藏到系统托盘而不是退出</span></div>
+              <select class="select"><option selected>隐藏到托盘</option><option>退出应用</option></select>
+            </div>
+            <div class="setting-row">
+              <div class="setting-text"><strong>选择后自动关闭快速面板</strong><span>更接近 Win + V 的使用方式</span></div>
+              <div class="switch on"></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+</div>
+
+<div class="toast" id="toast"></div>
+
+<script>
+const baseClips = [
+  {id:1,content:"SELECT id, content, created_at FROM clipboard_item ORDER BY created_at DESC LIMIT 100;",time:"刚刚",source:"IDEA",device:"DESKTOP-01",fav:true},
+  {id:2,content:"https://gitee.com/api/v5",time:"2 分钟前",source:"Chrome",device:"DESKTOP-01",fav:false},
+  {id:3,content:"Local First + 应用内置 Git 能力 + 本地隐藏 Git 仓库 + 用户自己的远端 Git 仓库。",time:"5 分钟前",source:"ChatGPT",device:"DESKTOP-01",fav:true},
+  {id:4,content:"flutter create idreaml_clip",time:"8 分钟前",source:"Terminal",device:"DESKTOP-01",fav:false},
+  {id:5,content:"跨平台、本地优先、可选 Git 云同步的剪切板管理器",time:"12 分钟前",source:"Notes",device:"MacBook Pro",fav:true},
+  {id:6,content:'{"provider":"gitee","syncEnabled":true,"historyLimit":10000}',time:"18 分钟前",source:"VS Code",device:"DESKTOP-01",fav:false},
+  {id:7,content:"git2dart / libgit2",time:"25 分钟前",source:"Browser",device:"DESKTOP-01",fav:false},
+  {id:8,content:"Idreaml Clip - 理梦剪藏",time:"32 分钟前",source:"Notes",device:"MacBook Pro",fav:true},
+  {id:9,content:"Ctrl + Shift + V",time:"41 分钟前",source:"Settings",device:"DESKTOP-01",fav:false},
+  {id:10,content:"SQLite 是应用真正的本地业务数据库，Git 仓库是远端同步副本。",time:"52 分钟前",source:"ChatGPT",device:"DESKTOP-01",fav:true},
+  {id:11,content:"window_manager tray_manager hotkey_manager",time:"1 小时前",source:"IDEA",device:"DESKTOP-01",fav:false},
+  {id:12,content:"剪切板历史应该在应用重启或系统重启之后仍然保留。",time:"1 小时前",source:"Browser",device:"ThinkPad",fav:false},
+  {id:13,content:"默认最近 30 条；搜索时可跨全部历史检索。",time:"2 小时前",source:"ChatGPT",device:"MacBook Pro",fav:true},
+  {id:14,content:"Gitee / GitHub / GitLab",time:"2 小时前",source:"Notes",device:"DESKTOP-01",fav:false},
+  {id:15,content:"Windows / macOS / Linux",time:"3 小时前",source:"Browser",device:"DESKTOP-01",fav:false}
+];
+
+let clips = [...baseClips];
+let quickTab = "recent";
+let selectedQuick = 0;
+let selectedHistoryId = 1;
+let quickCount = 30;
+
+const quickPanel = document.getElementById("quickPanel");
+const mainApp = document.getElementById("mainApp");
+const quickList = document.getElementById("quickList");
+const quickSearch = document.getElementById("quickSearch");
+const historyList = document.getElementById("historyList");
+const favoriteList = document.getElementById("favoriteList");
+const toast = document.getElementById("toast");
+
+function esc(s){return s.replace(/[&<>"']/g,m=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[m]))}
+function showToast(msg){
+  toast.textContent=msg; toast.classList.add("show");
+  clearTimeout(window.__t); window.__t=setTimeout(()=>toast.classList.remove("show"),1500);
+}
+function quickFiltered(){
+  const q=quickSearch.value.trim().toLowerCase();
+  let arr=clips.filter(x=>quickTab==="favorite"?x.fav:true);
+  if(q) arr=arr.filter(x=>(x.content+" "+x.source+" "+x.device).toLowerCase().includes(q));
+  else arr=arr.slice(0,quickCount);
+  return arr;
+}
+function renderQuick(){
+  const arr=quickFiltered();
+  if(selectedQuick>=arr.length) selectedQuick=Math.max(0,arr.length-1);
+  quickList.innerHTML=arr.length?arr.map((x,i)=>`
+    <div class="quick-item ${i===selectedQuick?"active":""}" data-idx="${i}">
+      <div class="quick-type">T</div>
+      <div class="quick-main">
+        <div class="quick-preview">${esc(x.content.replace(/\n/g," "))}</div>
+        <div class="quick-meta"><span>${x.time}</span><span>·</span><span class="source">${x.source}</span></div>
+      </div>
+      <div class="quick-actions"><button class="star ${x.fav?"active":""}" data-fav="${x.id}">★</button></div>
+    </div>`).join(""):`<div style="padding:50px;text-align:center;color:#8d949e;font-size:12px">没有找到记录</div>`;
+  document.querySelectorAll(".quick-item").forEach(el=>{
+    el.onclick=e=>{
+      if(e.target.dataset.fav)return;
+      selectedQuick=Number(el.dataset.idx); renderQuick();
+    };
+    el.ondblclick=e=>{
+      if(e.target.dataset.fav)return;
+      useQuick();
+    };
+  });
+  document.querySelectorAll("[data-fav]").forEach(btn=>btn.onclick=e=>{
+    e.stopPropagation();
+    const item=clips.find(x=>x.id===Number(btn.dataset.fav)); if(item)item.fav=!item.fav;
+    renderQuick();renderHistory();showToast(item.fav?"已收藏":"已取消收藏");
+  });
+}
+function useQuick(){
+  const arr=quickFiltered(); const item=arr[selectedQuick]; if(!item)return;
+  navigator.clipboard?.writeText(item.content).catch(()=>{});
+  quickPanel.classList.add("hidden");
+  showToast("已写入系统剪切板");
+}
+function renderHistory(){
+  const rows=clips.map(x=>`
+    <div class="history-item" data-hid="${x.id}">
+      <div class="history-icon">T</div>
+      <div class="history-text"><strong>${esc(x.content.replace(/\n/g," "))}</strong><span>${x.source}</span></div>
+      <div class="history-time">${x.time}</div>
+      <div class="history-device">${x.device}</div>
+    </div>`).join("");
+  historyList.innerHTML=rows;
+  favoriteList.innerHTML=clips.filter(x=>x.fav).map(x=>`
+    <div class="history-item" data-hid="${x.id}">
+      <div class="history-icon">★</div>
+      <div class="history-text"><strong>${esc(x.content.replace(/\n/g," "))}</strong><span>${x.source}</span></div>
+      <div class="history-time">${x.time}</div>
+      <div class="history-device">${x.device}</div>
+    </div>`).join("");
+  document.querySelectorAll("[data-hid]").forEach(el=>el.onclick=()=>selectHistory(Number(el.dataset.hid)));
+  selectHistory(selectedHistoryId);
+}
+function selectHistory(id){
+  selectedHistoryId=id;
+  const item=clips.find(x=>x.id===id);
+  if(!item)return;
+  document.getElementById("detailBox").textContent=item.content;
+  document.getElementById("detailMeta").textContent=`${item.time} · ${item.source} · ${item.device}`;
+  document.getElementById("detailFav").textContent=item.fav?"取消收藏":"收藏";
+}
+function openMain(){
+  quickPanel.classList.add("hidden"); mainApp.classList.remove("hidden"); renderHistory();
+}
+function openQuick(){
+  mainApp.classList.add("hidden"); quickPanel.classList.remove("hidden");
+  quickSearch.focus(); renderQuick();
+}
+document.getElementById("openMain").onclick=openMain;
+document.getElementById("showQuick").onclick=openQuick;
+document.getElementById("closeQuick").onclick=()=>quickPanel.classList.add("hidden");
+quickSearch.oninput=()=>{selectedQuick=0;renderQuick()};
+document.querySelectorAll("[data-qtab]").forEach(b=>b.onclick=()=>{
+  quickTab=b.dataset.qtab; selectedQuick=0;
+  document.querySelectorAll("[data-qtab]").forEach(x=>x.classList.toggle("active",x===b));
+  renderQuick();
+});
+document.querySelectorAll(".nav").forEach(btn=>btn.onclick=()=>{
+  document.querySelectorAll(".nav").forEach(x=>x.classList.remove("active")); btn.classList.add("active");
+  const page=btn.dataset.page;
+  document.querySelectorAll(".page").forEach(x=>x.classList.remove("active"));
+  document.getElementById("page-"+page).classList.add("active");
+  const map={
+    history:["全部历史","长期保存的本地剪切板记录"],
+    favorites:["收藏","长期保留的重要剪切板内容"],
+    sync:["云同步","同步到用户自己的 Git 仓库"],
+    devices:["设备","查看参与同步的设备"],
+    privacy:["隐私","管理记录范围、清理和本地数据"],
+    settings:["设置","快捷面板和桌面应用行为"]
+  };
+  document.getElementById("mainTitle").textContent=map[page][0];
+  document.getElementById("mainSubtitle").textContent=map[page][1];
+  document.getElementById("mainSearchWrap").style.visibility=(page==="history"||page==="favorites")?"visible":"hidden";
+});
+document.querySelectorAll(".switch").forEach(sw=>sw.onclick=()=>sw.classList.toggle("on"));
+document.getElementById("syncNow").onclick=e=>{
+  e.currentTarget.textContent="同步中...";
+  setTimeout(()=>{e.currentTarget.textContent="立即同步";showToast("同步完成 · Gitee")},900);
+};
+document.getElementById("quickCountSelect").onchange=e=>{
+  quickCount=Number(e.target.value); showToast(`快速面板改为最近 ${quickCount} 条`);
+};
+document.getElementById("detailCopy").onclick=()=>{
+  const item=clips.find(x=>x.id===selectedHistoryId); if(!item)return;
+  navigator.clipboard?.writeText(item.content).catch(()=>{}); showToast("已复制");
+};
+document.getElementById("detailFav").onclick=()=>{
+  const item=clips.find(x=>x.id===selectedHistoryId); if(!item)return;
+  item.fav=!item.fav; renderHistory();renderQuick();showToast(item.fav?"已收藏":"已取消收藏");
+};
+document.addEventListener("keydown",e=>{
+  if(e.ctrlKey&&e.shiftKey&&e.key.toLowerCase()==="v"){
+    e.preventDefault();
+    if(!mainApp.classList.contains("hidden")) openQuick();
+    else quickPanel.classList.toggle("hidden");
+    if(!quickPanel.classList.contains("hidden"))quickSearch.focus();
+  }
+  if(!quickPanel.classList.contains("hidden")){
+    const arr=quickFiltered();
+    if(e.key==="ArrowDown"){e.preventDefault();selectedQuick=Math.min(selectedQuick+1,arr.length-1);renderQuick()}
+    if(e.key==="ArrowUp"){e.preventDefault();selectedQuick=Math.max(selectedQuick-1,0);renderQuick()}
+    if(e.key==="Enter"){e.preventDefault();useQuick()}
+    if(e.key==="Escape"){quickPanel.classList.add("hidden")}
+  }
+});
+renderQuick();
+renderHistory();
+</script>
+</body>
+</html>
