@@ -332,7 +332,7 @@ void main() {
     desktop.onTrayIconRightMouseDown();
     await tester.pump();
     expect(trayCalls.last.method, 'popUpContextMenu');
-    expect(trayCalls.last.arguments, {'bringAppToFront': true});
+    expect(trayCalls.last.arguments, {'bringAppToFront': Platform.isWindows});
     desktop.onTrayIconRightMouseDown();
     await tester.pump();
     expect(
