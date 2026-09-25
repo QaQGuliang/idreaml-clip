@@ -12,3 +12,9 @@ PRODUCT_BUNDLE_IDENTIFIER = com.idreaml.idreamlClip
 
 // The copyright displayed in application information
 PRODUCT_COPYRIGHT = Copyright © 2026 com.idreaml. All rights reserved.
+
+// This distribution targets Apple Silicon only and uses free local signing.
+ARCHS = arm64
+EXCLUDED_ARCHS = x86_64
+CODE_SIGN_IDENTITY = -
+CODE_SIGN_STYLE = Manual

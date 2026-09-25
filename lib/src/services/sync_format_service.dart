@@ -18,7 +18,11 @@ class SyncImportData {
 }
 
 class SyncFormatService {
-  static const _maxFileBytes = 10 * 1024 * 1024;
+  SyncFormatService({this.maxFileBytes = 64 * 1024 * 1024});
+
+  // A 32 MB image expands to about 43 MB in a JSON/base64 record. Split monthly
+  // history into bounded files instead of letting image records break sync.
+  final int maxFileBytes;
 
   Future<int> exportDevice({
     required Directory repository,
@@ -52,18 +56,42 @@ class SyncFormatService {
       final month = '${date.year}-${date.month.toString().padLeft(2, '0')}';
       groups.putIfAbsent(month, () => []).add(SyncRecord.fromItem(item));
     }
-    for (final old in recordDirectory.listSync().whereType<File>()) {
-      if (p.extension(old.path) == '.jsonl' &&
-          !groups.containsKey(p.basenameWithoutExtension(old.path))) {
-        await old.delete();
-      }
-    }
+    final expectedFiles = <String>{};
     for (final entry in groups.entries) {
       entry.value.sort((a, b) => a.createdAt.compareTo(b.createdAt));
-      await _writeJsonLines(
-        File(p.join(recordDirectory.path, '${entry.key}.jsonl')),
-        entry.value.map((item) => item.toJson()),
-      );
+      var part = 0;
+      var size = 0;
+      var buffer = StringBuffer();
+      Future<void> flush() async {
+        if (buffer.isEmpty) return;
+        final name = part == 0
+            ? '${entry.key}.jsonl'
+            : '${entry.key}.${part.toString().padLeft(3, '0')}.jsonl';
+        expectedFiles.add(name);
+        await _writeText(
+          File(p.join(recordDirectory.path, name)),
+          buffer.toString(),
+        );
+        part++;
+        size = 0;
+        buffer = StringBuffer();
+      }
+
+      for (final record in entry.value) {
+        final line = '${jsonEncode(record.toJson())}\n';
+        final bytes = utf8.encode(line).length;
+        if (bytes > maxFileBytes) throw const FormatException('单条同步记录过大');
+        if (size + bytes > maxFileBytes) await flush();
+        buffer.write(line);
+        size += bytes;
+      }
+      await flush();
+    }
+    for (final old in recordDirectory.listSync().whereType<File>()) {
+      if (p.extension(old.path) == '.jsonl' &&
+          !expectedFiles.contains(p.basename(old.path))) {
+        await old.delete();
+      }
     }
 
     final tombstones = items
@@ -111,7 +139,7 @@ class SyncFormatService {
     if (devicesRoot.existsSync()) {
       for (final file in devicesRoot.listSync().whereType<File>()) {
         if (p.extension(file.path) != '.json' ||
-            await file.length() > _maxFileBytes) {
+            await file.length() > maxFileBytes) {
           continue;
         }
         final value = jsonDecode(await file.readAsString());
@@ -128,8 +156,8 @@ class SyncFormatService {
   }
 
   Future<List<Map<String, dynamic>>> _readJsonLines(File file) async {
-    if (await file.length() > _maxFileBytes) {
-      throw const FormatException('同步文件超过 10 MB 安全限制');
+    if (await file.length() > maxFileBytes) {
+      throw const FormatException('同步文件超过大小限制');
     }
     final result = <Map<String, dynamic>>[];
     final lines = file

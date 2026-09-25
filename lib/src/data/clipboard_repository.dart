@@ -1,11 +1,10 @@
-import 'dart:convert';
 import 'dart:io';
 
-import 'package:crypto/crypto.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:uuid/uuid.dart';
 
 import '../models/clipboard_item.dart';
+import '../models/clipboard_content.dart';
 import '../models/sync_models.dart';
 import 'clipboard_database.dart';
 
@@ -54,10 +53,14 @@ class ClipboardRepository {
     return deviceId;
   }
 
-  Future<ClipboardItem?> captureText(String content) async {
-    if (content.trim().isEmpty) return null;
+  Future<ClipboardItem?> captureText(String content) =>
+      capture(ClipboardContent.text(content));
+
+  Future<ClipboardItem?> capture(ClipboardContent payload) async {
+    if (payload.content.trim().isEmpty) return null;
+    final content = payload.content;
     final deviceId = _deviceId ?? await initializeDevice();
-    final hash = sha256.convert(utf8.encode(content)).toString();
+    final hash = payload.hash;
     final now = DateTime.now().millisecondsSinceEpoch;
 
     return _db.transaction((txn) async {
@@ -71,7 +74,7 @@ class ClipboardRepository {
         final id = _uuid.v4();
         await txn.insert('clipboard_item', {
           'id': id,
-          'type': 'text',
+          'type': payload.type,
           'content': content,
           'content_hash': hash,
           'created_at': now,
@@ -120,8 +123,15 @@ class ClipboardRepository {
     final where = <String>['deleted = 0'];
     final args = <Object?>[];
     if (query.trim().isNotEmpty) {
-      where.add('instr(lower(content), lower(?)) > 0');
-      args.add(query.trim());
+      where.add(
+        "((type NOT LIKE 'image/%' AND instr(lower(content), lower(?)) > 0) "
+        "OR (type LIKE 'image/%' AND (instr(lower(type), lower(?)) > 0 OR ? = '图片'))) ",
+      );
+      args.addAll([
+        query.trim(),
+        query.trim().toLowerCase() == 'jpg' ? 'jpeg' : query.trim(),
+        query.trim(),
+      ]);
     }
     if (favoritesOnly) where.add('favorite = 1');
     if (todayOnly) {

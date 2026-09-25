@@ -6,22 +6,40 @@ import 'package:flutter/services.dart';
 import 'data/clipboard_repository.dart';
 import 'models/clipboard_item.dart';
 import 'models/sync_models.dart';
+import 'models/quick_shortcut.dart';
+import 'models/workspace_layout.dart';
 import 'services/sync_service.dart';
+import 'services/clipboard_service.dart';
 
 enum AppPage { history, favorites, sync, devices, privacy, settings }
 
 class AppController extends ChangeNotifier {
-  AppController(this.repository, this.syncService) {
+  AppController(
+    this.repository,
+    this.syncService, {
+    ClipboardService? clipboard,
+  }) : clipboard = clipboard ?? TextClipboardService() {
     syncService.addListener(_onSyncChanged);
     syncService.onSynced = reload;
   }
 
   final ClipboardRepository repository;
   final SyncService syncService;
+  final ClipboardService clipboard;
   Timer? _monitor;
   bool _readingClipboard = false;
-  String? _lastObservedText;
-  String? _selfWrittenText;
+  bool _writingClipboard = false;
+  bool _disposed = false;
+  int? _lastSequence;
+  String? _lastSignature;
+  String? clipboardError;
+  int? copiedClipboardSequence;
+  QuickShortcut quickShortcut = QuickShortcut.platformDefault();
+  bool winVShortcutEnabled = false;
+  bool shortcutModeChanging = false;
+  String? shortcutError;
+  WorkspaceLayout workspaceLayout = const WorkspaceLayout();
+  int _writeGeneration = 0;
 
   List<ClipboardItem> history = const [];
   List<ClipboardItem> quickItems = const [];
@@ -29,6 +47,7 @@ class AppController extends ChangeNotifier {
   List<DeviceInfo> devices = const [];
   AppPage page = AppPage.history;
   bool quickMode = false;
+  int quickSession = 0;
   bool recordingEnabled = true;
   bool launchAtStartupEnabled = false;
   bool busy = true;
@@ -55,11 +74,20 @@ class AppController extends ChangeNotifier {
 
   Future<void> initialize({bool startMonitor = true}) async {
     await repository.initializeDevice();
+    workspaceLayout = WorkspaceLayout.decode(
+      await repository.getSetting('workspace_layout'),
+    );
+    quickShortcut = QuickShortcut.decode(
+      await repository.getSetting('quick_shortcut'),
+    );
+    winVShortcutEnabled =
+        await repository.getSetting('win_v_shortcut_enabled') == 'true';
     quickCount =
         int.tryParse(await repository.getSetting('quick_count') ?? '') ?? 30;
     historyLimit =
         int.tryParse(await repository.getSetting('history_limit') ?? '') ??
         10000;
+    if (historyLimit < 1) historyLimit = 10000;
     autoCleanupDays =
         int.tryParse(await repository.getSetting('auto_cleanup_days') ?? '') ??
         0;
@@ -72,7 +100,7 @@ class AppController extends ChangeNotifier {
     if (startMonitor) {
       _monitor = Timer.periodic(
         const Duration(milliseconds: 700),
-        (_) => _pollClipboard(),
+        (_) => pollClipboard(),
       );
     }
     busy = false;
@@ -81,6 +109,17 @@ class AppController extends ChangeNotifier {
 
   void _onSyncChanged() => notifyListeners();
 
+  void resizeWorkspace({double? sidebarWidth, double? historyFraction}) {
+    workspaceLayout = workspaceLayout.copyWith(
+      sidebarWidth: sidebarWidth,
+      historyFraction: historyFraction,
+    );
+    notifyListeners();
+  }
+
+  Future<void> saveWorkspaceLayout() =>
+      repository.setSetting('workspace_layout', workspaceLayout.encode());
+
   Future<void> saveSyncConfig(SyncConfig config, {String? token}) =>
       syncService.saveConfig(config, token: token);
 
@@ -88,25 +127,45 @@ class AppController extends ChangeNotifier {
 
   Future<void> disconnectSync() => syncService.disconnect();
 
-  Future<void> _pollClipboard() async {
-    if (!recordingEnabled || _readingClipboard) return;
+  Future<void> pollClipboard() async {
+    if (!recordingEnabled ||
+        _readingClipboard ||
+        _writingClipboard ||
+        _disposed) {
+      return;
+    }
+    final sequence = clipboard.sequence;
+    final writeGeneration = _writeGeneration;
+    if (sequence != null && sequence == _lastSequence) return;
     _readingClipboard = true;
     try {
-      final data = await Clipboard.getData(Clipboard.kTextPlain);
-      final text = data?.text;
-      if (text == null || text.trim().isEmpty || text == _lastObservedText) {
+      final contents = await clipboard.read();
+      if (_disposed ||
+          !recordingEnabled ||
+          _writingClipboard ||
+          writeGeneration != _writeGeneration) {
         return;
       }
-      _lastObservedText = text;
-      if (_selfWrittenText == text) {
-        _selfWrittenText = null;
-        return;
+      // A newer clipboard value arriving during decoding is read on the next poll.
+      final signature = contents.map((content) => content.hash).join(':');
+      if (sequence == null && signature == _lastSignature) return;
+      for (final content in contents) {
+        await repository.capture(content);
       }
-      await repository.captureText(text);
+      _lastSequence = clipboard.lastReadSequence ?? sequence;
+      _lastSignature = signature;
+      clipboardError = null;
       await repository.enforceHistoryLimit(historyLimit);
       await reload();
     } on PlatformException {
       // The clipboard can be temporarily locked; the next poll retries.
+    } on FormatException catch (error) {
+      _lastSequence = sequence;
+      clipboardError = error.message;
+      if (!_disposed) notifyListeners();
+    } on Exception {
+      clipboardError = '读取剪切板失败，将自动重试';
+      if (!_disposed) notifyListeners();
     } finally {
       _readingClipboard = false;
     }
@@ -187,12 +246,24 @@ class AppController extends ChangeNotifier {
 
   Future<bool> useItem(ClipboardItem? item) async {
     if (item == null) return false;
-    _selfWrittenText = item.content;
-    _lastObservedText = item.content;
-    await Clipboard.setData(ClipboardData(text: item.content));
-    await repository.markUsed(item.id);
-    await reload();
-    return true;
+    _writingClipboard = true;
+    _writeGeneration++;
+    try {
+      await clipboard.write(item.payload);
+      _lastSequence = clipboard.sequence;
+      copiedClipboardSequence = _lastSequence;
+      _lastSignature = item.payload.hash;
+      clipboardError = null;
+      await repository.markUsed(item.id);
+      await reload();
+      return true;
+    } on Exception {
+      clipboardError = '复制失败，请重试';
+      notifyListeners();
+      return false;
+    } finally {
+      _writingClipboard = false;
+    }
   }
 
   Future<void> toggleFavorite(String id) async {
@@ -224,9 +295,9 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> setHistoryLimit(int value) async {
-    if (!const [1000, 5000, 10000, 50000].contains(value)) return;
-    historyLimit = value;
+    if (value < 1) throw ArgumentError.value(value, 'value', '必须为正整数');
     await repository.setSetting('history_limit', '$value');
+    historyLimit = value;
     await repository.enforceHistoryLimit(value);
     await reload();
   }
@@ -244,13 +315,37 @@ class AppController extends ChangeNotifier {
     notifyListeners();
   }
 
-  void enterQuickMode() {
+  Future<void> saveQuickShortcut(QuickShortcut value) async {
+    await repository.setSetting('quick_shortcut', value.encode());
+    quickShortcut = value;
+    shortcutError = null;
+    notifyListeners();
+  }
+
+  void setShortcutError(String? message) {
+    shortcutError = message;
+    notifyListeners();
+  }
+
+  Future<void> saveWinVShortcutEnabled(bool value) async {
+    await repository.setSetting('win_v_shortcut_enabled', '$value');
+    winVShortcutEnabled = value;
+    shortcutError = null;
+    notifyListeners();
+  }
+
+  void setShortcutModeChanging(bool value) {
+    shortcutModeChanging = value;
+    notifyListeners();
+  }
+
+  Future<void> enterQuickMode() async {
     quickMode = true;
+    quickSession++;
     quickFavoritesOnly = false;
     selectedQuickIndex = 0;
     quickSearch = '';
-    unawaited(reload());
-    notifyListeners();
+    await reload();
   }
 
   void leaveQuickMode() {
@@ -260,7 +355,9 @@ class AppController extends ChangeNotifier {
 
   @override
   void dispose() {
+    _disposed = true;
     _monitor?.cancel();
+    clipboard.dispose();
     syncService.removeListener(_onSyncChanged);
     syncService.dispose();
     super.dispose();

@@ -1,0 +1,71 @@
+name: macOS Apple Silicon package
+
+on:
+  workflow_dispatch:
+    inputs:
+      confirm_free_allowance:
+        description: 'Private repo only: confirm free Actions allowance remains and paid overages are disabled'
+        type: boolean
+        default: false
+  push:
+    branches: ['codex/macos-arm64-package']
+    paths-ignore: ['doc/**', 'README.md', 'scripts/templates/**']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-arm64-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    # Public standard runners are free. Private builds require an explicit,
+    # per-run confirmation; this never enables billing or changes visibility.
+    if: >-
+      github.event.repository.private == false ||
+      (github.event_name == 'workflow_dispatch' && inputs.confirm_free_allowance) ||
+      (github.event_name == 'push' && contains(github.event.head_commit.message, '[use-free-actions]'))
+    runs-on: macos-15
+    timeout-minutes: 35
+    env:
+      COCOAPODS_DISABLE_STATS: 'true'
+      PUB_HOSTED_URL: https://pub.dev
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          persist-credentials: false
+      - name: Verify Apple Silicon runner
+        run: test "$(uname -m)" = arm64
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2
+        with:
+          flutter-version: '3.47.4'
+          channel: stable
+          architecture: arm64
+          cache: false
+      - name: Resolve locked dependencies
+        run: |
+          flutter config --no-analytics --enable-macos-desktop --enable-macos-arm64-only
+          # Use the official host in CI, preserving locked versions and hashes.
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('pubspec.lock')
+          path.write_text(path.read_text().replace('https://pub.flutter-io.cn', 'https://pub.dev'))
+          PY
+          flutter pub get --enforce-lockfile
+      - name: Build native Git library for macOS 12
+        run: bash scripts/prepare-macos-libgit2.sh
+      - name: Analyze and test
+        run: |
+          flutter analyze --no-pub
+          flutter test --no-pub
+      - name: Build, sign locally and package
+        run: bash scripts/package-macos.sh
+      - name: Upload DMG, ZIP and checksums
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: Idreaml-Clip-macos-arm64-${{ github.run_number }}
+          path: dist/macos/*
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
