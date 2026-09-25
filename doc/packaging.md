@@ -55,11 +55,13 @@ Windows 程序在打开数据库、注册快捷键之前获取会话级命名互
 
 ## macOS / Apple Silicon
 
-通过 `.github/workflows/macos-arm64.yml` 在 GitHub 标准 `macos-15` ARM64 构建机生成免费本地签名的测试包。固定 Flutter 3.47.4，最低 macOS 12，不包含 Intel 架构，不需要 Apple Developer 会员、证书或公证凭证。
+通过 `.github/workflows/macos-arm64.yml` 在 GitHub 标准 `macos-15` ARM64 构建机生成免费本地签名的测试包。固定 Flutter 3.47.4，最低 macOS 13，不包含 Intel 架构，不需要 Apple Developer 会员、证书或公证凭证。
 
 公开仓库可使用免费的标准构建机。私有仓库必须先确认剩余免费额度且未启用超额付费；工作流默认跳过私有仓库构建。确认后，手动运行时勾选 `confirm_free_allowance`，或在构建分支 `codex/macos-arm64-package` 的提交说明中加入 `[use-free-actions]`。此标记只表示本次已确认额度，不会修改账户的计费设置。工作流进入默认分支后可在 Actions 页面手动启动。
 
-依赖包随附的 libgit2 动态库最低要求 macOS 26，不能直接用于本项目的 macOS 12 目标。CI 会先从 libgit2 v1.9.7 源码重新编译 arm64 / macOS 12 版本，保留 Dart 绑定需要的 experimental SHA256 ABI，HTTPS 使用系统 SecureTransport，不引入 Homebrew 运行依赖；应用仅接受 HTTPS 同步地址，因此不启用 SSH。构建信息中记录源码提交和动态库校验值。
+Flutter 3.47.4 的原生资产构建目标固定为 macOS 13，`objective_c.framework` 实际生成的最低版本也是 13，因此本包统一以 macOS 13 为最低版本，未宣称支持 12。
+
+依赖包随附的 libgit2 动态库最低要求 macOS 26，不能直接用于本项目的 macOS 13 目标。CI 会先从 libgit2 v1.9.7 源码重新编译 arm64 / macOS 13 版本，保留 Dart 绑定需要的 experimental SHA256 ABI，HTTPS 使用系统 SecureTransport，不引入 Homebrew 运行依赖；应用仅接受 HTTPS 同步地址，因此不启用 SSH。构建信息中记录源码提交和动态库校验值。
 
 构建流程执行静态检查、Flutter 测试和 Release 构建，逐个检查 Mach-O 文件是否支持 arm64，必要时去掉 Intel 切片，再从内到外执行 ad-hoc 本地签名。验证版本、最低系统版本、签名、应用进程启动存活和 DMG 完整性。它不是实机交互验收，也不会声称通过 Gatekeeper 的 Developer ID / 公证检查。
 
@@ -71,7 +73,7 @@ Windows 程序在打开数据库、注册快捷键之前获取会话级命名互
 
 本地 Apple Silicon Mac 可以先执行 `flutter pub get`，再运行 `bash scripts/prepare-macos-libgit2.sh` 和 `bash scripts/package-macos.sh`，结果写入 `dist/macos/`。脚本不覆盖已有同版本产物；准备新的输出目录后再重新构建。通过 `ditto` 打包 ZIP，保留应用结构、权限与符号链接。Windows 上可以保存或转发产物，但不能运行 Mac 应用。
 
-首次打开时，未公证软件可能被系统拦截。在确认来源后，可查看“系统设置 → 隐私与安全性”中该应用的“仍要打开”。macOS 12 对应“系统偏好设置 → 安全性与隐私 → 通用”。不要求关闭系统安全机制。正式面向所有用户发布前，仍需要在 M 系列 Mac 上验证快捷键、文本采集、菜单栏和窗口交互。
+首次打开时，未公证软件可能被系统拦截。在确认来源后，可查看“系统设置 → 隐私与安全性”中该应用的“仍要打开”。不要求关闭系统安全机制。正式面向所有用户发布前，仍需要在 M 系列 Mac 上验证快捷键、文本采集、菜单栏和窗口交互。
 
 当前 Mac 版仅实现本地文本采集、历史搜索/收藏、JSON 预览和快捷面板；默认快捷键 Control + Option + V，选择后回到目标位置按 Command + V。图片采集与写回、自动粘贴以及同步令牌安全存储仍未完成 Mac 适配。包内说明和 HTML 教程明确列出了这些限制。
 

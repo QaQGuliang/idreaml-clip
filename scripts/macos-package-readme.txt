@@ -1,6 +1,6 @@
 Idreaml Clip — macOS Apple Silicon 测试版
 
-系统要求：Apple Silicon（M 系列）Mac，macOS 12 或更新版本。
+系统要求：Apple Silicon（M 系列）Mac，macOS 13 或更新版本。
 架构为 arm64，不支持 Intel Mac。无需安装 Flutter、Dart 或 Git。
 
 安装：
@@ -13,7 +13,6 @@ ZIP 方式：解压后将完整的 Idreaml Clip.app 拖入“应用程序”，�
 本包使用免费本地签名（ad-hoc），没有 Developer ID 签名或苹果公证。
 如果系统提示无法验证开发者，在确认文件来自本项目并核对校验值后，
 可到“系统设置 → 隐私与安全性”查看针对这个应用的“仍要打开”选项。
-macOS 12 的相应入口在“系统偏好设置 → 安全性与隐私 → 通用”。
 公司管理的设备可能禁止手动允许，请遵循管理员的配置。
 无需关闭 Gatekeeper、SIP，也不要对来源不明的软件移除安全保护。
 苹果说明：https://support.apple.com/102445

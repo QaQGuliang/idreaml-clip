@@ -53,7 +53,7 @@ jobs:
           path.write_text(path.read_text().replace('https://pub.flutter-io.cn', 'https://pub.dev'))
           PY
           flutter pub get --enforce-lockfile
-      - name: Build native Git library for macOS 12
+      - name: Build native Git library for macOS 13
         run: bash scripts/prepare-macos-libgit2.sh
       - name: Analyze and test
         run: |

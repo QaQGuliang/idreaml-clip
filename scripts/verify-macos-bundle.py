@@ -13,7 +13,7 @@ with (app / 'Contents/Info.plist').open('rb') as stream:
     info = plistlib.load(stream)
 assert info['CFBundleShortVersionString'] == release['version']
 assert str(info['CFBundleVersion']) == str(release['build'])
-assert info['LSMinimumSystemVersion'] == '12.0'
+assert info['LSMinimumSystemVersion'] == '13.0'
 
 def run(*args):
     return subprocess.check_output(args, text=True).strip()
@@ -35,13 +35,13 @@ for path in sorted(app.rglob('*')):
     load_commands = run('otool', '-l', str(path))
     minimums = re.findall(r'\bminos\s+([\d.]+)', load_commands)
     for minimum in minimums:
-        assert tuple(int(v) for v in minimum.split('.')[:2]) <= (12, 0), \
-            f'{path.relative_to(app)} requires macOS {minimum}, above declared 12.0'
+        assert tuple(int(v) for v in minimum.split('.')[:2]) <= (13, 0), \
+            f'{path.relative_to(app)} requires macOS {minimum}, above declared 13.0'
     binaries.append({'path': str(path.relative_to(app)), 'architecture': 'arm64', 'minimumOS': minimums})
 assert binaries, 'No native code found'
 metadata = {
     'version': release['version'], 'build': release['build'],
-    'architecture': 'arm64', 'minimumMacOS': '12.0',
+    'architecture': 'arm64', 'minimumMacOS': '13.0',
     'signing': 'ad-hoc', 'notarized': False,
     'commit': run('git', 'rev-parse', 'HEAD'),
     'flutter': json.loads(run('flutter', '--version', '--machine')),
@@ -51,4 +51,4 @@ metadata = {
                     'Cloud credential storage not implemented on macOS'],
 }
 (output / 'build-info.json').write_text(json.dumps(metadata, ensure_ascii=False, indent=2), encoding='utf-8')
-print(f'Checked {len(binaries)} arm64 binaries; deployment target macOS 12.0')
+print(f'Checked {len(binaries)} arm64 binaries; deployment target macOS 13.0')

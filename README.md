@@ -4,7 +4,7 @@ Idreaml Clip 是一款面向桌面端的本地优先剪切板管理工具。它�
 
 无论是整理资料、编写文档、处理代码，还是在多个应用之间频繁搬运内容，Idreaml Clip 都能帮助你快速找回、搜索并再次使用历史剪切板内容。
 
-安装步骤见 [离线图文使用指南](doc/Idreaml-Clip-1.0.3-使用指南.html)。Windows 版支持 Windows 10/11 x64；Mac 测试包目标为 Apple Silicon（M 系列）与 macOS 12+，使用免费 ad-hoc 本地签名，不包含苹果公证。当前 Mac 功能范围是本地文本记录、搜索、收藏、JSON 预览和快捷面板；图片采集与写回、自动粘贴、同步令牌存储尚未适配。构建和下载方式见 [桌面打包说明](doc/packaging.md)。
+安装步骤见 [离线图文使用指南](doc/Idreaml-Clip-1.0.3-使用指南.html)。Windows 版支持 Windows 10/11 x64；Mac 测试包目标为 Apple Silicon（M 系列）与 macOS 13+，使用免费 ad-hoc 本地签名，不包含苹果公证。当前 Mac 功能范围是本地文本记录、搜索、收藏、JSON 预览和快捷面板；图片采集与写回、自动粘贴、同步令牌存储尚未适配。构建和下载方式见 [桌面打包说明](doc/packaging.md)。
 
 ## 产品介绍
 
