@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -42,7 +44,7 @@ void main() {
       IdreamlClipApp(controller: controller, desktopService: desktop),
     );
     await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(OutlinedButton, 'Ctrl + Shift + V'));
+    await tester.tap(find.byKey(const ValueKey('custom-shortcut-button')));
     await tester.pumpAndSettle();
   }
 
@@ -71,7 +73,7 @@ void main() {
       LogicalKeyboardKey.altRight,
       LogicalKeyboardKey.keyQ,
     ]);
-    expect(label(tester), 'Alt + Q');
+    expect(label(tester), Platform.isMacOS ? 'Option + Q' : 'Alt + Q');
     await tester.tap(find.text('保存'));
     await tester.pumpAndSettle();
     expect(desktop.saves, 1);
@@ -92,13 +94,19 @@ void main() {
       LogicalKeyboardKey.shiftRight,
       LogicalKeyboardKey.period,
     ]);
-    expect(label(tester), 'Shift + Win + .');
+    expect(
+      label(tester),
+      Platform.isMacOS ? 'Shift + Command + .' : 'Shift + Win + .',
+    );
     await record(tester, [
       LogicalKeyboardKey.controlRight,
       LogicalKeyboardKey.altLeft,
       LogicalKeyboardKey.arrowUp,
     ]);
-    expect(label(tester), 'Ctrl + Alt + ↑');
+    expect(
+      label(tester),
+      Platform.isMacOS ? 'Control + Option + ↑' : 'Ctrl + Alt + ↑',
+    );
     await record(tester, [LogicalKeyboardKey.f8]);
     expect(label(tester), 'F8');
     expect(desktop.saves, 0);
@@ -110,12 +118,12 @@ void main() {
       LogicalKeyboardKey.controlLeft,
       LogicalKeyboardKey.tab,
     ]);
-    expect(label(tester), 'Ctrl + Tab');
+    expect(label(tester), Platform.isMacOS ? 'Control + Tab' : 'Ctrl + Tab');
     await record(tester, [
       LogicalKeyboardKey.altLeft,
       LogicalKeyboardKey.enter,
     ]);
-    expect(label(tester), 'Alt + Enter');
+    expect(label(tester), Platform.isMacOS ? 'Option + Enter' : 'Alt + Enter');
     expect(desktop.saves, 0);
     expect(find.byType(ShortcutDialog), findsOneWidget);
   });
@@ -127,7 +135,10 @@ void main() {
       LogicalKeyboardKey.controlLeft,
       LogicalKeyboardKey.altLeft,
     ]);
-    expect(label(tester), 'Ctrl + Alt + J');
+    expect(
+      label(tester),
+      Platform.isMacOS ? 'Control + Option + J' : 'Ctrl + Alt + J',
+    );
   });
 
   testWidgets('只按修饰键不会提交，Esc 取消录入并保留原配置', (tester) async {
@@ -145,7 +156,7 @@ void main() {
     );
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    expect(label(tester), 'Ctrl + Shift + V');
+    expect(label(tester), QuickShortcut.platformDefault().label());
     expect(find.byType(ShortcutDialog), findsOneWidget);
     expect(desktop.saves, 0);
   });
@@ -162,7 +173,7 @@ void main() {
     expect(desktop.saves, 0);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    expect(label(tester), 'Ctrl + Shift + V');
+    expect(label(tester), QuickShortcut.platformDefault().label());
   });
 
   testWidgets('保存冲突时保留编辑内容，修改后可重新保存', (tester) async {
@@ -172,8 +183,11 @@ void main() {
     await tester.tap(find.text('保存'));
     await tester.pumpAndSettle();
     expect(find.text('该快捷键已被占用'), findsOneWidget);
-    expect(controller.quickShortcut.label('windows'), 'Ctrl + Shift + V');
-    expect(label(tester), 'Alt + Q');
+    expect(
+      controller.quickShortcut.sameCombination(QuickShortcut.platformDefault()),
+      isTrue,
+    );
+    expect(label(tester), Platform.isMacOS ? 'Option + Q' : 'Alt + Q');
     desktop.saveError = null;
     await record(tester, [LogicalKeyboardKey.f8]);
     await tester.tap(find.text('保存'));

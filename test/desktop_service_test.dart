@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -53,6 +54,7 @@ void main() {
     'dev.leanflutter.plugins/screen_retriever',
   );
   const trayChannel = MethodChannel('tray_manager');
+  const startupChannel = MethodChannel('launch_at_startup');
   const hotkeyChannel = MethodChannel('dev.leanflutter.plugins/hotkey_manager');
   const hotkeyEvents = MethodChannel(
     'dev.leanflutter.plugins/hotkey_manager_event',
@@ -85,9 +87,18 @@ void main() {
   Map<String, Object> display(String id, Rect area, {double scale = 1}) => {
     'id': id,
     'name': id,
-    'size': {'width': area.width / scale, 'height': area.height / scale},
-    'visibleSize': {'width': area.width / scale, 'height': area.height / scale},
-    'visiblePosition': {'dx': area.left / scale, 'dy': area.top / scale},
+    'size': {
+      'width': area.width / (Platform.isWindows ? scale : 1),
+      'height': area.height / (Platform.isWindows ? scale : 1),
+    },
+    'visibleSize': {
+      'width': area.width / (Platform.isWindows ? scale : 1),
+      'height': area.height / (Platform.isWindows ? scale : 1),
+    },
+    'visiblePosition': {
+      'dx': area.left / (Platform.isWindows ? scale : 1),
+      'dy': area.top / (Platform.isWindows ? scale : 1),
+    },
     'scaleFactor': scale,
   };
 
@@ -142,7 +153,10 @@ void main() {
     messenger.setMockMethodCallHandler(screenChannel, (call) async {
       switch (call.method) {
         case 'getCursorScreenPoint':
-          final ratio = (call.arguments as Map)['devicePixelRatio'] as double;
+          // Cocoa uses logical points; Windows converts physical pixels.
+          final ratio = Platform.isWindows
+              ? (call.arguments as Map)['devicePixelRatio'] as double
+              : 1.0;
           return {
             'dx': physicalPointer.dx / ratio,
             'dy': physicalPointer.dy / ratio,
@@ -166,6 +180,7 @@ void main() {
       return null;
     });
     messenger.setMockMethodCallHandler(hotkeyEvents, (_) async => null);
+    messenger.setMockMethodCallHandler(startupChannel, (_) async => false);
   });
 
   tearDown(() {
@@ -180,6 +195,7 @@ void main() {
       trayChannel,
       hotkeyChannel,
       hotkeyEvents,
+      startupChannel,
     ]) {
       messenger.setMockMethodCallHandler(channel, null);
     }
@@ -203,7 +219,9 @@ void main() {
   }
 
   Rect physicalBounds() {
-    final scale = windowManager.getDevicePixelRatio();
+    final scale = Platform.isWindows
+        ? windowManager.getDevicePixelRatio()
+        : 1.0;
     return Rect.fromLTWH(
       bounds.left * scale,
       bounds.top * scale,
@@ -217,13 +235,23 @@ void main() {
     maximized = true;
     await finish(tester, desktop.showQuick());
     expect(windowCalls.map((call) => call.method), contains('unmaximize'));
-    expect(windowCalls.map((call) => call.method), contains('setAsFrameless'));
-    expect(
-      windowCalls
-          .singleWhere((call) => call.method == 'setHasShadow')
-          .arguments,
-      {'hasShadow': false},
-    );
+    if (Platform.isWindows) {
+      expect(
+        windowCalls.map((call) => call.method),
+        contains('setAsFrameless'),
+      );
+      expect(
+        windowCalls
+            .singleWhere((call) => call.method == 'setHasShadow')
+            .arguments,
+        {'hasShadow': false},
+      );
+    } else {
+      expect(
+        windowCalls.map((call) => call.method),
+        isNot(contains('setAsFrameless')),
+      );
+    }
     expect(physicalBounds(), const Rect.fromLTWH(512, 312, 347, 427));
     expect(controller.quickMode, isTrue);
     final hides = windowCalls.where((call) => call.method == 'hide').length;
@@ -260,9 +288,17 @@ void main() {
       ),
     );
     await finish(tester, desktop.showQuick());
-    expect(physicalBounds().size, const Size(347 * 1.5, 427 * 1.5));
-    expect(physicalBounds().left, closeTo(2518, 0.01));
-    expect(physicalBounds().top, closeTo(318, 0.01));
+    expect(
+      physicalBounds().size,
+      Platform.isWindows
+          ? const Size(347 * 1.5, 427 * 1.5)
+          : const Size(347, 427),
+    );
+    expect(
+      physicalBounds().left,
+      closeTo(Platform.isWindows ? 2518 : 2512, 0.01),
+    );
+    expect(physicalBounds().top, closeTo(Platform.isWindows ? 318 : 312, 0.01));
   });
 
   testWidgets('托盘左击进入全部历史并清空旧搜索和今日筛选', (tester) async {

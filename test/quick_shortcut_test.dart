@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:idreaml_clip/src/models/quick_shortcut.dart';
@@ -40,20 +42,22 @@ void main() {
       ).isValid,
       isTrue,
     );
-    expect(
-      const QuickShortcut(
-        key: PhysicalKeyboardKey.keyF,
-        control: true,
-      ).windowsVirtualKey,
-      0x46,
-    );
-    expect(
-      const QuickShortcut(
-        key: PhysicalKeyboardKey.f12,
-        alt: true,
-      ).windowsVirtualKey,
-      0x7b,
-    );
+    if (Platform.isWindows) {
+      expect(
+        const QuickShortcut(
+          key: PhysicalKeyboardKey.keyF,
+          control: true,
+        ).windowsVirtualKey,
+        0x46,
+      );
+      expect(
+        const QuickShortcut(
+          key: PhysicalKeyboardKey.f12,
+          alt: true,
+        ).windowsVirtualKey,
+        0x7b,
+      );
+    }
   });
 
   test('从按键状态完整重建组合，不保留旧修饰键或主键', () {
@@ -71,7 +75,7 @@ void main() {
       PhysicalKeyboardKey.period,
     });
     expect(win.label('windows'), 'Shift + Win + .');
-    expect(win.windowsVirtualKey, 0xbe);
+    if (Platform.isWindows) expect(win.windowsVirtualKey, 0xbe);
   });
 
   test('支持标点、方向键和独立功能键，纯修饰键不作为主键', () {

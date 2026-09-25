@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,6 +9,7 @@ import 'package:idreaml_clip/src/app.dart';
 import 'package:idreaml_clip/src/app_controller.dart';
 import 'package:idreaml_clip/src/models/clipboard_content.dart';
 import 'package:idreaml_clip/src/models/clipboard_item.dart';
+import 'package:idreaml_clip/src/models/quick_shortcut.dart';
 import 'package:idreaml_clip/src/ui/clipboard_image.dart';
 import 'package:idreaml_clip/src/ui/shortcut_dialog.dart';
 import 'package:idreaml_clip/src/ui/json_split_preview.dart';
@@ -213,7 +215,7 @@ void main() {
   testWidgets('设置可进入快捷键编辑、修改和恢复默认，取消不更改配置', (tester) async {
     await controller.setPage(AppPage.settings);
     await mount(tester);
-    await tester.tap(find.widgetWithText(OutlinedButton, 'Ctrl + Shift + V'));
+    await tester.tap(find.byKey(const ValueKey('custom-shortcut-button')));
     await tester.pumpAndSettle();
     expect(find.byType(ShortcutDialog), findsOneWidget);
     await tester.tap(find.byKey(const ValueKey('shortcut-recorder')));
@@ -223,13 +225,22 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.keyQ);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.altLeft);
     await tester.pumpAndSettle();
-    expect(find.text('Alt + Q'), findsOneWidget);
+    expect(
+      find.text(Platform.isMacOS ? 'Option + Q' : 'Alt + Q'),
+      findsOneWidget,
+    );
     await tester.tap(find.text('恢复默认'));
     await tester.pumpAndSettle();
-    expect(find.text('Alt + Q'), findsNothing);
+    expect(
+      find.text(Platform.isMacOS ? 'Option + Q' : 'Alt + Q'),
+      findsNothing,
+    );
     await tester.tap(find.text('取消'));
     await tester.pumpAndSettle();
-    expect(controller.quickShortcut.label('windows'), 'Ctrl + Shift + V');
+    expect(
+      controller.quickShortcut.sameCombination(QuickShortcut.platformDefault()),
+      isTrue,
+    );
     expect(tester.takeException(), isNull);
   });
 }
