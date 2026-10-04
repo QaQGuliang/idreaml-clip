@@ -67,7 +67,7 @@ trap - EXIT
 
 cp scripts/macos-package-readme.txt "$STAGING/安装说明.txt"
 python3 scripts/build-user-guide.py
-GUIDE="doc/guides/Idreaml-Clip-${VERSION%+*}-使用指南.html"
+GUIDE="doc/使用指南/理梦剪藏-${VERSION%+*}-使用指南.html"
 cp "$GUIDE" "$STAGING/使用指南.html"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$OUTPUT/$NAME.zip"
 ln -s /Applications "$STAGING/Applications"

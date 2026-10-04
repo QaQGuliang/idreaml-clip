@@ -16,11 +16,11 @@ values = {
 for key, value in values.items():
     source = source.replace('{{' + key + '}}', value)
 assert not re.search(r'\{\{\w+\}\}', source), 'Unresolved template field'
-output = root / 'doc' / 'guides' / f'Idreaml-Clip-{release["version"]}-使用指南.html'
+output = root / 'doc' / '使用指南' / f'理梦剪藏-{release["version"]}-使用指南.html'
 output.parent.mkdir(parents=True, exist_ok=True)
 output.write_text(source, encoding='utf-8')
 # Keep the local companion guide standalone; the build source stays in scripts.
-legacy_output = root / 'doc/guides/assets/guide.template.html'
+legacy_output = root / 'doc/使用指南/配套资料/使用指南.html'
 legacy_output.parent.mkdir(parents=True, exist_ok=True)
 legacy_output.write_text(source, encoding='utf-8')
 print(f'{output}\n{output.stat().st_size:,} bytes; all images embedded')

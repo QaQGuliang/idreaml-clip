@@ -6,7 +6,7 @@ Idreaml Clip 是一款面向桌面端的本地优先剪切板管理工具。它�
 
 Windows 版支持 Windows 10/11 x64；Mac 测试包目标为 Apple Silicon（M 系列）与 macOS 13+，使用免费 ad-hoc 本地签名，不包含苹果公证。当前 Mac 功能范围是本地文本记录、搜索、收藏、JSON 预览和快捷面板；图片采集与写回、自动粘贴、同步令牌存储尚未适配。
 
-运行 `python scripts/build-user-guide.py` 可生成包含安装步骤的离线图文使用指南，输出到 `doc/guides/`。本地文档按需求讨论、开发设计、界面原型、使用指南和打包发布分类保存在 `doc/` 中，该目录不纳入版本控制。打包入口见 [Windows 打包脚本](scripts/package-windows.ps1)、[Windows 安装器脚本](scripts/package-windows-installer.ps1)和 [macOS 打包脚本](scripts/package-macos.sh)。
+运行 `python scripts/build-user-guide.py` 可生成包含安装步骤的离线图文使用指南，输出到 `doc/使用指南/理梦剪藏-<版本>-使用指南.html`。本地文档按需求讨论、开发设计、界面原型、使用指南和打包发布分类保存在 `doc/` 中，分类目录和文件均使用中文名称，该目录不纳入版本控制。打包入口见 [Windows 打包脚本](scripts/package-windows.ps1)、[Windows 安装器脚本](scripts/package-windows-installer.ps1)和 [macOS 打包脚本](scripts/package-macos.sh)。
 
 ## 产品介绍
 
