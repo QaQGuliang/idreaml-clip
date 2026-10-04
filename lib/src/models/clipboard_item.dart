@@ -1,3 +1,5 @@
+import 'clipboard_content.dart';
+
 class ClipboardItem {
   const ClipboardItem({
     required this.id,
@@ -28,6 +30,12 @@ class ClipboardItem {
   final String deviceId;
   final String syncState;
   final String? sourceApp;
+
+  ClipboardContent get payload =>
+      ClipboardContent(type: type, content: content);
+  bool get isImage => payload.isImage;
+  String get typeLabel => payload.typeLabel;
+  String get summary => payload.summary;
 
   factory ClipboardItem.fromMap(Map<String, Object?> map) => ClipboardItem(
     id: map['id']! as String,

@@ -228,7 +228,7 @@ packages:
     source: hosted
     version: "0.2.0"
   image:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: image
       sha256: "1976370a4df3091bb0f72409c187ad1f9132a818bc6b95ca59c0bae1c75c688e"
@@ -476,7 +476,7 @@ packages:
     source: hosted
     version: "1.1.1"
   screen_retriever:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: screen_retriever
       sha256: ace919117a7520c13a50a6259e60c4a0d4cbe98809468792a91b5c5adada2aa6
@@ -625,7 +625,7 @@ packages:
     source: hosted
     version: "1.4.0"
   uni_platform:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: uni_platform
       sha256: e02213a7ee5352212412ca026afd41d269eb00d982faa552f419ffc2debfad84

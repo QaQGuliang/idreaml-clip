@@ -18,25 +18,22 @@ class IdreamlClipApp extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => MaterialApp(
-    title: 'Idreaml Clip · 理梦剪藏',
+    title: 'Idreaml Clip',
     debugShowCheckedModeBanner: false,
     theme: buildAppTheme(),
     home: AnimatedBuilder(
       animation: controller,
-      builder: (context, _) => AnimatedSwitcher(
-        duration: const Duration(milliseconds: 160),
-        child: controller.quickMode
-            ? QuickPanel(
-                key: const ValueKey('quick-panel'),
-                controller: controller,
-                desktopService: desktopService,
-              )
-            : MainShell(
-                key: const ValueKey('main-shell'),
-                controller: controller,
-                desktopService: desktopService,
-              ),
-      ),
+      builder: (context, _) => controller.quickMode
+          ? QuickPanel(
+              key: ValueKey('quick-panel-${controller.quickSession}'),
+              controller: controller,
+              desktopService: desktopService,
+            )
+          : MainShell(
+              key: const ValueKey('main-shell'),
+              controller: controller,
+              desktopService: desktopService,
+            ),
     ),
   );
 }
