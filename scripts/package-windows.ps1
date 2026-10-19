@@ -92,7 +92,13 @@ try {
         Copy-Item -LiteralPath (Join-Path $sdkRoot 'bin/cache/artifacts/engine/windows-x64-release/flutter_windows.dll') -Destination $stage -Force
         Copy-Item -LiteralPath (Join-Path $bundle 'flutter_assets/NativeAssetsManifest.json') -Destination (Join-Path $stage 'native_assets.json')
     } else {
-        Copy-Item -LiteralPath (Join-Path $nativeRoot 'data') -Destination $stage -Recurse
+        # Running a local build can create data/idreaml_clip. Ship only the
+        # Flutter runtime assets so private clipboard data never enters a ZIP.
+        $data = Join-Path $stage 'data'
+        New-Item -ItemType Directory -Path $data | Out-Null
+        foreach ($name in @('app.so', 'icudtl.dat', 'flutter_assets')) {
+            Copy-Item -LiteralPath (Join-Path $nativeRoot "data/$name") -Destination $data -Recurse
+        }
         $nativeManifest = Join-Path $nativeRoot 'native_assets.json'
         if (Test-Path -LiteralPath $nativeManifest) {
             Copy-Item -LiteralPath $nativeManifest -Destination $stage

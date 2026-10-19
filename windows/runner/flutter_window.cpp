@@ -26,6 +26,10 @@ bool FlutterWindow::OnCreate() {
   }
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+  directory_picker_ = std::make_unique<DirectoryPicker>(
+      GetHandle(), flutter_controller_->engine()->messenger());
+  administrator_launch_ = std::make_unique<AdministratorLaunch>(
+      GetHandle(), flutter_controller_->engine()->messenger());
   screenshot_host_ = std::make_unique<ScreenshotHost>(
       GetHandle(), flutter_controller_->view()->GetNativeWindow(),
       flutter_controller_->engine(), project_);
@@ -43,6 +47,8 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  administrator_launch_.reset();
+  directory_picker_.reset();
   screenshot_host_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;

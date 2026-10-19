@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'data/clipboard_repository.dart';
+import 'data/data_storage.dart';
 import 'models/clipboard_item.dart';
 import 'models/clipboard_content.dart';
 import 'models/sync_models.dart';
@@ -49,6 +50,47 @@ class AppController extends ChangeNotifier {
   );
   QuickShortcut screenshotShortcut = defaultScreenshotShortcut;
   String? screenshotError;
+  bool runAsAdministratorEnabled = false;
+  bool isAdministrator = false;
+  bool administratorChanging = false;
+  String? administratorMessage;
+
+  void setAdministratorState({
+    required bool enabled,
+    required bool elevated,
+    String? message,
+    bool changing = false,
+  }) {
+    runAsAdministratorEnabled = enabled;
+    isAdministrator = elevated;
+    administratorMessage = message;
+    administratorChanging = changing;
+    if (!_disposed) notifyListeners();
+  }
+
+  bool storageChanging = false;
+  String? storageMessage;
+  String? get storagePath => repository.storage?.root.path;
+
+  Future<String> validateStoragePath(String value) =>
+      repository.storage!.validateDestination(value);
+
+  Future<StorageMoveResult> changeStoragePath(String value) async {
+    if (administratorChanging) throw const StorageException('正在切换启动权限，请稍候。');
+    if (storageChanging) throw const StorageException('正在迁移数据，请稍候。');
+    storageChanging = true;
+    storageMessage = null;
+    notifyListeners();
+    try {
+      final result = await repository.moveStorage(value);
+      storageMessage = result.warning ?? '数据迁移完成，旧目录已删除。';
+      await reload();
+      return result;
+    } finally {
+      storageChanging = false;
+      if (!_disposed) notifyListeners();
+    }
+  }
 
   List<ClipboardItem> history = const [];
   List<ClipboardItem> quickItems = const [];
@@ -142,7 +184,10 @@ class AppController extends ChangeNotifier {
   Future<void> disconnectSync() => syncService.disconnect();
 
   Future<void> pollClipboard() async {
-    if (_readingClipboard || _writingClipboard || _disposed) {
+    if (_readingClipboard ||
+        _writingClipboard ||
+        _disposed ||
+        storageChanging) {
       return;
     }
     final sequence = clipboard.sequence;

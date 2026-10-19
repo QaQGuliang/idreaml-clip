@@ -18,6 +18,7 @@ import 'win_v_shortcut_service.dart';
 import 'startup_service.dart';
 import 'windows_folder_startup_service.dart';
 import 'screenshot_service.dart';
+import 'administrator_launch_service.dart';
 
 class DesktopService with TrayListener, WindowListener {
   DesktopService(
@@ -26,9 +27,12 @@ class DesktopService with TrayListener, WindowListener {
     QuickPasteService? pasteService,
     WinVShortcutService? winVShortcut,
     StartupService? startupService,
+    AdministratorLaunchService? administrator,
     this.screenshotService,
     this.onExit,
-  }) : _canRegisterShortcut =
+  }) : administrator =
+           administrator ?? AdministratorLaunchService(controller.repository),
+       _canRegisterShortcut =
            canRegisterShortcut ?? shortcut_check.canRegisterShortcut,
        _winVShortcut = winVShortcut ?? WindowsWinVShortcutService(),
        _startupService =
@@ -43,6 +47,7 @@ class DesktopService with TrayListener, WindowListener {
                : const CopyOnlyPasteService());
 
   final AppController controller;
+  final AdministratorLaunchService administrator;
   final ScreenshotService? screenshotService;
   late final screenshots = screenshotService ?? ScreenshotService(controller);
   final Future<void> Function()? onExit;
@@ -112,6 +117,8 @@ class DesktopService with TrayListener, WindowListener {
     }
 
     await screenshots.initialize();
+    await administrator.initialize(requestRestart: false);
+    _publishAdministrator();
     try {
       final state = await _startupService.initialize();
       controller.setLaunchAtStartupState(state.enabled, message: state.message);
@@ -516,6 +523,34 @@ class DesktopService with TrayListener, WindowListener {
   }
 
   Future<void> exitApp() => _exitFuture ??= _exitApp();
+
+  void _publishAdministrator({bool changing = false}) =>
+      controller.setAdministratorState(
+        enabled: administrator.enabled,
+        elevated: administrator.elevated,
+        message: administrator.message,
+        changing: changing,
+      );
+
+  Future<String?> setRunAsAdministratorEnabled(bool value) async {
+    if (_exiting ||
+        controller.administratorChanging ||
+        controller.storageChanging) {
+      return '正在处理其他操作，请稍候。';
+    }
+    _publishAdministrator(changing: true);
+    try {
+      final restart = await administrator.setEnabled(value);
+      _publishAdministrator(changing: restart);
+      if (restart) await exitApp();
+      return administrator.message;
+    } catch (_) {
+      _publishAdministrator();
+      return administrator.message ?? '无法更改管理员启动设置，请重试。';
+    } finally {
+      if (!_exiting) _publishAdministrator();
+    }
+  }
 
   Future<void> _exitApp() async {
     _exiting = true;

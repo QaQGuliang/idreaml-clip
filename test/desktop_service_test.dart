@@ -12,6 +12,7 @@ import 'package:idreaml_clip/src/services/desktop_service.dart';
 import 'package:idreaml_clip/src/services/screenshot_service.dart';
 import 'package:idreaml_clip/src/services/quick_paste_service.dart';
 import 'package:idreaml_clip/src/services/startup_service.dart';
+import 'package:idreaml_clip/src/services/administrator_launch_service.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -80,6 +81,7 @@ void main() {
   const hotkeyEvents = MethodChannel(
     'dev.leanflutter.plugins/hotkey_manager_event',
   );
+  const administratorChannel = WindowsAdministratorPlatform.channel;
   late AppController controller;
   late DesktopService desktop;
   late List<MethodCall> windowCalls;
@@ -206,6 +208,10 @@ void main() {
     });
     messenger.setMockMethodCallHandler(hotkeyEvents, (_) async => null);
     messenger.setMockMethodCallHandler(startupChannel, (_) async => false);
+    messenger.setMockMethodCallHandler(
+      administratorChannel,
+      (_) async => false,
+    );
   });
 
   tearDown(() {
@@ -221,6 +227,7 @@ void main() {
       hotkeyChannel,
       hotkeyEvents,
       startupChannel,
+      administratorChannel,
     ]) {
       messenger.setMockMethodCallHandler(channel, null);
     }
@@ -378,6 +385,69 @@ void main() {
       trayCalls.where((call) => call.method == 'popUpContextMenu'),
       hasLength(2),
     );
+  });
+
+  testWidgets('管理员开关取消授权后保留普通进程及原偏好', (tester) async {
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    var requests = 0;
+    messenger.setMockMethodCallHandler(administratorChannel, (call) async {
+      if (call.method == 'restartElevated') {
+        requests++;
+        throw PlatformException(code: 'cancelled');
+      }
+      return false;
+    });
+    await finish(tester, desktop.initialize());
+    controller.page = AppPage.settings;
+    await tester.pumpWidget(
+      IdreamlClipApp(controller: controller, desktopService: desktop),
+    );
+    final toggle = find.byKey(const ValueKey('run-as-administrator-switch'));
+    await tester.ensureVisible(toggle);
+    await tester.pumpAndSettle();
+    await tester.tap(toggle);
+    await tester.pumpAndSettle();
+    expect(requests, 1);
+    expect(controller.runAsAdministratorEnabled, isFalse);
+    expect(controller.administratorChanging, isFalse);
+    expect(
+      await controller.repository.getSetting(
+        AdministratorLaunchService.settingKey,
+      ),
+      'false',
+    );
+    expect(windowCalls.where((call) => call.method == 'close'), isEmpty);
+  });
+
+  testWidgets('管理员重启请求成功才关闭原进程，重启前偏好已保存', (tester) async {
+    final messenger =
+        TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
+    var requests = 0;
+    String? preferenceAtRequest;
+    messenger.setMockMethodCallHandler(administratorChannel, (call) async {
+      if (call.method == 'restartElevated') {
+        requests++;
+        preferenceAtRequest =
+            (controller.repository as MemoryClipboardRepository)
+                .settings[AdministratorLaunchService.settingKey];
+        return null;
+      }
+      return false;
+    });
+    await finish(tester, desktop.initialize());
+    String? resultMessage;
+    await finish(
+      tester,
+      desktop.setRunAsAdministratorEnabled(true).then((value) {
+        resultMessage = value;
+      }),
+    );
+    expect(resultMessage, isNull);
+    expect(requests, 1);
+    expect(preferenceAtRequest, 'true');
+    expect(windowCalls.where((call) => call.method == 'close'), hasLength(1));
+    expect(controller.runAsAdministratorEnabled, isTrue);
   });
 
   testWidgets('托盘退出菜单关闭程序，旧菜单入口不再生效', (tester) async {

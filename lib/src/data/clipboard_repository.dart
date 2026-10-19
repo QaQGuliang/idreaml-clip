@@ -7,6 +7,7 @@ import '../models/clipboard_item.dart';
 import '../models/clipboard_content.dart';
 import '../models/sync_models.dart';
 import 'clipboard_database.dart';
+import 'data_storage.dart';
 
 class ClipboardStats {
   const ClipboardStats({required this.history, required this.favorites});
@@ -23,6 +24,21 @@ class ClipboardRepository {
   String? _deviceId;
 
   Database get _db => _database.database;
+  DataStorage? get storage => _database.storage;
+  Future<T> access<T>(Future<T> Function() action) => _database.access(action);
+  Future<StorageMoveResult> moveStorage(String path) => _database.moveTo(path);
+
+  Future<ClipboardItem> _item(Map<String, Object?> row) async =>
+      ClipboardItem.fromMap(await _database.images?.hydrate(row) ?? row);
+
+  Future<List<ClipboardItem>> _items(List<Map<String, Object?>> rows) async {
+    final result = <ClipboardItem>[];
+    // A large history must not open thousands of image files simultaneously.
+    for (var offset = 0; offset < rows.length; offset += 16) {
+      result.addAll(await Future.wait(rows.skip(offset).take(16).map(_item)));
+    }
+    return result;
+  }
 
   String get deviceId {
     final value = _deviceId;
@@ -35,7 +51,7 @@ class ClipboardRepository {
       Platform.environment['HOSTNAME'] ??
       '本机';
 
-  Future<String> initializeDevice() async {
+  Future<String> initializeDevice() => access(() async {
     final savedId = await getSetting('device_id');
     final deviceId = savedId ?? _uuid.v4();
     if (savedId == null) await setSetting('device_id', deviceId);
@@ -51,7 +67,7 @@ class ClipboardRepository {
       'is_current': 1,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
     return deviceId;
-  }
+  });
 
   Future<ClipboardItem?> captureText(String content) =>
       capture(ClipboardContent.text(content));
@@ -63,18 +79,20 @@ class ClipboardRepository {
     ClipboardContent payload,
   ) => _capture(payload, operationId: operationId);
 
-  Future<void> releaseScreenshotReceipt(String operationId) => _db.delete(
-    'screenshot_commit',
-    where: 'operation_id = ?',
-    whereArgs: [operationId],
+  Future<void> releaseScreenshotReceipt(String operationId) => access(
+    () => _db.delete(
+      'screenshot_commit',
+      where: 'operation_id = ?',
+      whereArgs: [operationId],
+    ),
   );
 
   Future<ClipboardItem?> _capture(
     ClipboardContent payload, {
     String? operationId,
-  }) async {
+  }) => access(() async {
     if (payload.content.trim().isEmpty) return null;
-    final content = payload.content;
+    final content = await _database.images?.persist(payload) ?? payload.content;
     final deviceId = _deviceId ?? await initializeDevice();
     final hash = payload.hash;
     final now = DateTime.now().millisecondsSinceEpoch;
@@ -95,7 +113,7 @@ class ClipboardRepository {
             where: 'id = ?',
             whereArgs: [receipts.single['item_id']],
           );
-          return rows.isEmpty ? null : ClipboardItem.fromMap(rows.single);
+          return rows.isEmpty ? null : await _item(rows.single);
         }
       }
       Future<void> receipt(String id) async {
@@ -137,7 +155,7 @@ class ClipboardRepository {
           whereArgs: [id],
         );
         await receipt(id);
-        return ClipboardItem.fromMap(rows.single);
+        return _item(rows.single);
       }
 
       final id = existing.single['id']! as String;
@@ -156,16 +174,16 @@ class ClipboardRepository {
         whereArgs: [id],
       );
       await receipt(id);
-      return ClipboardItem.fromMap(rows.single);
+      return _item(rows.single);
     });
-  }
+  });
 
   Future<List<ClipboardItem>> list({
     String query = '',
     bool favoritesOnly = false,
     bool todayOnly = false,
     int? limit,
-  }) async {
+  }) => access(() async {
     final where = <String>['deleted = 0'];
     final args = <Object?>[];
     if (query.trim().isNotEmpty) {
@@ -197,10 +215,10 @@ class ClipboardRepository {
       orderBy: 'last_used_at DESC',
       limit: limit,
     );
-    return rows.map(ClipboardItem.fromMap).toList(growable: false);
-  }
+    return _items(rows);
+  });
 
-  Future<void> toggleFavorite(String id) async {
+  Future<void> toggleFavorite(String id) => access(() async {
     final now = DateTime.now().millisecondsSinceEpoch;
     await _db.rawUpdate(
       '''
@@ -211,9 +229,9 @@ class ClipboardRepository {
     ''',
       [now, id],
     );
-  }
+  });
 
-  Future<void> markUsed(String id) async {
+  Future<void> markUsed(String id) => access(() async {
     final now = DateTime.now().millisecondsSinceEpoch;
     await _db.rawUpdate(
       '''
@@ -224,9 +242,9 @@ class ClipboardRepository {
     ''',
       [now, now, id],
     );
-  }
+  });
 
-  Future<void> softDelete(String id) async {
+  Future<void> softDelete(String id) => access(() async {
     await _db.update(
       'clipboard_item',
       {
@@ -237,17 +255,17 @@ class ClipboardRepository {
       where: 'id = ?',
       whereArgs: [id],
     );
-  }
+  });
 
-  Future<void> clearHistory() async {
+  Future<void> clearHistory() => access(() async {
     await _db.update('clipboard_item', {
       'deleted': 1,
       'updated_at': DateTime.now().millisecondsSinceEpoch,
       'sync_state': 'dirty',
     }, where: 'deleted = 0');
-  }
+  });
 
-  Future<void> enforceHistoryLimit(int limit) async {
+  Future<void> enforceHistoryLimit(int limit) => access(() async {
     if (limit <= 0) return;
     final now = DateTime.now().millisecondsSinceEpoch;
     await _db.rawUpdate(
@@ -263,9 +281,9 @@ class ClipboardRepository {
     ''',
       [now, limit],
     );
-  }
+  });
 
-  Future<void> cleanupOlderThan(int days) async {
+  Future<void> cleanupOlderThan(int days) => access(() async {
     if (days <= 0) return;
     final cutoff = DateTime.now()
         .subtract(Duration(days: days))
@@ -280,9 +298,9 @@ class ClipboardRepository {
       where: 'deleted = 0 AND favorite = 0 AND last_used_at < ?',
       whereArgs: [cutoff],
     );
-  }
+  });
 
-  Future<ClipboardStats> stats() async {
+  Future<ClipboardStats> stats() => access(() async {
     final historyRows = await _db.rawQuery(
       'SELECT COUNT(*) AS total FROM clipboard_item WHERE deleted = 0',
     );
@@ -293,10 +311,10 @@ class ClipboardRepository {
     final history = historyRows.single['total']! as int;
     final favorites = favoriteRows.single['total']! as int;
     return ClipboardStats(history: history, favorites: favorites);
-  }
+  });
 
-  Future<String?> getSetting(String key) async {
-    final rows = await _db.query(
+  Future<String?> getSetting(String key) => access(() async {
+    final rows = await _database.settings.query(
       'app_setting',
       columns: ['value'],
       where: 'key = ?',
@@ -304,26 +322,26 @@ class ClipboardRepository {
       limit: 1,
     );
     return rows.isEmpty ? null : rows.single['value'] as String;
-  }
+  });
 
-  Future<void> setSetting(String key, String value) async {
-    await _db.insert('app_setting', {
+  Future<void> setSetting(String key, String value) => access(() async {
+    await _database.settings.insert('app_setting', {
       'key': key,
       'value': value,
       'updated_at': DateTime.now().millisecondsSinceEpoch,
     }, conflictAlgorithm: ConflictAlgorithm.replace);
-  }
+  });
 
-  Future<List<ClipboardItem>> listForSync() async {
+  Future<List<ClipboardItem>> listForSync() => access(() async {
     final rows = await _db.query('clipboard_item', orderBy: 'created_at ASC');
-    return rows.map(ClipboardItem.fromMap).toList(growable: false);
-  }
+    return _items(rows);
+  });
 
   Future<int> mergeSyncData({
     required List<SyncRecord> records,
     required List<SyncTombstone> tombstones,
     List<SyncDevice> devices = const [],
-  }) async {
+  }) => access(() async {
     var changes = 0;
     await _db.transaction((txn) async {
       for (final device in devices) {
@@ -338,6 +356,11 @@ class ClipboardRepository {
         }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
       for (final remote in records) {
+        final content =
+            await _database.images?.persist(
+              ClipboardContent(type: remote.type, content: remote.content),
+            ) ??
+            remote.content;
         final rows = await txn.query(
           'clipboard_item',
           where: 'content_hash = ?',
@@ -348,7 +371,7 @@ class ClipboardRepository {
           await txn.insert('clipboard_item', {
             'id': remote.id,
             'type': remote.type,
-            'content': remote.content,
+            'content': content,
             'content_hash': remote.contentHash,
             'created_at': remote.createdAt,
             'updated_at': remote.updatedAt,
@@ -372,7 +395,7 @@ class ClipboardRepository {
           'clipboard_item',
           {
             'type': remote.type,
-            'content': remote.content,
+            'content': content,
             'created_at':
                 remote.createdAt < local.createdAt.millisecondsSinceEpoch
                 ? remote.createdAt
@@ -423,15 +446,15 @@ class ClipboardRepository {
       }
     });
     return changes;
-  }
+  });
 
-  Future<void> markAllSynced() async {
+  Future<void> markAllSynced() => access(() async {
     await _db.update('clipboard_item', {
       'sync_state': 'clean',
     }, where: "sync_state != 'clean'");
-  }
+  });
 
-  Future<List<DeviceInfo>> listDevices() async {
+  Future<List<DeviceInfo>> listDevices() => access(() async {
     final rows = await _db.query(
       'device',
       orderBy: 'is_current DESC, last_seen_at DESC',
@@ -449,5 +472,5 @@ class ClipboardRepository {
           ),
         )
         .toList(growable: false);
-  }
+  });
 }

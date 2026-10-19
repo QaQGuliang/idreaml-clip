@@ -14,6 +14,7 @@ import 'resize_divider.dart';
 import 'history_limit_picker.dart';
 import 'json_split_preview.dart';
 import 'release_info_card.dart';
+import 'storage_directory_card.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({
@@ -1771,7 +1772,9 @@ class _SettingsPage extends StatelessWidget {
               trailing: Switch(
                 key: const ValueKey('launch-at-startup-switch'),
                 value: controller.launchAtStartupEnabled,
-                onChanged: controller.launchAtStartupChanging
+                onChanged:
+                    controller.launchAtStartupChanging ||
+                        controller.administratorChanging
                     ? null
                     : (value) async {
                         try {
@@ -1787,10 +1790,39 @@ class _SettingsPage extends StatelessWidget {
                       },
               ),
             ),
+            if (desktopService.administrator.supported) ...[
+              const Divider(height: 1),
+              _SettingRow(
+                title: '以管理员身份启动',
+                subtitle: controller.administratorChanging
+                    ? '正在等待 Windows 授权并准备重启…'
+                    : '${controller.isAdministrator ? '当前：管理员。' : '当前：普通权限。'}'
+                          '${controller.administratorMessage ?? '开启后立即请求授权并重启，以后每次启动默认请求管理员权限。'}',
+                trailing: Switch(
+                  key: const ValueKey('run-as-administrator-switch'),
+                  value: controller.runAsAdministratorEnabled,
+                  onChanged:
+                      controller.administratorChanging ||
+                          controller.storageChanging
+                      ? null
+                      : (value) async {
+                          final message = await desktopService
+                              .setRunAsAdministratorEnabled(value);
+                          if (context.mounted && message != null) {
+                            showMessage(context, message);
+                          }
+                        },
+                ),
+              ),
+            ],
           ],
         ),
       ),
       const SizedBox(height: 14),
+      if (controller.storagePath != null) ...[
+        StorageDirectoryCard(controller: controller),
+        const SizedBox(height: 14),
+      ],
       const ReleaseInfoCard(),
     ],
   );

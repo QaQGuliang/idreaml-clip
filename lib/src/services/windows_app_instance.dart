@@ -68,20 +68,41 @@ class WindowsAppInstance {
       if (maintenance()) {
         return WindowsAppInstance._(InstanceLaunch.maintenance, handles, 0, 0);
       }
-      int event(String name) => using((arena) {
+      int event(String name, {bool tolerateAccessDenied = false}) => using((
+        arena,
+      ) {
         final handle = CreateEvent(
           nullptr,
           FALSE,
           FALSE,
           name.toNativeUtf16(allocator: arena),
         );
-        if (handle == 0) throw WindowsException(GetLastError());
+        if (handle == 0) {
+          final error = GetLastError();
+          if (tolerateAccessDenied && error == ERROR_ACCESS_DENIED) return 0;
+          throw WindowsException(error);
+        }
         handles.add(handle);
         return handle;
       });
       // Create before claiming the mutex so a concurrent secondary can queue a
       // request even while the winner is still initializing Flutter/SQLite.
-      final activation = event('$namespace.Activate');
+      final activation = event(
+        '$namespace.Activate',
+        tolerateAccessDenied: true,
+      );
+      if (activation == 0) {
+        // A normal launch may not signal an already-running elevated copy.
+        // Preserve the single instance rather than crashing or starting a peer.
+        final result = WindowsAppInstance._(
+          InstanceLaunch.secondary,
+          handles,
+          0,
+          0,
+        );
+        result.dispose();
+        return result;
+      }
       final (mutex, error) = using((arena) {
         final handle = _createMutex(
           nullptr,

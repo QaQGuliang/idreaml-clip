@@ -1,15 +1,23 @@
-import 'dart:io';
-
-import 'package:path_provider/path_provider.dart';
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 
+import '../models/clipboard_content.dart';
+import 'data_storage.dart';
+import 'image_store.dart';
+
 class ClipboardDatabase {
-  ClipboardDatabase();
+  ClipboardDatabase({this.storage});
 
-  ClipboardDatabase.withFactory(this._factory);
+  ClipboardDatabase.withFactory(this._factory, {this.storage});
 
+  DataStorage? storage;
   DatabaseFactory? _factory;
   Database? _database;
+  Database? _settings;
+  Database get settings => _settings ?? database;
+  ImageStore? get images => storage == null ? null : ImageStore(storage!);
+
+  Future<T> access<T>(Future<T> Function() action) =>
+      storage?.access.run(action) ?? action();
 
   Database get database {
     final value = _database;
@@ -20,7 +28,11 @@ class ClipboardDatabase {
   Future<void> open({String? path}) async {
     sqfliteFfiInit();
     _factory ??= databaseFactoryFfi;
-    final databasePath = path ?? await _defaultPath();
+    if (path == null && storage == null) {
+      storage = DataStorage();
+      await storage!.initialize();
+    }
+    final databasePath = path ?? storage!.databasePath;
     _database = await _factory!.openDatabase(
       databasePath,
       options: OpenDatabaseOptions(
@@ -35,15 +47,74 @@ class ClipboardDatabase {
         },
       ),
     );
+    if (storage != null) {
+      try {
+        _settings = await _factory!.openDatabase(
+          storage!.settingsPath,
+          options: OpenDatabaseOptions(
+            version: 1,
+            onCreate: (db, _) => db.execute('''
+              CREATE TABLE app_setting (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL,
+                updated_at INTEGER NOT NULL
+              )
+            '''),
+          ),
+        );
+        for (final db in [database, settings]) {
+          final check = await db.rawQuery('PRAGMA quick_check');
+          if (check.length != 1 || check.single.values.single != 'ok') {
+            throw const StorageException('数据库校验失败，原数据已保留。');
+          }
+        }
+        await _separateLegacyData();
+      } catch (_) {
+        await close();
+        rethrow;
+      }
+    }
   }
 
-  Future<String> _defaultPath() async {
-    final root = await getApplicationSupportDirectory();
-    final directory = Directory(
-      '${root.path}${Platform.pathSeparator}idreaml_clip${Platform.pathSeparator}database',
+  Future<StorageMoveResult> moveTo(String path) {
+    final current = storage;
+    if (current == null) throw StateError('No managed storage');
+    return current.moveTo(path, close: close, open: () => open());
+  }
+
+  Future<void> _separateLegacyData() async {
+    final legacySettings = await database.query('app_setting');
+    await settings.transaction((txn) async {
+      for (final row in legacySettings) {
+        await txn.insert(
+          'app_setting',
+          row,
+          conflictAlgorithm: ConflictAlgorithm.ignore,
+        );
+      }
+    });
+    await database.delete('app_setting');
+    // Flush each image before replacing its inline contents with a relative
+    // reference. An interrupted upgrade is safe to resume on the next launch.
+    final rows = await database.query(
+      'clipboard_item',
+      where: "type LIKE 'image/%' AND content NOT LIKE ?",
+      whereArgs: ['${ImageStore.prefix}%'],
     );
-    await directory.create(recursive: true);
-    return '${directory.path}${Platform.pathSeparator}clipboard.db';
+    for (final row in rows) {
+      final value = await images!.persist(
+        ClipboardContent(
+          type: row['type'] as String,
+          content: row['content'] as String,
+        ),
+      );
+      await database.update(
+        'clipboard_item',
+        {'content': value},
+        where: 'id = ?',
+        whereArgs: [row['id']],
+      );
+    }
   }
 
   Future<void> _createSchema(Database db, int version) async {
@@ -99,7 +170,12 @@ class ClipboardDatabase {
     ''');
   }
 
-  Future<void> close() async => _database?.close();
+  Future<void> close() async {
+    await _settings?.close();
+    _settings = null;
+    await _database?.close();
+    _database = null;
+  }
 
   Future<void> _createScreenshotReceipts(Database db) => db.execute('''
     CREATE TABLE screenshot_commit (

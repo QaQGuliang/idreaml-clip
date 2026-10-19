@@ -8,6 +8,8 @@
 
 #include "win32_window.h"
 #include "screenshot_host.h"
+#include "directory_picker.h"
+#include "administrator_launch.h"
 
 // A window that does nothing but host a Flutter view.
 class FlutterWindow : public Win32Window {
@@ -30,6 +32,8 @@ class FlutterWindow : public Win32Window {
   // The Flutter instance hosted by this window.
   std::unique_ptr<flutter::FlutterViewController> flutter_controller_;
   std::unique_ptr<ScreenshotHost> screenshot_host_;
+  std::unique_ptr<DirectoryPicker> directory_picker_;
+  std::unique_ptr<AdministratorLaunch> administrator_launch_;
 };
 
 #endif  // RUNNER_FLUTTER_WINDOW_H_

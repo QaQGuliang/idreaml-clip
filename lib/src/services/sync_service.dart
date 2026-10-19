@@ -59,18 +59,19 @@ class SyncService extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> saveConfig(SyncConfig value, {String? token}) async {
-    _validate(value);
-    if (token != null && token.trim().isNotEmpty) {
-      await _credentialStore.writeToken(token.trim());
-    }
-    config = value;
-    await _repository.setSetting(_configKey, value.encode());
-    _schedule();
-    notifyListeners();
-  }
+  Future<void> saveConfig(SyncConfig value, {String? token}) =>
+      _repository.access(() async {
+        _validate(value);
+        if (token != null && token.trim().isNotEmpty) {
+          await _credentialStore.writeToken(token.trim());
+        }
+        config = value;
+        await _repository.setSetting(_configKey, value.encode());
+        _schedule();
+        notifyListeners();
+      });
 
-  Future<void> disconnect() async {
+  Future<void> disconnect() => _repository.access(() async {
     _timer?.cancel();
     _startupTimer?.cancel();
     config = null;
@@ -79,9 +80,9 @@ class SyncService extends ChangeNotifier {
     await _credentialStore.deleteToken();
     await _repository.setSetting(_configKey, 'null');
     notifyListeners();
-  }
+  });
 
-  Future<SyncResult?> syncNow() async {
+  Future<SyncResult?> syncNow() => _repository.access(() async {
     final current = config;
     if (_running || current == null || !current.enabled) return null;
     _running = true;
@@ -93,12 +94,14 @@ class SyncService extends ChangeNotifier {
       if (token == null || token.isEmpty) {
         throw StateError('尚未保存访问令牌，请重新编辑连接。');
       }
-      final root = await _supportDirectory();
+      final root =
+          _repository.storage?.sync ??
+          Directory(
+            p.join((await _supportDirectory()).path, 'idreaml_clip', 'sync'),
+          );
       final repository = Directory(
         p.join(
           root.path,
-          'idreaml_clip',
-          'sync',
           sha256
               .convert(utf8.encode(current.remoteUrl))
               .toString()
@@ -139,7 +142,7 @@ class SyncService extends ChangeNotifier {
       _running = false;
       notifyListeners();
     }
-  }
+  });
 
   void _schedule() {
     _timer?.cancel();

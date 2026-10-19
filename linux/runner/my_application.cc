@@ -14,6 +14,43 @@ struct _MyApplication {
 
 G_DEFINE_TYPE(MyApplication, my_application, GTK_TYPE_APPLICATION)
 
+static void directory_picker_response(GtkNativeDialog* dialog, gint response,
+                                      gpointer user_data) {
+  auto* call = FL_METHOD_CALL(user_data);
+  g_autoptr(FlValue) value = nullptr;
+  if (response == GTK_RESPONSE_ACCEPT) {
+    g_autofree gchar* path = gtk_file_chooser_get_filename(GTK_FILE_CHOOSER(dialog));
+    if (path != nullptr) value = fl_value_new_string(path);
+  }
+  fl_method_call_respond_success(call, value, nullptr);
+  gtk_native_dialog_destroy(dialog);
+  g_object_unref(dialog);
+}
+
+static void directory_picker_call(FlMethodChannel* channel, FlMethodCall* call,
+                                  gpointer user_data) {
+  if (g_strcmp0(fl_method_call_get_name(call), "chooseDirectory") != 0) {
+    fl_method_call_respond_not_implemented(call, nullptr);
+    return;
+  }
+  GtkFileChooserNative* picker = gtk_file_chooser_native_new(
+      "选择数据存储目录", GTK_WINDOW(user_data),
+      GTK_FILE_CHOOSER_ACTION_SELECT_FOLDER, "选择文件夹", "取消");
+  gtk_file_chooser_set_local_only(GTK_FILE_CHOOSER(picker), TRUE);
+  gtk_file_chooser_set_create_folders(GTK_FILE_CHOOSER(picker), TRUE);
+  FlValue* args = fl_method_call_get_args(call);
+  if (args != nullptr && fl_value_get_type(args) == FL_VALUE_TYPE_STRING) {
+    gtk_file_chooser_set_current_folder(GTK_FILE_CHOOSER(picker),
+                                        fl_value_get_string(args));
+  }
+  g_signal_connect_data(picker, "response", G_CALLBACK(directory_picker_response),
+                        g_object_ref(call),
+                        [](gpointer data, GClosure*) { g_object_unref(data); },
+                        G_CONNECT_DEFAULT);
+  gtk_native_dialog_set_modal(GTK_NATIVE_DIALOG(picker), TRUE);
+  gtk_native_dialog_show(GTK_NATIVE_DIALOG(picker));
+}
+
 // Called when first Flutter frame received.
 static void first_frame_cb(MyApplication* self, FlView* view) {
   gtk_widget_show(gtk_widget_get_toplevel(GTK_WIDGET(view)));
@@ -74,6 +111,13 @@ static void my_application_activate(GApplication* application) {
   gtk_widget_realize(GTK_WIDGET(view));
 
   fl_register_plugins(FL_PLUGIN_REGISTRY(view));
+
+  g_autoptr(FlStandardMethodCodec) directory_codec = fl_standard_method_codec_new();
+  g_autoptr(FlMethodChannel) directory_channel = fl_method_channel_new(
+      fl_engine_get_binary_messenger(fl_view_get_engine(view)),
+      "idreaml_clip/directories", FL_METHOD_CODEC(directory_codec));
+  fl_method_channel_set_method_call_handler(directory_channel,
+                                            directory_picker_call, window, nullptr);
 
   gtk_widget_grab_focus(GTK_WIDGET(view));
 }

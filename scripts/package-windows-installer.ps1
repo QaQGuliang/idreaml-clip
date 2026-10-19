@@ -48,6 +48,9 @@ try {
         if ($actual -ne $entry.sha256) { throw "Release file changed: $($entry.path)" }
     }
     $allFiles = @(Get-ChildItem -LiteralPath $bundle -Recurse -File)
+    if (Test-Path -LiteralPath (Join-Path $bundle 'data/idreaml_clip')) {
+        throw 'Release bundle contains private clipboard data. Rebuild the package before creating an installer.'
+    }
     if ($allFiles.Count -ne $info.files.Count + 1) { throw 'Release bundle contains unexpected files.' }
     if (@(Get-ChildItem -LiteralPath $bundle -Recurse -Attributes ReparsePoint).Count) {
         throw 'Release bundle must not contain links.'

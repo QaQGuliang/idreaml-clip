@@ -1,0 +1,8 @@
+cmake_minimum_required(VERSION 3.14)
+project(scroll_capture_smoke LANGUAGES CXX)
+add_executable(scroll_capture_smoke main.cpp ../../windows/runner/scroll_capture.cpp)
+target_compile_features(scroll_capture_smoke PRIVATE cxx_std_17)
+target_compile_definitions(scroll_capture_smoke PRIVATE NOMINMAX UNICODE _UNICODE)
+target_compile_options(scroll_capture_smoke PRIVATE /utf-8 /W4)
+target_include_directories(scroll_capture_smoke PRIVATE ../../windows/runner)
+target_link_libraries(scroll_capture_smoke PRIVATE user32 gdi32 dwmapi)
