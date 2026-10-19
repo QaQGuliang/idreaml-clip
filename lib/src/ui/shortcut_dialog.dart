@@ -6,15 +6,25 @@ import '../services/desktop_service.dart';
 import 'app_theme.dart';
 
 class ShortcutDialog extends StatefulWidget {
-  const ShortcutDialog({super.key, required this.desktopService});
+  const ShortcutDialog({
+    super.key,
+    required this.desktopService,
+    this.screenshot = false,
+  });
   final DesktopService desktopService;
+  final bool screenshot;
 
   @override
   State<ShortcutDialog> createState() => _ShortcutDialogState();
 }
 
 class _ShortcutDialogState extends State<ShortcutDialog> {
-  late QuickShortcut _shortcut = widget.desktopService.controller.quickShortcut;
+  late QuickShortcut _shortcut = widget.screenshot
+      ? widget.desktopService.controller.screenshotShortcut
+      : widget.desktopService.controller.quickShortcut;
+  QuickShortcut get _default => widget.screenshot
+      ? const QuickShortcut(key: PhysicalKeyboardKey.f1)
+      : QuickShortcut.platformDefault();
   final _recordFocus = FocusNode(debugLabel: 'shortcut recorder');
   QuickShortcut? _candidate;
   bool _recording = false;
@@ -101,7 +111,9 @@ class _ShortcutDialogState extends State<ShortcutDialog> {
       _saving = true;
       _error = null;
     });
-    final error = await widget.desktopService.updateQuickShortcut(_shortcut);
+    final error = widget.screenshot
+        ? await widget.desktopService.screenshots.updateShortcut(_shortcut)
+        : await widget.desktopService.updateQuickShortcut(_shortcut);
     if (!mounted) return;
     if (error == null) {
       Navigator.pop(context, true);
@@ -117,7 +129,7 @@ class _ShortcutDialogState extends State<ShortcutDialog> {
   Widget build(BuildContext context) => PopScope(
     canPop: !_saving,
     child: AlertDialog(
-      title: const Text('自定义快捷键'),
+      title: Text(widget.screenshot ? '截图快捷键' : '自定义快捷键'),
       content: SizedBox(
         width: 420,
         child: Column(
@@ -192,7 +204,7 @@ class _ShortcutDialogState extends State<ShortcutDialog> {
             const Text('修饰键和主键均可更换，保存后立即生效。'),
             const SizedBox(height: 8),
             Text(
-              '默认：${QuickShortcut.platformDefault().label()}',
+              '默认：${_default.label()}',
               style: Theme.of(context).textTheme.bodySmall,
             ),
             if (_error != null)
@@ -213,7 +225,7 @@ class _ShortcutDialogState extends State<ShortcutDialog> {
               : () {
                   _cancelRecording();
                   setState(() {
-                    _shortcut = QuickShortcut.platformDefault();
+                    _shortcut = _default;
                     _error = null;
                   });
                 },

@@ -5,6 +5,7 @@ import '../models/clipboard_content.dart';
 abstract class ClipboardService {
   int? get sequence;
   int? get lastReadSequence => null;
+  int? get lastWriteSequence => null;
   Future<List<ClipboardContent>> read();
   Future<void> write(ClipboardContent content);
   void dispose() {}

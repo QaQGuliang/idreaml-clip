@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$BundleDirectory,
-    [string]$OutputDirectory = 'dist/windows',
+    [string]$OutputDirectory,
     [string]$InnoCompiler = 'build/tools/innosetup/ISCC.exe'
 )
 
@@ -22,7 +22,10 @@ try {
     $displayVersion = $versionMatch.Groups[1].Value
     $buildNumber = if ($versionMatch.Groups[2].Success) { $versionMatch.Groups[2].Value } else { '0' }
     $packageVersion = if ($versionMatch.Groups[2].Success) { "$displayVersion+$buildNumber" } else { $displayVersion }
-    if (-not $BundleDirectory) { $BundleDirectory = "dist/windows/Idreaml-Clip-$packageVersion-windows-x64" }
+    if (-not $OutputDirectory) { $OutputDirectory = "dist/windows/$packageVersion" }
+    if (-not $BundleDirectory) {
+        $BundleDirectory = Join-Path $OutputDirectory "Idreaml-Clip-$packageVersion-windows-x64"
+    }
     $bundle = (Resolve-Path -LiteralPath (Resolve-ProjectPath $BundleDirectory)).Path
     $compiler = (Resolve-Path -LiteralPath (Resolve-ProjectPath $InnoCompiler)).Path
     $output = Resolve-ProjectPath $OutputDirectory

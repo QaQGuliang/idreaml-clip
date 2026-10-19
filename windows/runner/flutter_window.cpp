@@ -26,6 +26,9 @@ bool FlutterWindow::OnCreate() {
   }
   RegisterPlugins(flutter_controller_->engine());
   SetChildContent(flutter_controller_->view()->GetNativeWindow());
+  screenshot_host_ = std::make_unique<ScreenshotHost>(
+      GetHandle(), flutter_controller_->view()->GetNativeWindow(),
+      flutter_controller_->engine(), project_);
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
@@ -40,6 +43,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  screenshot_host_.reset();
   if (flutter_controller_) {
     flutter_controller_ = nullptr;
   }
@@ -62,6 +66,9 @@ FlutterWindow::MessageHandler(HWND hwnd, UINT const message,
   }
 
   switch (message) {
+    case ScreenshotHost::kCloseMessage:
+      if (screenshot_host_) screenshot_host_->Close();
+      return 0;
     case WM_FONTCHANGE:
       flutter_controller_->engine()->ReloadSystemFonts();
       break;

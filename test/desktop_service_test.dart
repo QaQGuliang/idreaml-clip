@@ -9,6 +9,7 @@ import 'package:idreaml_clip/src/app.dart';
 import 'package:idreaml_clip/src/app_controller.dart';
 import 'package:idreaml_clip/src/models/quick_shortcut.dart';
 import 'package:idreaml_clip/src/services/desktop_service.dart';
+import 'package:idreaml_clip/src/services/screenshot_service.dart';
 import 'package:idreaml_clip/src/services/quick_paste_service.dart';
 import 'package:idreaml_clip/src/services/startup_service.dart';
 import 'package:tray_manager/tray_manager.dart';
@@ -133,6 +134,7 @@ void main() {
     startup = _StartupService();
     desktop = DesktopService(
       controller,
+      screenshotService: ScreenshotService(controller, supported: false),
       canRegisterShortcut: (_) => shortcutAvailable,
       pasteService: pasteService,
       winVShortcut: winV,
@@ -284,6 +286,20 @@ void main() {
       windowCalls.where((call) => call.method == 'hide').length,
       hides + 1,
     );
+  });
+
+  testWidgets('快捷键截图会话期间失焦保留面板，结束后恢复正常失焦隐藏', (tester) async {
+    useNativeDpi(tester);
+    await finish(tester, desktop.showQuick());
+    windowCalls.clear();
+    desktop.screenshots.active = true;
+    desktop.onWindowBlur();
+    await tester.pump();
+    expect(windowCalls.where((call) => call.method == 'hide'), isEmpty);
+    desktop.screenshots.active = false;
+    desktop.onWindowBlur();
+    await tester.pump();
+    expect(windowCalls.where((call) => call.method == 'hide'), hasLength(1));
   });
 
   testWidgets('失焦不关闭管理窗口，返回历史后也不会被旧 blur 事件隐藏', (tester) async {

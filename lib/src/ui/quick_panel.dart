@@ -357,10 +357,7 @@ class _QuickPanelState extends State<QuickPanel> {
           child: Column(
             children: [
               DragToMoveArea(
-                child: _QuickHeader(
-                  service: widget.desktopService,
-                  recording: controller.recordingEnabled,
-                ),
+                child: _QuickHeader(service: widget.desktopService),
               ),
               Padding(
                 padding: const EdgeInsets.fromLTRB(10, 0, 10, 7),
@@ -471,13 +468,12 @@ class _QuickPanelState extends State<QuickPanel> {
 }
 
 class _QuickHeader extends StatelessWidget {
-  const _QuickHeader({required this.service, required this.recording});
+  const _QuickHeader({required this.service});
   final DesktopService service;
-  final bool recording;
 
   @override
   Widget build(BuildContext context) => Padding(
-    padding: const EdgeInsets.fromLTRB(11, 8, 5, 7),
+    padding: const EdgeInsets.fromLTRB(11, 7, 9, 6),
     child: Row(
       children: [
         const BrandMark(size: 26),
@@ -485,23 +481,55 @@ class _QuickHeader extends StatelessWidget {
         const Expanded(
           child: Text(
             'Idreaml Clip',
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
             style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
           ),
         ),
-        Tooltip(
-          message: recording ? '正在记录' : '已暂停记录',
-          child: Icon(
-            Icons.circle,
-            color: recording ? AppColors.success : AppColors.muted,
-            size: 7,
+        if (service.screenshots.supported)
+          Builder(
+            builder: (buttonContext) => IconButton(
+              key: const ValueKey('screenshot-button'),
+              tooltip: '截图（${service.controller.screenshotShortcut.label()}）',
+              visualDensity: VisualDensity.standard,
+              style: IconButton.styleFrom(
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+              padding: EdgeInsets.zero,
+              icon: const Icon(Icons.screenshot_monitor_outlined, size: 18),
+              onPressed: () {
+                final box = buttonContext.findRenderObject()! as RenderBox;
+                final point =
+                    box.localToGlobal(box.size.center(Offset.zero)) *
+                    View.of(buttonContext).devicePixelRatio;
+                service.screenshots.start(
+                  buttonPoint: point,
+                  hidePanel: service.hide,
+                );
+              },
+            ),
+          ),
+        if (service.screenshots.supported) const SizedBox(width: 6),
+        const Tooltip(
+          message: '正在记录',
+          child: SizedBox(
+            width: 24,
+            height: 32,
+            child: Center(
+              child: Icon(Icons.circle, color: AppColors.success, size: 7),
+            ),
           ),
         ),
-        const SizedBox(width: 5),
+        const SizedBox(width: 6),
         IconButton(
           tooltip: '关闭',
           onPressed: service.hide,
-          visualDensity: VisualDensity.compact,
-          constraints: const BoxConstraints.tightFor(width: 28, height: 28),
+          visualDensity: VisualDensity.standard,
+          style: IconButton.styleFrom(
+            tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          ),
+          constraints: const BoxConstraints.tightFor(width: 32, height: 32),
           padding: EdgeInsets.zero,
           icon: const Icon(Icons.close_rounded, size: 17),
         ),

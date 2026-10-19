@@ -7,6 +7,7 @@ import 'package:idreaml_clip/src/app_controller.dart';
 import 'package:idreaml_clip/src/data/clipboard_database.dart';
 import 'package:idreaml_clip/src/data/clipboard_repository.dart';
 import 'package:idreaml_clip/src/models/clipboard_content.dart';
+import 'package:idreaml_clip/src/models/clipboard_item.dart';
 import 'package:idreaml_clip/src/models/quick_shortcut.dart';
 import 'package:idreaml_clip/src/services/clipboard_service.dart';
 import 'package:idreaml_clip/src/services/credential_service.dart';
@@ -20,6 +21,7 @@ class _Clipboard extends ClipboardService {
   ClipboardContent? written;
   bool locked = false;
   int reads = 0;
+  int writes = 0;
   Completer<void>? readGate;
   void change(List<ClipboardContent> values) {
     contents = values;
@@ -38,6 +40,7 @@ class _Clipboard extends ClipboardService {
   @override
   Future<void> write(ClipboardContent content) async {
     if (locked) throw PlatformException(code: 'locked');
+    writes++;
     written = content;
     change([content]);
   }
@@ -52,10 +55,27 @@ class _Credentials implements CredentialStore {
   Future<void> deleteToken() async {}
 }
 
+class _ScreenshotRepository extends ClipboardRepository {
+  _ScreenshotRepository(super.database);
+  bool failAfterCommit = false;
+  @override
+  Future<ClipboardItem?> captureScreenshot(
+    String operationId,
+    ClipboardContent payload,
+  ) async {
+    final item = await super.captureScreenshot(operationId, payload);
+    if (failAfterCommit) {
+      failAfterCommit = false;
+      throw StateError('模拟事务已提交但响应失败');
+    }
+    return item;
+  }
+}
+
 void main() {
   TestWidgetsFlutterBinding.ensureInitialized();
   late ClipboardDatabase database;
-  late ClipboardRepository repository;
+  late _ScreenshotRepository repository;
   late AppController controller;
   late _Clipboard clipboard;
   final png = ClipboardContent.image(
@@ -67,7 +87,7 @@ void main() {
     sqfliteFfiInit();
     database = ClipboardDatabase.withFactory(databaseFactoryFfi);
     await database.open(path: inMemoryDatabasePath);
-    repository = ClipboardRepository(database);
+    repository = _ScreenshotRepository(database);
     clipboard = _Clipboard();
     controller = AppController(
       repository,
@@ -98,6 +118,97 @@ void main() {
     final reads = clipboard.reads;
     await controller.pollClipboard();
     expect(clipboard.reads, reads);
+  });
+
+  test('旧版暂停设置不会阻止应用启动后自动记录', () async {
+    await repository.setSetting('recording_enabled', 'false');
+    final nextClipboard = _Clipboard()
+      ..change([const ClipboardContent.text('启动后自动记录')]);
+    final next = AppController(
+      repository,
+      SyncService(repository, _Credentials()),
+      clipboard: nextClipboard,
+    );
+    final captured = Completer<void>();
+    next.addListener(() {
+      if (next.history.isNotEmpty && !captured.isCompleted) captured.complete();
+    });
+    try {
+      await next.initialize();
+      await captured.future.timeout(const Duration(seconds: 5));
+      expect(next.history.single.content, '启动后自动记录');
+      expect(next.quickItems.single.id, next.history.single.id);
+    } finally {
+      next.dispose();
+    }
+  });
+
+  test('手动截图入库且不打开窗口', () async {
+    await controller.commitScreenshot('manual', png);
+    expect(controller.history.single.isImage, isTrue);
+    expect(controller.quickItems.single.id, controller.history.single.id);
+    expect(controller.quickMode, isFalse);
+    expect(clipboard.written!.hash, png.hash);
+  });
+
+  test('同一截图重试及自动轮询不重复计数，独立截图正常计数', () async {
+    await Future.wait([
+      controller.commitScreenshot('one', png),
+      controller.commitScreenshot('one', png),
+    ]);
+    await controller.pollClipboard();
+    expect((await repository.list()).single.copyCount, 1);
+    expect(clipboard.writes, 1);
+    await controller.commitScreenshot('two', png);
+    await controller.pollClipboard();
+    expect((await repository.list()).single.copyCount, 2);
+    expect(clipboard.writes, 2);
+  });
+
+  test('截图完成让旧的异步轮询失效', () async {
+    clipboard.change([png]);
+    clipboard.readGate = Completer<void>();
+    final oldPoll = controller.pollClipboard();
+    await controller.commitScreenshot('race', png);
+    clipboard.readGate!.complete();
+    await oldPoll;
+    await controller.pollClipboard();
+    expect((await repository.list()).single.copyCount, 1);
+  });
+
+  test('数据库提交结果不确定时通过回执重试，不再复制或计数', () async {
+    repository.failAfterCommit = true;
+    await expectLater(
+      controller.commitScreenshot('receipt', png),
+      throwsStateError,
+    );
+    clipboard.change([const ClipboardContent.text('后来复制的内容')]);
+    await controller.commitScreenshot('receipt', png);
+    expect(clipboard.writes, 1);
+    expect(clipboard.contents.single.content, '后来复制的内容');
+    await controller.pollClipboard();
+    final image = (await repository.list()).firstWhere((item) => item.isImage);
+    expect(image.copyCount, 1);
+    expect((await repository.list()), hasLength(2));
+  });
+
+  test('截图快捷键独立持久化且无效配置回退 F1', () async {
+    expect(controller.screenshotShortcut.key, PhysicalKeyboardKey.f1);
+    await controller.saveScreenshotShortcut(
+      const QuickShortcut(key: PhysicalKeyboardKey.f8),
+    );
+    expect(await repository.getSetting('screenshot_shortcut'), contains('key'));
+    expect(
+      controller.quickShortcut.sameCombination(QuickShortcut.platformDefault()),
+      isTrue,
+    );
+    expect(
+      QuickShortcut.decode(
+        'bad',
+        fallback: AppController.defaultScreenshotShortcut,
+      ).key,
+      PhysicalKeyboardKey.f1,
+    );
   });
 
   test('重新初始化应用会恢复 Win+V 开关和独立保存的自定义快捷键', () async {
@@ -192,7 +303,7 @@ void main() {
     expect(controller.clipboardError, isNotNull);
   });
 
-  test('读取期间自己复制或暂停记录，不再写入过期数据', () async {
+  test('读取期间自己复制，不再写入过期数据', () async {
     final saved = await repository.captureText('original');
     clipboard.change([png]);
     clipboard.readGate = Completer<void>();
@@ -201,10 +312,5 @@ void main() {
     clipboard.readGate!.complete();
     await pending;
     expect((await repository.list()).single.content, 'original');
-    clipboard.readGate = null;
-    await controller.setRecording(false);
-    clipboard.change([png]);
-    await controller.pollClipboard();
-    expect((await repository.list()), hasLength(1));
   });
 }

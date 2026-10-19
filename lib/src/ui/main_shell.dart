@@ -292,18 +292,6 @@ class _Sidebar extends StatelessWidget {
                         : AppColors.success,
                   ),
                 ),
-                const SizedBox(height: 9),
-                IconButton.outlined(
-                  tooltip: controller.recordingEnabled ? '暂停记录' : '恢复记录',
-                  onPressed: () =>
-                      controller.setRecording(!controller.recordingEnabled),
-                  icon: Icon(
-                    controller.recordingEnabled
-                        ? Icons.pause_rounded
-                        : Icons.play_arrow_rounded,
-                    size: 20,
-                  ),
-                ),
               ],
             ),
           )
@@ -358,21 +346,6 @@ class _Sidebar extends StatelessWidget {
                         ),
                       ),
                     ],
-                  ),
-                ),
-                const SizedBox(height: 9),
-                SizedBox(
-                  width: double.infinity,
-                  child: OutlinedButton.icon(
-                    onPressed: () =>
-                        controller.setRecording(!controller.recordingEnabled),
-                    icon: Icon(
-                      controller.recordingEnabled
-                          ? Icons.pause_rounded
-                          : Icons.play_arrow_rounded,
-                      size: 16,
-                    ),
-                    label: Text(controller.recordingEnabled ? '暂停记录' : '恢复记录'),
                   ),
                 ),
               ],
@@ -1561,17 +1534,8 @@ class _PrivacyPage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const _SectionTitle(title: '隐私控制', subtitle: '随时暂停或恢复记录'),
+            const _SectionTitle(title: '隐私控制', subtitle: '管理历史保留与清理'),
             const SizedBox(height: 8),
-            _SettingRow(
-              title: '自动记录剪切板',
-              subtitle: '关闭后不再捕获新的文本和图片',
-              trailing: Switch(
-                value: controller.recordingEnabled,
-                onChanged: controller.setRecording,
-              ),
-            ),
-            const Divider(height: 1),
             _SettingRow(
               title: '自动清理历史',
               subtitle: '收藏内容不会被自动清理',
@@ -1718,6 +1682,40 @@ class _SettingsPage extends StatelessWidget {
               ),
             ),
             const Divider(height: 1),
+            if (desktopService.screenshots.supported) ...[
+              _SettingRow(
+                title: '截图快捷键',
+                subtitle: controller.screenshotError ?? '默认 F1，独立于快捷剪切板快捷键',
+                trailing: OutlinedButton.icon(
+                  key: const ValueKey('screenshot-shortcut-button'),
+                  onPressed: () async {
+                    final error = await desktopService.beginShortcutRecording(
+                      screenshot: true,
+                    );
+                    if (error != null) {
+                      if (context.mounted) showMessage(context, error);
+                      return;
+                    }
+                    try {
+                      if (!context.mounted) return;
+                      await showDialog<bool>(
+                        context: context,
+                        barrierDismissible: false,
+                        builder: (_) => ShortcutDialog(
+                          desktopService: desktopService,
+                          screenshot: true,
+                        ),
+                      );
+                    } finally {
+                      await desktopService.endShortcutRecording();
+                    }
+                  },
+                  icon: const Icon(Icons.screenshot_monitor_outlined, size: 18),
+                  label: Text(controller.screenshotShortcut.label()),
+                ),
+              ),
+              const Divider(height: 1),
+            ],
             _SettingRow(
               title: '快捷面板显示数量',
               subtitle: '无搜索词时只查询最近记录',

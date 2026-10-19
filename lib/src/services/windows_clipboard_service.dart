@@ -17,6 +17,9 @@ class WindowsClipboardService extends ClipboardService {
 
   @override
   int? get lastReadSequence => _readSequence;
+  int? _writeSequence;
+  @override
+  int? get lastWriteSequence => _writeSequence;
 
   int _format(String name) => _formats.putIfAbsent(name, () {
     final native = name.toNativeUtf16();
@@ -180,6 +183,7 @@ class WindowsClipboardService extends ClipboardService {
 
   @override
   Future<void> write(ClipboardContent content) async {
+    _writeSequence = null;
     final values = <int, Uint8List>{};
     if (content.isImage) {
       final original = content.imageBytes;
@@ -213,6 +217,10 @@ class WindowsClipboardService extends ClipboardService {
       } finally {
         CloseClipboard();
       }
+      // Closing publishes synthesized text/bitmap formats and can advance the
+      // sequence again. Capture the committed value so our own write does not
+      // look like an external clipboard change and cancel quick paste.
+      _writeSequence = sequence;
     } finally {
       for (final memory in allocations.values) {
         GlobalFree(memory);

@@ -17,6 +17,7 @@ import 'shortcut_availability.dart' as shortcut_check;
 import 'win_v_shortcut_service.dart';
 import 'startup_service.dart';
 import 'windows_folder_startup_service.dart';
+import 'screenshot_service.dart';
 
 class DesktopService with TrayListener, WindowListener {
   DesktopService(
@@ -25,6 +26,7 @@ class DesktopService with TrayListener, WindowListener {
     QuickPasteService? pasteService,
     WinVShortcutService? winVShortcut,
     StartupService? startupService,
+    this.screenshotService,
     this.onExit,
   }) : _canRegisterShortcut =
            canRegisterShortcut ?? shortcut_check.canRegisterShortcut,
@@ -41,6 +43,8 @@ class DesktopService with TrayListener, WindowListener {
                : const CopyOnlyPasteService());
 
   final AppController controller;
+  final ScreenshotService? screenshotService;
+  late final screenshots = screenshotService ?? ScreenshotService(controller);
   final Future<void> Function()? onExit;
   Future<void>? _exitFuture;
   final bool Function(QuickShortcut) _canRegisterShortcut;
@@ -107,6 +111,7 @@ class DesktopService with TrayListener, WindowListener {
       );
     }
 
+    await screenshots.initialize();
     try {
       final state = await _startupService.initialize();
       controller.setLaunchAtStartupState(state.enabled, message: state.message);
@@ -132,7 +137,9 @@ class DesktopService with TrayListener, WindowListener {
   }
 
   Future<void> showQuick() async {
-    if (_changingMode || _exiting) return;
+    if (_changingMode || _exiting || screenshots.active || _recordingShortcut) {
+      return;
+    }
     _changingMode = true;
     final previousTarget = _quickVisible ? _quickPasteTarget : null;
     _quickEpoch++;
@@ -407,6 +414,10 @@ class DesktopService with TrayListener, WindowListener {
   }
 
   Future<String?> updateQuickShortcut(QuickShortcut shortcut) async {
+    if (screenshots.supported &&
+        shortcut.sameCombination(controller.screenshotShortcut)) {
+      return '该组合已用于截图';
+    }
     if (usesWinV) return '请先关闭固定 Win + V 快捷键';
     if (controller.shortcutModeChanging) return '正在切换快捷键，请稍候';
     if (_savingShortcut) return '正在保存快捷键，请稍候';
@@ -459,13 +470,14 @@ class DesktopService with TrayListener, WindowListener {
     }
   }
 
-  Future<String?> beginShortcutRecording() async {
-    if (usesWinV) return '请先关闭固定 Win + V 快捷键';
+  Future<String?> beginShortcutRecording({bool screenshot = false}) async {
+    if (usesWinV && !screenshot) return '请先关闭固定 Win + V 快捷键';
     if (controller.shortcutModeChanging) return '正在切换快捷键，请稍候';
     if (_recordingShortcut || _savingShortcut) return '正在编辑快捷键，请稍候';
     _recordingShortcut = true;
     final registered = _registeredShortcut;
     try {
+      await screenshots.suspendShortcut();
       if (registered != null) {
         await hotKeyManager.unregister(registered);
         _suspendedShortcut = registered;
@@ -474,6 +486,7 @@ class DesktopService with TrayListener, WindowListener {
       return null;
     } catch (_) {
       _recordingShortcut = false;
+      await screenshots.resumeShortcut();
       return '无法开始录入快捷键，请重试';
     }
   }
@@ -498,6 +511,7 @@ class DesktopService with TrayListener, WindowListener {
     } finally {
       _suspendedShortcut = null;
       _recordingShortcut = false;
+      await screenshots.resumeShortcut();
     }
   }
 
@@ -509,6 +523,7 @@ class DesktopService with TrayListener, WindowListener {
     _quickPasteTarget = null;
     // A failed tray/hotkey plugin must not prevent exit or an uninstall.
     for (final cleanup in <Future<void> Function()>[
+      screenshots.dispose,
       _stopWinV,
       hotKeyManager.unregisterAll,
       trayManager.destroy,
@@ -631,7 +646,10 @@ class DesktopService with TrayListener, WindowListener {
 
   @override
   void onWindowBlur() {
-    if (controller.quickMode && _quickVisible && !_changingMode) {
+    if (controller.quickMode &&
+        _quickVisible &&
+        !_changingMode &&
+        !screenshots.active) {
       unawaited(hide());
     }
   }

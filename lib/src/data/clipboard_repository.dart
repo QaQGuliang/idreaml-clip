@@ -56,7 +56,23 @@ class ClipboardRepository {
   Future<ClipboardItem?> captureText(String content) =>
       capture(ClipboardContent.text(content));
 
-  Future<ClipboardItem?> capture(ClipboardContent payload) async {
+  Future<ClipboardItem?> capture(ClipboardContent payload) => _capture(payload);
+
+  Future<ClipboardItem?> captureScreenshot(
+    String operationId,
+    ClipboardContent payload,
+  ) => _capture(payload, operationId: operationId);
+
+  Future<void> releaseScreenshotReceipt(String operationId) => _db.delete(
+    'screenshot_commit',
+    where: 'operation_id = ?',
+    whereArgs: [operationId],
+  );
+
+  Future<ClipboardItem?> _capture(
+    ClipboardContent payload, {
+    String? operationId,
+  }) async {
     if (payload.content.trim().isEmpty) return null;
     final content = payload.content;
     final deviceId = _deviceId ?? await initializeDevice();
@@ -64,6 +80,34 @@ class ClipboardRepository {
     final now = DateTime.now().millisecondsSinceEpoch;
 
     return _db.transaction((txn) async {
+      if (operationId != null) {
+        final receipts = await txn.query(
+          'screenshot_commit',
+          where: 'operation_id = ?',
+          whereArgs: [operationId],
+        );
+        if (receipts.isNotEmpty) {
+          if (receipts.single['content_hash'] != hash) {
+            throw StateError('截图提交内容与已完成结果不一致');
+          }
+          final rows = await txn.query(
+            'clipboard_item',
+            where: 'id = ?',
+            whereArgs: [receipts.single['item_id']],
+          );
+          return rows.isEmpty ? null : ClipboardItem.fromMap(rows.single);
+        }
+      }
+      Future<void> receipt(String id) async {
+        if (operationId == null) return;
+        await txn.insert('screenshot_commit', {
+          'operation_id': operationId,
+          'content_hash': hash,
+          'item_id': id,
+          'created_at': now,
+        });
+      }
+
       final existing = await txn.query(
         'clipboard_item',
         where: 'content_hash = ?',
@@ -92,6 +136,7 @@ class ClipboardRepository {
           where: 'id = ?',
           whereArgs: [id],
         );
+        await receipt(id);
         return ClipboardItem.fromMap(rows.single);
       }
 
@@ -110,6 +155,7 @@ class ClipboardRepository {
         where: 'id = ?',
         whereArgs: [id],
       );
+      await receipt(id);
       return ClipboardItem.fromMap(rows.single);
     });
   }

@@ -5,11 +5,13 @@ import 'package:flutter/services.dart';
 
 import 'data/clipboard_repository.dart';
 import 'models/clipboard_item.dart';
+import 'models/clipboard_content.dart';
 import 'models/sync_models.dart';
 import 'models/quick_shortcut.dart';
 import 'models/workspace_layout.dart';
 import 'services/sync_service.dart';
 import 'services/clipboard_service.dart';
+import 'services/async_gate.dart';
 
 enum AppPage { history, favorites, sync, devices, privacy, settings }
 
@@ -40,6 +42,13 @@ class AppController extends ChangeNotifier {
   String? shortcutError;
   WorkspaceLayout workspaceLayout = const WorkspaceLayout();
   int _writeGeneration = 0;
+  final _clipboardGate = AsyncGate();
+  final _copiedScreenshots = <String, String>{};
+  static const defaultScreenshotShortcut = QuickShortcut(
+    key: PhysicalKeyboardKey.f1,
+  );
+  QuickShortcut screenshotShortcut = defaultScreenshotShortcut;
+  String? screenshotError;
 
   List<ClipboardItem> history = const [];
   List<ClipboardItem> quickItems = const [];
@@ -48,7 +57,6 @@ class AppController extends ChangeNotifier {
   AppPage page = AppPage.history;
   bool quickMode = false;
   int quickSession = 0;
-  bool recordingEnabled = true;
   bool launchAtStartupEnabled = false;
   bool launchAtStartupChanging = false;
   String? launchAtStartupMessage;
@@ -82,6 +90,10 @@ class AppController extends ChangeNotifier {
     quickShortcut = QuickShortcut.decode(
       await repository.getSetting('quick_shortcut'),
     );
+    screenshotShortcut = QuickShortcut.decode(
+      await repository.getSetting('screenshot_shortcut'),
+      fallback: defaultScreenshotShortcut,
+    );
     winVShortcutEnabled =
         await repository.getSetting('win_v_shortcut_enabled') == 'true';
     quickCount =
@@ -93,17 +105,17 @@ class AppController extends ChangeNotifier {
     autoCleanupDays =
         int.tryParse(await repository.getSetting('auto_cleanup_days') ?? '') ??
         0;
-    recordingEnabled =
-        (await repository.getSetting('recording_enabled') ?? 'true') == 'true';
     await repository.cleanupOlderThan(autoCleanupDays);
     await repository.enforceHistoryLimit(historyLimit);
     await reload();
     await syncService.initialize();
     if (startMonitor) {
+      // Recording is always active; legacy recording_enabled settings are ignored.
       _monitor = Timer.periodic(
         const Duration(milliseconds: 700),
         (_) => pollClipboard(),
       );
+      unawaited(pollClipboard());
     }
     busy = false;
     notifyListeners();
@@ -130,10 +142,7 @@ class AppController extends ChangeNotifier {
   Future<void> disconnectSync() => syncService.disconnect();
 
   Future<void> pollClipboard() async {
-    if (!recordingEnabled ||
-        _readingClipboard ||
-        _writingClipboard ||
-        _disposed) {
+    if (_readingClipboard || _writingClipboard || _disposed) {
       return;
     }
     final sequence = clipboard.sequence;
@@ -143,7 +152,6 @@ class AppController extends ChangeNotifier {
     try {
       final contents = await clipboard.read();
       if (_disposed ||
-          !recordingEnabled ||
           _writingClipboard ||
           writeGeneration != _writeGeneration) {
         return;
@@ -151,14 +159,21 @@ class AppController extends ChangeNotifier {
       // A newer clipboard value arriving during decoding is read on the next poll.
       final signature = contents.map((content) => content.hash).join(':');
       if (sequence == null && signature == _lastSignature) return;
-      for (final content in contents) {
-        await repository.capture(content);
-      }
-      _lastSequence = clipboard.lastReadSequence ?? sequence;
-      _lastSignature = signature;
-      clipboardError = null;
-      await repository.enforceHistoryLimit(historyLimit);
-      await reload();
+      await _clipboardGate.run(() async {
+        if (_disposed ||
+            _writingClipboard ||
+            writeGeneration != _writeGeneration) {
+          return;
+        }
+        for (final content in contents) {
+          await repository.capture(content);
+        }
+        _lastSequence = clipboard.lastReadSequence ?? sequence;
+        _lastSignature = signature;
+        clipboardError = null;
+        await repository.enforceHistoryLimit(historyLimit);
+        await reload();
+      });
     } on PlatformException {
       // The clipboard can be temporarily locked; the next poll retries.
     } on FormatException catch (error) {
@@ -248,24 +263,75 @@ class AppController extends ChangeNotifier {
 
   Future<bool> useItem(ClipboardItem? item) async {
     if (item == null) return false;
-    _writingClipboard = true;
     _writeGeneration++;
-    try {
-      await clipboard.write(item.payload);
-      _lastSequence = clipboard.sequence;
-      copiedClipboardSequence = _lastSequence;
-      _lastSignature = item.payload.hash;
-      clipboardError = null;
-      await repository.markUsed(item.id);
-      await reload();
-      return true;
-    } on Exception {
-      clipboardError = '复制失败，请重试';
-      notifyListeners();
-      return false;
-    } finally {
-      _writingClipboard = false;
-    }
+    return _clipboardGate.run(() async {
+      _writingClipboard = true;
+      try {
+        await clipboard.write(item.payload);
+        _lastSequence = clipboard.lastWriteSequence ?? clipboard.sequence;
+        copiedClipboardSequence = _lastSequence;
+        _lastSignature = item.payload.hash;
+        clipboardError = null;
+        await repository.markUsed(item.id);
+        await reload();
+        return true;
+      } on Exception {
+        clipboardError = '复制失败，请重试';
+        notifyListeners();
+        return false;
+      } finally {
+        _writingClipboard = false;
+      }
+    });
+  }
+
+  bool screenshotWasCopied(String operationId) =>
+      _copiedScreenshots.containsKey(operationId);
+
+  Future<void> commitScreenshot(
+    String operationId,
+    ClipboardContent image,
+  ) async {
+    if (!image.isImage) throw ArgumentError('截图必须为图片');
+    _writeGeneration++;
+    await _clipboardGate.run(() async {
+      _writingClipboard = true;
+      try {
+        final previous = _copiedScreenshots[operationId];
+        if (previous != null && previous != image.hash) {
+          throw StateError('请先完成当前截图结果的处理');
+        }
+        if (previous == null) {
+          await clipboard.write(image);
+          _copiedScreenshots[operationId] = image.hash;
+          _lastSequence = clipboard.lastWriteSequence ?? clipboard.sequence;
+          _lastSignature = image.hash;
+        }
+        await repository.captureScreenshot(operationId, image);
+        await repository.enforceHistoryLimit(historyLimit);
+        await reload();
+      } finally {
+        _writingClipboard = false;
+      }
+    });
+  }
+
+  Future<void> releaseScreenshot(String operationId) async {
+    await _clipboardGate.run(() async {
+      _copiedScreenshots.remove(operationId);
+      await repository.releaseScreenshotReceipt(operationId);
+    });
+  }
+
+  void setScreenshotError(String? error) {
+    screenshotError = error;
+    if (!_disposed) notifyListeners();
+  }
+
+  Future<void> saveScreenshotShortcut(QuickShortcut shortcut) async {
+    await repository.setSetting('screenshot_shortcut', shortcut.encode());
+    screenshotShortcut = shortcut;
+    setScreenshotError(null);
   }
 
   Future<void> toggleFavorite(String id) async {
@@ -281,12 +347,6 @@ class AppController extends ChangeNotifier {
   Future<void> clearHistory() async {
     await repository.clearHistory();
     await reload();
-  }
-
-  Future<void> setRecording(bool value) async {
-    recordingEnabled = value;
-    await repository.setSetting('recording_enabled', '$value');
-    notifyListeners();
   }
 
   Future<void> setQuickCount(int value) async {

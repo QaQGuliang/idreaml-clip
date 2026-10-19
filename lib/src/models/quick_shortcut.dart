@@ -107,11 +107,12 @@ class QuickShortcut {
     'meta': meta,
   });
 
-  static QuickShortcut decode(String? value) {
+  static QuickShortcut decode(String? value, {QuickShortcut? fallback}) {
+    final defaultValue = fallback ?? platformDefault();
     try {
       final data = jsonDecode(value ?? '') as Map<String, dynamic>;
       final key = PhysicalKeyboardKey.findKeyByCode(data['key'] as int);
-      if (key == null) return platformDefault();
+      if (key == null) return defaultValue;
       final shortcut = QuickShortcut(
         key: key,
         control: data['control'] == true,
@@ -119,9 +120,9 @@ class QuickShortcut {
         shift: data['shift'] == true,
         meta: data['meta'] == true,
       );
-      return shortcut.isValid ? shortcut : platformDefault();
+      return shortcut.isValid ? shortcut : defaultValue;
     } on Object {
-      return platformDefault();
+      return defaultValue;
     }
   }
 

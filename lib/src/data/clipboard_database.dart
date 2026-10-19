@@ -24,12 +24,15 @@ class ClipboardDatabase {
     _database = await _factory!.openDatabase(
       databasePath,
       options: OpenDatabaseOptions(
-        version: 1,
+        version: 2,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
           await db.execute('PRAGMA journal_mode = WAL');
         },
         onCreate: _createSchema,
+        onUpgrade: (db, oldVersion, newVersion) async {
+          if (oldVersion < 2) await _createScreenshotReceipts(db);
+        },
       ),
     );
   }
@@ -44,6 +47,7 @@ class ClipboardDatabase {
   }
 
   Future<void> _createSchema(Database db, int version) async {
+    await _createScreenshotReceipts(db);
     await db.execute('''
       CREATE TABLE clipboard_item (
         id TEXT PRIMARY KEY,
@@ -96,4 +100,13 @@ class ClipboardDatabase {
   }
 
   Future<void> close() async => _database?.close();
+
+  Future<void> _createScreenshotReceipts(Database db) => db.execute('''
+    CREATE TABLE screenshot_commit (
+      operation_id TEXT PRIMARY KEY,
+      content_hash TEXT NOT NULL,
+      item_id TEXT NOT NULL,
+      created_at INTEGER NOT NULL
+    )
+  ''');
 }

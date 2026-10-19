@@ -1,7 +1,7 @@
 [CmdletBinding()]
 param(
     [string]$Flutter = 'flutter',
-    [string]$OutputDirectory = 'dist/windows',
+    [string]$OutputDirectory,
     [string]$RuntimeDirectory = "$env:WINDIR/System32",
     # Optional fallback: reuse an already validated native runner and plugins,
     # while compiling the current Dart code and assets in release mode.
@@ -42,7 +42,12 @@ try {
         throw 'Release notes version does not match pubspec.yaml.'
     }
     $packageName = "Idreaml-Clip-$version-windows-x64"
-    $outputRoot = [IO.Path]::GetFullPath((Join-Path $projectRoot $OutputDirectory))
+    if (-not $OutputDirectory) { $OutputDirectory = "dist/windows/$version" }
+    $outputRoot = if ([IO.Path]::IsPathRooted($OutputDirectory)) {
+        [IO.Path]::GetFullPath($OutputDirectory)
+    } else {
+        [IO.Path]::GetFullPath((Join-Path $projectRoot $OutputDirectory))
+    }
     $stage = Join-Path $outputRoot $packageName
     $archive = "$stage.zip"
     if ((Test-Path -LiteralPath $stage) -or (Test-Path -LiteralPath $archive)) {

@@ -69,15 +69,14 @@ void main() {
     await tester.tap(find.byTooltip('设置'));
     await tester.pumpAndSettle();
     expect(controller.page, AppPage.settings);
-    await tester.tap(find.byTooltip('暂停记录'));
-    await tester.pumpAndSettle();
-    expect(controller.recordingEnabled, isFalse);
-    expect(find.byTooltip('恢复记录'), findsOneWidget);
+    expect(find.byTooltip('暂停记录'), findsNothing);
+    expect(find.byTooltip('恢复记录'), findsNothing);
     await tester.drag(sidebarDivider, const Offset(160, 0));
     await tester.pumpAndSettle();
     expect(tester.getSize(sidebar).width, closeTo(232, .1));
     expect(find.text('设置'), findsNWidgets(2));
     expect(find.text('全部历史'), findsOneWidget);
+    expect(find.text('暂停记录'), findsNothing);
     expect(tester.takeException(), isNull);
   });
 
@@ -123,6 +122,8 @@ void main() {
     final expectedWidth = tester.getSize(history).width;
     await tester.tap(find.byTooltip('隐私'));
     await tester.pumpAndSettle();
+    expect(find.text('自动记录剪切板'), findsNothing);
+    expect(find.text('自动清理历史'), findsOneWidget);
     await tester.tap(find.byTooltip('全部历史'));
     await tester.pumpAndSettle();
     expect(tester.getSize(history).width, expectedWidth);

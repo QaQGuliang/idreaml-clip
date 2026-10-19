@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -12,6 +13,13 @@ import 'src/services/sync_service.dart';
 import 'src/services/clipboard_service.dart';
 import 'src/services/windows_clipboard_service.dart';
 import 'src/services/windows_app_instance.dart';
+import 'src/screenshot/screenshot_editor.dart';
+
+@pragma('vm:entry-point')
+void screenshotMain() {
+  WidgetsFlutterBinding.ensureInitialized();
+  runApp(const ScreenshotEditorApp());
+}
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -45,6 +53,9 @@ Future<void> main() async {
   runApp(
     IdreamlClipApp(controller: controller, desktopService: desktopService),
   );
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(desktopService.screenshots.warmUp());
+  });
   instance?.listen(
     onActivate: desktopService.showHistory,
     onShutdown: desktopService.exitApp,
