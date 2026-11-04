@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:ui' show ViewFocusDirection, ViewFocusEvent, ViewFocusState;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
@@ -6,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:image/image.dart' as img;
 import 'package:idreaml_clip/src/screenshot/screenshot_editor.dart';
+import 'package:idreaml_clip/src/screenshot/screenshot_color_picker.dart';
 
 void main() {
   const channel = MethodChannel('idreaml_clip/screenshot');
@@ -13,11 +15,13 @@ void main() {
   late Map<String, Object> commitReply;
   var scrollTop = 0, scrollWidth = 400, scrollHeight = 300;
   var failScrollStart = false;
+  var failColorCopy = false;
   setUp(() {
     calls = [];
     commitReply = {'success': true};
     scrollTop = 0;
     failScrollStart = false;
+    failColorCopy = false;
   });
 
   Future<void> settleImages(WidgetTester tester) async {
@@ -61,6 +65,9 @@ void main() {
       call,
     ) async {
       calls.add(call);
+      if (call.method == 'copyColor' && failColorCopy) {
+        throw PlatformException(code: 'clipboard', message: '无法复制');
+      }
       if (call.method == 'beginScroll' || call.method == 'scrollFrame') {
         if (call.method == 'beginScroll') {
           if (failScrollStart) {
@@ -107,6 +114,181 @@ void main() {
   }
 
   final toolbar = find.byKey(const ValueKey('screenshot-toolbar'));
+
+  testWidgets('无需点击截图画面，首次 Esc 取消，再次打开时 C 复制并退出', (tester) async {
+    await mount(tester);
+    Future<void> windowFocus(ViewFocusState state) async {
+      tester.binding.platformDispatcher.onViewFocusChange?.call(
+        ViewFocusEvent(
+          viewId: tester.view.viewId,
+          state: state,
+          direction: ViewFocusDirection.undefined,
+        ),
+      );
+      await tester.pump();
+    }
+
+    await windowFocus(ViewFocusState.focused);
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pump();
+    expect(calls.last.method, 'close');
+    expect(calls.last.arguments, 1);
+    expect(calls.where((c) => c.method == 'copyColor'), isEmpty);
+
+    await windowFocus(ViewFocusState.unfocused);
+    await fromHost(tester, 'reset', 1);
+    await fromHost(tester, 'start', snapshot(2));
+    await settleImages(tester);
+    await windowFocus(ViewFocusState.focused);
+    await fromHost(tester, 'localShortcut', {'session': 2, 'key': 'copyColor'});
+    final copy = calls.singleWhere((c) => c.method == 'copyColor');
+    expect(copy.arguments, {'token': 2, 'hex': '#FFFFFF'});
+    expect(calls.last.method, 'close');
+    expect(calls.last.arguments, 2);
+    expect(calls.where((c) => c.method == 'commit'), isEmpty);
+
+    await fromHost(tester, 'reset', 2);
+    await fromHost(tester, 'start', snapshot(3));
+    await settleImages(tester);
+    // The OS can deliver a key to the reopened HWND before Flutter restores
+    // its widget focus. Hiding a view parks focus at the root scope.
+    await windowFocus(ViewFocusState.unfocused);
+    final previousCloseCount = calls.where((c) => c.method == 'close').length;
+    await fromHost(tester, 'localShortcut', {'session': 2, 'key': 'escape'});
+    expect(
+      calls.where((c) => c.method == 'close'),
+      hasLength(previousCloseCount),
+    );
+    await fromHost(tester, 'localShortcut', {'session': 3, 'key': 'escape'});
+    expect(calls.last.method, 'close');
+    expect(calls.last.arguments, 3);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('贴图提交最终选区 PNG 和原屏幕位置', (tester) async {
+    await mount(tester);
+    await tester.tapAt(const Offset(100, 150));
+    await tester.pump();
+    await tester.tap(find.byTooltip('贴图并计入历史'));
+    await settleImages(tester);
+    final args =
+        calls.singleWhere((c) => c.method == 'commit').arguments as Map;
+    expect(args['pin'], true);
+    expect([args['x'], args['y']], [50, 100]);
+    final image = img.decodePng(args['png'] as Uint8List)!;
+    expect([image.width, image.height], [400, 300]);
+    expect(calls.last.method, 'close');
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('取色器从初始光标采样，框选和全屏后按物理像素取色，C 复制并退出', (tester) async {
+    await mount(tester, pending: false);
+    tester.view.devicePixelRatio = 1.5;
+    final data = snapshot(1);
+    data['initialCursorX'] = 27;
+    data['initialCursorY'] = 36;
+    final pixels = data['pixels']! as Uint8List;
+    pixels.setRange((36 * 800 + 27) * 4, (36 * 800 + 27) * 4 + 4, [
+      0x12,
+      0x34,
+      0x56,
+      255,
+    ]);
+    pixels.setRange((585 * 800 + 780) * 4, (585 * 800 + 780) * 4 + 4, [
+      0xAB,
+      0xCD,
+      0xEF,
+      255,
+    ]);
+    await fromHost(tester, 'start', data);
+    await settleImages(tester);
+    expect(find.text('#563412'), findsOneWidget);
+    expect(find.text('RGB(86, 52, 18)'), findsOneWidget);
+
+    await tester.dragFrom(const Offset(50, 100), const Offset(80, 70));
+    await tester.pump();
+    final picker = find.byKey(const ValueKey('screenshot-color-picker'));
+    expect(picker, findsOneWidget);
+    await tester.tap(find.byTooltip('当前屏幕全屏'));
+    await tester.pump();
+    expect(picker, findsOneWidget);
+    final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await pointer.addPointer(location: const Offset(510, 380));
+    await pointer.moveTo(const Offset(520, 390));
+    await tester.pump();
+    final card = tester.widget<ScreenshotColorPicker>(
+      find.byType(ScreenshotColorPicker),
+    );
+    expect(
+      card.pixel,
+      const Offset(780, 585),
+      reason: 'pointer ${card.anchor}',
+    );
+    expect(find.text('#EFCDAB'), findsOneWidget);
+    expect(tester.getRect(picker).right, lessThan(520));
+    expect(tester.getRect(picker).bottom, lessThanOrEqualTo(400));
+    failColorCopy = true;
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.pump();
+    expect(find.text('色值复制失败，按 C 重试'), findsOneWidget);
+    expect(calls.where((c) => c.method == 'close'), isEmpty);
+    failColorCopy = false;
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.pump();
+    final copy = calls.lastWhere((c) => c.method == 'copyColor');
+    expect(copy.arguments, {'token': 1, 'hex': '#EFCDAB'});
+    expect(calls.where((c) => c.method == 'commit'), isEmpty);
+    expect(calls.last.method, 'close');
+    await pointer.removePointer();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('取色器设置只决定初始状态，F2 只切换本次，文字输入和组合键不复制颜色', (tester) async {
+    await mount(tester, pending: false);
+    final picker = find.byKey(const ValueKey('screenshot-color-picker'));
+    await fromHost(tester, 'start', snapshot(1)..['showColorPicker'] = false);
+    await settleImages(tester);
+    expect(picker, findsNothing);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await fromHost(tester, 'localShortcut', {
+      'session': 1,
+      'key': 'togglePicker',
+    });
+    await tester.pump();
+    expect(picker, findsOneWidget);
+    await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+    await tester.tapAt(const Offset(100, 150));
+    await tester.pump();
+    await tester.tap(find.byTooltip('文字'));
+    await tester.pump();
+    await tester.tapAt(const Offset(120, 170));
+    await tester.pump();
+    expect(calls.lastWhere((c) => c.method == 'setLocalShortcuts').arguments, {
+      'session': 1,
+      'enabled': false,
+    });
+    await fromHost(tester, 'localShortcut', {'session': 1, 'key': 'copyColor'});
+    await fromHost(tester, 'localShortcut', {'session': 1, 'key': 'escape'});
+    await tester.sendKeyEvent(LogicalKeyboardKey.f2);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    expect(picker, findsOneWidget);
+    expect(calls.where((c) => c.method == 'copyColor'), isEmpty);
+    expect(calls.where((c) => c.method == 'close'), isEmpty);
+    await tester.tap(find.byTooltip('选择 / 调整'));
+    await tester.pump();
+    expect(calls.lastWhere((c) => c.method == 'setLocalShortcuts').arguments, {
+      'session': 1,
+      'enabled': true,
+    });
+    await fromHost(tester, 'reset', 1);
+    await fromHost(tester, 'start', snapshot(2)..['showColorPicker'] = false);
+    await settleImages(tester);
+    expect(picker, findsNothing);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
 
   testWidgets('长截图首次完成只进入编辑，第二次完成才提交合成后的长图', (tester) async {
     await mount(tester);
@@ -421,6 +603,13 @@ void main() {
     await tester.tap(find.byTooltip('取消（Esc）'));
     await tester.pumpAndSettle();
     expect(find.text('退出截图结果处理？'), findsOneWidget);
+    expect(calls.lastWhere((c) => c.method == 'setLocalShortcuts').arguments, {
+      'session': 1,
+      'enabled': false,
+    });
+    await fromHost(tester, 'localShortcut', {'session': 1, 'key': 'escape'});
+    expect(find.text('退出截图结果处理？'), findsOneWidget);
+    expect(calls.where((c) => c.method == 'close'), isEmpty);
     await fromHost(tester, 'reset', 1);
     await tester.pumpAndSettle();
     await fromHost(tester, 'start', snapshot(2));

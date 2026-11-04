@@ -9,6 +9,10 @@ FlutterWindow::FlutterWindow(const flutter::DartProject& project)
 
 FlutterWindow::~FlutterWindow() {}
 
+bool FlutterWindow::HandleScreenshotShortcut(const MSG& message) {
+  return screenshot_host_ && screenshot_host_->HandleShortcut(message);
+}
+
 bool FlutterWindow::OnCreate() {
   if (!Win32Window::OnCreate()) {
     return false;

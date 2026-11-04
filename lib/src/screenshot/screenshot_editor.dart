@@ -6,11 +6,14 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import 'screenshot_color_picker.dart';
 import 'screenshot_model.dart';
 import 'screenshot_renderer.dart';
 import 'scroll_capture_controller.dart';
 
 const _channel = MethodChannel('idreaml_clip/screenshot');
+
+enum _ScreenshotAction { copy, saveAs, pin }
 
 class ScreenshotEditorApp extends StatelessWidget {
   const ScreenshotEditorApp({super.key});
@@ -39,6 +42,7 @@ class _ScreenshotSessionHost extends StatefulWidget {
 
 class _ScreenshotSessionHostState extends State<_ScreenshotSessionHost> {
   Map<String, dynamic>? _snapshot;
+  GlobalKey<_ScreenshotEditorState>? _editorKey;
   int _generation = 0;
 
   @override
@@ -60,6 +64,7 @@ class _ScreenshotSessionHostState extends State<_ScreenshotSessionHost> {
     setState(() {
       _generation = session;
       _snapshot = data;
+      _editorKey = GlobalKey<_ScreenshotEditorState>();
     });
     // A reused hidden Windows view may have normal frame scheduling suspended.
     WidgetsBinding.instance.scheduleWarmUpFrame();
@@ -68,6 +73,11 @@ class _ScreenshotSessionHostState extends State<_ScreenshotSessionHost> {
   Future<void> _handle(MethodCall call) async {
     if (call.method == 'start') {
       _start(Map<String, dynamic>.from(call.arguments as Map));
+    } else if (call.method == 'localShortcut') {
+      final args = call.arguments as Map;
+      if (args['session'] == _generation && _snapshot != null) {
+        _editorKey?.currentState?._handleLocalShortcut(args['key'] as String);
+      }
     } else if (call.method == 'reset') {
       final session = call.arguments as int;
       if (mounted && session >= _generation) {
@@ -75,6 +85,7 @@ class _ScreenshotSessionHostState extends State<_ScreenshotSessionHost> {
         setState(() {
           _generation = session;
           _snapshot = null;
+          _editorKey = null;
         });
         WidgetsBinding.instance.scheduleWarmUpFrame();
       }
@@ -90,7 +101,7 @@ class _ScreenshotSessionHostState extends State<_ScreenshotSessionHost> {
   @override
   Widget build(BuildContext context) => _snapshot == null
       ? const SizedBox.shrink()
-      : ScreenshotEditor(key: ValueKey(_generation), snapshot: _snapshot!);
+      : ScreenshotEditor(key: _editorKey, snapshot: _snapshot!);
 }
 
 class ScreenshotEditor extends StatefulWidget {
@@ -114,6 +125,9 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
   int? _textId;
   Offset? _textOrigin;
   Offset _pointer = Offset.zero;
+  Uint8List? _frozenPixels;
+  bool _showColorPicker = true;
+  bool _currentRoute = true, _localShortcutsEnabled = true;
   Offset? _down;
   Rect? _originalRect;
   ScreenshotAnnotation? _originalObject;
@@ -122,7 +136,8 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
   String _drag = '';
   double _scale = 1;
   bool _busy = false, _locked = false, _rendering = false, _renderAgain = false;
-  bool _retrySaveAs = false;
+  _ScreenshotAction _pendingAction = _ScreenshotAction.copy;
+  Offset _captureOrigin = Offset.zero;
   String? _error;
   Timer? _renderTimer;
   List<ScreenshotAnnotation>? _renderedObjects;
@@ -145,12 +160,37 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
     unawaited(_load());
   }
 
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _currentRoute = ModalRoute.isCurrentOf(context) ?? true;
+    _updateLocalShortcuts();
+  }
+
+  void _updateLocalShortcuts() {
+    final enabled = _textOrigin == null && _currentRoute;
+    if (enabled == _localShortcutsEnabled) return;
+    _localShortcutsEnabled = enabled;
+    unawaited(
+      _channel.invokeMethod<void>('setLocalShortcuts', {
+        'session': widget.snapshot['session'],
+        'enabled': enabled,
+      }),
+    );
+  }
+
   Future<void> _load() async {
     try {
       final data = widget.snapshot;
+      _showColorPicker = data['showColorPicker'] as bool? ?? true;
+      _pointer = Offset(
+        (data['initialCursorX'] as num? ?? 0).toDouble(),
+        (data['initialCursorY'] as num? ?? 0).toDouble(),
+      );
+      _frozenPixels = data.remove('pixels') as Uint8List;
       final ready = Completer<ui.Image>();
       ui.decodeImageFromPixels(
-        data.remove('pixels') as Uint8List,
+        _frozenPixels!,
         data['width'] as int,
         data['height'] as int,
         ui.PixelFormat.bgra8888,
@@ -235,6 +275,50 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
   }
 
   Offset _point(Offset local) => _model!.clampPoint(local / _scale);
+
+  // A physical pixel mapped through fractional display scaling can round
+  // just below its original integer position.
+  Offset get _samplePixel => Offset(
+    (_pointer.dx + precisionErrorTolerance).floorToDouble().clamp(
+      0,
+      _background!.width - 1.0,
+    ),
+    (_pointer.dy + precisionErrorTolerance).floorToDouble().clamp(
+      0,
+      _background!.height - 1.0,
+    ),
+  );
+
+  int get _sampleRgb {
+    final pixel = _samplePixel;
+    final i = (pixel.dy.toInt() * _background!.width + pixel.dx.toInt()) * 4;
+    final bgra = _frozenPixels!;
+    return (bgra[i + 2] << 16) | (bgra[i + 1] << 8) | bgra[i];
+  }
+
+  void _trackPointer(PointerEvent event) {
+    final point = _point(event.localPosition);
+    if (point != _pointer) setState(() => _pointer = point);
+  }
+
+  Future<void> _copyColor() async {
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
+    try {
+      await _channel.invokeMethod<void>('copyColor', {
+        'token': widget.snapshot['session'],
+        'hex': screenshotHex(_sampleRgb),
+      });
+      if (mounted) await _saveStylesAndClose();
+    } on Object {
+      if (mounted) setState(() => _error = '色值复制失败，按 C 重试');
+    } finally {
+      if (mounted) setState(() => _busy = false);
+    }
+  }
+
   void _startToolbarDrag(DragStartDetails details) {
     final canvas = _canvasKey.currentContext!.findRenderObject()! as RenderBox;
     final toolbar =
@@ -325,12 +409,14 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
     _renderTimer?.cancel();
     _renderTimer = null;
     _model!.removeListener(_changed);
+    _captureOrigin = capture.selection.topLeft;
     _model!.dispose();
     _background?.dispose();
     _composite?.dispose();
     _composite = null;
     _renderedObjects = null;
     _background = background;
+    _frozenPixels = null;
     _model =
         ScreenshotModel(
             Size(width.toDouble(), height.toDouble()),
@@ -519,6 +605,7 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
     _commitText();
     _textId = object?.id;
     _textOrigin = origin;
+    _updateLocalShortcuts();
     _text.text = object?.text ?? '';
     setState(() {});
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -550,6 +637,7 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
       );
     }
     _textOrigin = null;
+    _updateLocalShortcuts();
     _textId = null;
     m.end();
     _textFocus.unfocus();
@@ -563,7 +651,7 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
         context: context,
         builder: (context) => AlertDialog(
           title: const Text('退出截图结果处理？'),
-          content: Text('${_error ?? '截图有部分步骤已完成'}\n退出后保留已完成的文件或复制结果。'),
+          content: Text('${_error ?? '截图有部分步骤已完成'}\n退出后将保留已完成的操作。'),
           actions: [
             TextButton(
               onPressed: () => Navigator.pop(context, false),
@@ -578,6 +666,11 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
       );
       if (leave != true) return;
     }
+    await _saveStylesAndClose();
+  }
+
+  Future<void> _saveStylesAndClose() async {
+    final session = widget.snapshot['session'];
     try {
       if (_model != null) {
         await _channel.invokeMethod<void>('styles', _model!.encodeStyles());
@@ -585,10 +678,12 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
     } on Object {
       /* Style persistence must not prevent cancellation. */
     }
-    await _channel.invokeMethod<void>('close', widget.snapshot['session']);
+    await _channel.invokeMethod<void>('close', session);
   }
 
-  Future<void> _finish({bool saveAs = false}) async {
+  Future<void> _finish({
+    _ScreenshotAction action = _ScreenshotAction.copy,
+  }) async {
     final m = _model;
     if (_busy ||
         m == null ||
@@ -604,10 +699,19 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
     });
     try {
       final png = await exportScreenshot(_background!, m.snapshot);
-      if (!_locked) _retrySaveAs = saveAs;
+      if (!_locked) _pendingAction = action;
+      final origin = _longImage ? _captureOrigin : m.selection!.topLeft;
       final response = await _channel.invokeMapMethod<String, dynamic>(
         'commit',
-        {'png': png, 'saveAs': _retrySaveAs},
+        {
+          'png': png,
+          'saveAs': _pendingAction == _ScreenshotAction.saveAs,
+          if (_pendingAction == _ScreenshotAction.pin) ...{
+            'pin': true,
+            'x': origin.dx.round(),
+            'y': origin.dy.round(),
+          },
+        },
       );
       if (!mounted) return;
       if (response?['success'] == true) {
@@ -627,6 +731,43 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
       if (mounted) setState(() => _error = '无法完成截图，请重试');
     } finally {
       if (mounted) setState(() => _busy = false);
+    }
+  }
+
+  void _handleLocalShortcut(String command) {
+    // Recheck on delivery: the native key may have been queued before a text
+    // field or popup took over, or while the editor was completing a capture.
+    if (_busy ||
+        _textOrigin != null ||
+        ModalRoute.of(context)?.isCurrent != true) {
+      return;
+    }
+    switch (command) {
+      case 'escape':
+        _escapeCanvas();
+      case 'copyColor':
+        if (_canPickColor && _showColorPicker) unawaited(_copyColor());
+      case 'togglePicker':
+        if (_canPickColor) _togglePicker();
+    }
+  }
+
+  bool get _canPickColor =>
+      _model != null && _editable && !_longImage && _scrollCapture == null;
+
+  void _togglePicker() => setState(() => _showColorPicker = !_showColorPicker);
+
+  void _escapeCanvas() {
+    final m = _model;
+    if (m != null && m.hasGesture && _scrollCapture == null) {
+      m.cancelGesture();
+      _down = null;
+      _drag = '';
+    } else if (m?.selectedId != null && _scrollCapture == null) {
+      m!.selectedId = null;
+      m.changed();
+    } else {
+      unawaited(_close());
     }
   }
 
@@ -654,17 +795,25 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
       }
       return KeyEventResult.ignored;
     }
-    if (key == LogicalKeyboardKey.escape) {
-      if (m.hasGesture) {
-        m.cancelGesture();
-        _down = null;
-        _drag = '';
-      } else if (m.selectedId != null) {
-        m.selectedId = null;
-        m.changed();
-      } else {
-        unawaited(_close());
+    final keyboard = HardwareKeyboard.instance;
+    if (_canPickColor &&
+        !keyboard.isControlPressed &&
+        !keyboard.isAltPressed &&
+        !keyboard.isShiftPressed &&
+        !keyboard.isMetaPressed) {
+      if (key == LogicalKeyboardKey.f2) {
+        if (event is KeyDownEvent) {
+          _togglePicker();
+        }
+        return KeyEventResult.handled;
       }
+      if (_showColorPicker && key == LogicalKeyboardKey.keyC) {
+        if (event is KeyDownEvent) unawaited(_copyColor());
+        return KeyEventResult.handled;
+      }
+    }
+    if (key == LogicalKeyboardKey.escape) {
+      _escapeCanvas();
     } else if (key == LogicalKeyboardKey.enter) {
       if (!_longImage || event is KeyDownEvent) unawaited(_finish());
     } else if (!_editable) {
@@ -730,7 +879,7 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
           final textObject = _textId == null
               ? null
               : m.annotations.firstWhere((a) => a.id == _textId);
-          return Stack(
+          final canvas = Stack(
             key: _canvasKey,
             children: [
               Positioned.fill(
@@ -738,8 +887,6 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
                   cursor: m.tool == ScreenshotTool.select && selected != null
                       ? SystemMouseCursors.basic
                       : SystemMouseCursors.precise,
-                  onHover: (event) =>
-                      setState(() => _pointer = _point(event.localPosition)),
                   child: GestureDetector(
                     behavior: HitTestBehavior.opaque,
                     onDoubleTapDown: (details) {
@@ -770,11 +917,6 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
                           model: m,
                           scale: _scale,
                           candidate: selected == null ? _candidate : null,
-                          pointer: _pointer,
-                          magnify:
-                              selected == null ||
-                              _drag == 'newSelection' ||
-                              _drag == 'resize',
                         ),
                       ),
                     ),
@@ -865,7 +1007,18 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
                 const Positioned(
                   bottom: 24,
                   left: 24,
-                  child: IgnorePointer(child: Text('拖动框选 · 单击选择窗口 · Esc 取消')),
+                  child: IgnorePointer(
+                    child: Text('拖动框选 · 单击选择窗口 · F2 取色器 · Esc 取消'),
+                  ),
+                ),
+              if (_showColorPicker)
+                Positioned.fill(
+                  child: ScreenshotColorPicker(
+                    image: _background!,
+                    pixel: _samplePixel,
+                    rgb: _sampleRgb,
+                    anchor: _pointer * _scale,
+                  ),
                 ),
               if (_error != null)
                 Positioned(
@@ -882,6 +1035,11 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
                   ),
                 ),
             ],
+          );
+          return Listener(
+            onPointerHover: _trackPointer,
+            onPointerMove: _trackPointer,
+            child: canvas,
           );
         },
       ),
@@ -1146,8 +1304,6 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
                     model: m,
                     scale: _scale,
                     candidate: null,
-                    pointer: _pointer,
-                    magnify: false,
                   ),
                 ),
               ),
@@ -1230,7 +1386,10 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
                 ),
               ),
             Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 30, vertical: 6),
+              padding: EdgeInsets.symmetric(
+                horizontal: fullScreen ? 30 : 8,
+                vertical: 6,
+              ),
               child: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -1303,12 +1462,21 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
                                 ),
                         ),
                       button(
+                        Icons.push_pin_outlined,
+                        '贴图并计入历史',
+                        selected &&
+                                _editable &&
+                                (!_longImage || _longFinishArmed)
+                            ? () => _finish(action: _ScreenshotAction.pin)
+                            : null,
+                      ),
+                      button(
                         Icons.save_alt,
                         '另存为并完成',
                         selected &&
                                 !_locked &&
                                 (!_longImage || _longFinishArmed)
-                            ? () => _finish(saveAs: true)
+                            ? () => _finish(action: _ScreenshotAction.saveAs)
                             : null,
                       ),
                       button(Icons.close, '取消（Esc）', _close),
@@ -1572,15 +1740,11 @@ class _EditorPainter extends CustomPainter {
     required this.model,
     required this.scale,
     required this.candidate,
-    required this.pointer,
-    required this.magnify,
   });
   final ui.Image image;
   final ScreenshotModel model;
   final double scale;
   final Rect? candidate;
-  final Offset pointer;
-  final bool magnify;
   @override
   void paint(Canvas canvas, Size size) {
     canvas.save();
@@ -1631,46 +1795,6 @@ class _EditorPainter extends CustomPainter {
       }
     }
     canvas.restore();
-    if (magnify) {
-      final at = pointer * scale;
-      final target = Rect.fromLTWH(
-        (at.dx + 22).clamp(0, math.max(0, size.width - 124)),
-        (at.dy + 22).clamp(0, math.max(0, size.height - 124)),
-        120,
-        120,
-      );
-      final source = Rect.fromCenter(
-        center: pointer,
-        width: 30,
-        height: 30,
-      ).intersect(model.screen);
-      if (!source.isEmpty) {
-        canvas.drawRect(target, Paint()..color = Colors.black);
-        canvas.drawImageRect(
-          image,
-          source,
-          target,
-          Paint()..filterQuality = FilterQuality.none,
-        );
-        canvas.drawRect(
-          target,
-          Paint()
-            ..style = PaintingStyle.stroke
-            ..strokeWidth = 2
-            ..color = Colors.white,
-        );
-        canvas.drawLine(
-          target.centerLeft,
-          target.centerRight,
-          Paint()..color = const Color(0xAAFF0000),
-        );
-        canvas.drawLine(
-          target.topCenter,
-          target.bottomCenter,
-          Paint()..color = Colors.red,
-        );
-      }
-    }
   }
 
   @override

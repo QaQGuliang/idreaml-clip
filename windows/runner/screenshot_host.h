@@ -6,10 +6,12 @@
 #include <flutter/method_channel.h>
 #include <flutter/encodable_value.h>
 #include <windows.h>
+#include "pinned_image.h"
 #include "scroll_capture.h"
 
 #include <memory>
 #include <cstdint>
+#include <set>
 
 // A separate engine/window preserves the clipboard window during hotkey capture.
 class ScreenshotHost {
@@ -19,6 +21,7 @@ class ScreenshotHost {
                  const flutter::DartProject& project);
   ~ScreenshotHost();
   void Close();
+  bool HandleShortcut(const MSG& message);
 
  private:
   using Value = flutter::EncodableValue;
@@ -39,6 +42,9 @@ class ScreenshotHost {
   RECT screen_{};
   bool prepared_ = false;
   bool active_ = false;
+  bool local_shortcuts_ = false;
+  std::set<WPARAM> consumed_keys_;
+  bool pinned_ = false;
   bool editor_ready_ = false;
   bool positioning_ = false;
   bool wait_for_compositor_ = false;
@@ -54,6 +60,7 @@ class ScreenshotHost {
   std::unique_ptr<flutter::MethodChannel<Value>> editor_channel_;
   std::unique_ptr<flutter::FlutterViewController> editor_;
   std::unique_ptr<ScrollCapture> scroll_;
+  PinnedImages pins_;
 };
 
 #endif

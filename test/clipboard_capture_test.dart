@@ -211,6 +211,21 @@ void main() {
     );
   });
 
+  test('截图取色器默认开启，重启后恢复用户选择', () async {
+    expect(controller.showScreenshotColorPicker, isTrue);
+    await controller.saveShowScreenshotColorPicker(false);
+    final next = AppController(
+      repository,
+      SyncService(repository, _Credentials()),
+      clipboard: _Clipboard(),
+    );
+    addTearDown(next.dispose);
+    await next.initialize(startMonitor: false);
+    expect(next.showScreenshotColorPicker, isFalse);
+    await next.saveShowScreenshotColorPicker(true);
+    expect(await repository.getSetting('show_screenshot_color_picker'), 'true');
+  });
+
   test('重新初始化应用会恢复 Win+V 开关和独立保存的自定义快捷键', () async {
     expect(controller.winVShortcutEnabled, isFalse);
     const shortcut = QuickShortcut(

@@ -49,6 +49,7 @@ class AppController extends ChangeNotifier {
     key: PhysicalKeyboardKey.f1,
   );
   QuickShortcut screenshotShortcut = defaultScreenshotShortcut;
+  bool showScreenshotColorPicker = true;
   String? screenshotError;
   bool runAsAdministratorEnabled = false;
   bool isAdministrator = false;
@@ -142,6 +143,7 @@ class AppController extends ChangeNotifier {
       'workspace_layout',
       'quick_shortcut',
       'screenshot_shortcut',
+      'show_screenshot_color_picker',
       'win_v_shortcut_enabled',
       'quick_count',
       'history_limit',
@@ -153,6 +155,8 @@ class AppController extends ChangeNotifier {
       settings['screenshot_shortcut'],
       fallback: defaultScreenshotShortcut,
     );
+    showScreenshotColorPicker =
+        settings['show_screenshot_color_picker'] != 'false';
     winVShortcutEnabled = settings['win_v_shortcut_enabled'] == 'true';
     quickCount = int.tryParse(settings['quick_count'] ?? '') ?? 30;
     if (!_quickCounts.contains(quickCount)) quickCount = 30;
@@ -446,13 +450,20 @@ class AppController extends ChangeNotifier {
           _lastSequence = clipboard.lastWriteSequence ?? clipboard.sequence;
           _lastSignature = hash;
         }
-        await repository.captureScreenshot(operationId, image);
-        await repository.enforceHistoryLimit(historyLimit);
-        await reload();
+        await recordScreenshot(operationId, image);
       } finally {
         _writingClipboard = false;
       }
     });
+  }
+
+  Future<void> recordScreenshot(
+    String operationId,
+    ClipboardContent image,
+  ) async {
+    await repository.captureScreenshot(operationId, image);
+    await repository.enforceHistoryLimit(historyLimit);
+    await reload();
   }
 
   Future<void> releaseScreenshot(String operationId) async {
@@ -471,6 +482,12 @@ class AppController extends ChangeNotifier {
     await repository.setSetting('screenshot_shortcut', shortcut.encode());
     screenshotShortcut = shortcut;
     setScreenshotError(null);
+  }
+
+  Future<void> saveShowScreenshotColorPicker(bool enabled) async {
+    await repository.setSetting('show_screenshot_color_picker', '$enabled');
+    showScreenshotColorPicker = enabled;
+    if (!_disposed) notifyListeners();
   }
 
   Future<void> toggleFavorite(String id) async {

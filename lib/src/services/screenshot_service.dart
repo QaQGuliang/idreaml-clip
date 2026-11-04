@@ -35,6 +35,7 @@ class ScreenshotService {
   Uint8List? _pendingPng;
   String? _savedPath;
   bool _saveMode = false;
+  bool _pinned = false;
   Future<void>? _commitFinished;
   String _styles = '{}';
 
@@ -72,13 +73,17 @@ class ScreenshotService {
     _pendingPng = null;
     _savedPath = null;
     _saveMode = false;
+    _pinned = false;
     try {
       await channel.invokeMethod<void>('prepare', {
         if (buttonPoint != null) 'x': buttonPoint.dx,
         if (buttonPoint != null) 'y': buttonPoint.dy,
       });
       if (hidePanel != null) await hidePanel();
-      await channel.invokeMethod<void>('open', {'styles': _styles});
+      await channel.invokeMethod<void>('open', {
+        'styles': _styles,
+        'showColorPicker': controller.showScreenshotColorPicker,
+      });
       controller.setScreenshotError(null);
     } on Object {
       active = false;
@@ -88,6 +93,18 @@ class ScreenshotService {
   }
 
   Future<Object?> _handle(MethodCall call) async {
+    if (call.method == 'copyPinnedImage' && !_disposed) {
+      final png = call.arguments as Uint8List;
+      await controller.clipboard.write(
+        ClipboardContent.image(png, 'image/png'),
+      );
+      return null;
+    }
+    if (call.method == 'copyColor' && active && !_disposed) {
+      final hex = (call.arguments as Map)['hex'] as String;
+      await controller.clipboard.write(ClipboardContent.text(hex));
+      return null;
+    }
     if (call.method == 'closed') {
       final session = _session;
       try {
@@ -121,6 +138,22 @@ class ScreenshotService {
       if (png.length > maxClipboardImageBytes ||
           imageMimeType(png) != 'image/png') {
         throw const FormatException('截图无法输出，请缩小选区后重试');
+      }
+      final image = ClipboardContent.image(png, 'image/png');
+      if (_pinned ||
+          (args['pin'] == true &&
+              _savedPath == null &&
+              !controller.screenshotWasCopied(_session!))) {
+        if (!_pinned) {
+          await channel.invokeMethod<void>('pinImage', {
+            'png': png,
+            'x': args['x'],
+            'y': args['y'],
+          });
+          _pinned = true;
+        }
+        await controller.recordScreenshot(_session!, image);
+        return {'success': true};
       }
       if (_savedPath == null && !controller.screenshotWasCopied(_session!)) {
         _saveMode = args['saveAs'] == true;
@@ -164,17 +197,15 @@ class ScreenshotService {
           /* The exported image remains valid. */
         }
       }
-      await controller.commitScreenshot(
-        _session!,
-        ClipboardContent.image(png, 'image/png'),
-      );
+      await controller.commitScreenshot(_session!, image);
       return {'success': true};
     } on Object catch (error) {
       final copied =
           _session != null && controller.screenshotWasCopied(_session!);
-      final locked = _savedPath != null || copied;
+      final locked = _savedPath != null || copied || _pinned;
       if (!locked) _pendingPng = null;
       final prefix = [
+        if (_pinned) '贴图已显示',
         if (_savedPath != null) '副本已保存',
         if (copied) '图片已复制',
       ].join('，');

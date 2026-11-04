@@ -1756,6 +1756,23 @@ class _SettingsPage extends StatelessWidget {
                 ),
               ),
               const Divider(height: 1),
+              _SettingRow(
+                title: '开始截图时显示取色器',
+                subtitle: '截图中按 F2 临时显示或隐藏，按 C 复制当前 HEX 色值并退出',
+                trailing: Switch(
+                  value: controller.showScreenshotColorPicker,
+                  onChanged: (enabled) async {
+                    try {
+                      await controller.saveShowScreenshotColorPicker(enabled);
+                    } catch (_) {
+                      if (context.mounted) {
+                        showMessage(context, '取色器设置保存失败，请重试');
+                      }
+                    }
+                  },
+                ),
+              ),
+              const Divider(height: 1),
             ],
             _SettingRow(
               title: '快捷面板显示数量',

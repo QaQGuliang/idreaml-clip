@@ -165,12 +165,39 @@ void main() {
     await service.start();
     expect(service.active, isTrue);
     expect(opened?['styles'], '{}');
+    expect(opened?['showColorPicker'], true);
     const styles = '{"rectangle":{"color":4278190080}}';
     await fromEditor('styles', styles);
     await fromEditor('closed');
+    await controller.saveShowScreenshotColorPicker(false);
     await service.start();
     expect(opened?['styles'], styles);
+    expect(opened?['showColorPicker'], false);
     expect(await repository.getSetting('screenshot_styles'), styles);
+  });
+
+  test('贴图保留剪切板，历史写入失败后重试不重复创建浮窗', () async {
+    clipboard.content = const ClipboardContent.text('原内容');
+    await service.start();
+    await database.database.execute('''
+      CREATE TRIGGER fail_receipt BEFORE INSERT ON screenshot_commit
+      BEGIN SELECT RAISE(ABORT, 'test'); END
+    ''');
+    final request = {'png': png, 'pin': true, 'x': 120, 'y': 32};
+    final first = await fromEditor('commit', request) as Map;
+    expect(first['locked'], isTrue);
+    expect(first['error'], contains('贴图已显示'));
+    await database.database.execute('DROP TRIGGER fail_receipt');
+    final retry = await fromEditor('commit', request) as Map;
+    expect(retry['success'], true);
+    expect(calls.where((c) => c == 'pinImage'), hasLength(1));
+    expect(controller.history.single.payload.imageBytes, png);
+    expect(controller.history.single.copyCount, 1);
+    expect(clipboard.writes, 0);
+    expect(clipboard.content!.content, '原内容');
+    await fromEditor('closed');
+    await fromEditor('copyPinnedImage', png);
+    expect(clipboard.content!.imageBytes, png);
   });
 
   test('另存为成功同时复制及入库，普通完成不出现文件对话框', () async {

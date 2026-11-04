@@ -23,6 +23,15 @@ const Value* Field(const Map& map, const char* key) {
   return it == map.end() ? nullptr : &it->second;
 }
 
+bool Integer(const Map* map, const char* key, int64_t* out) {
+  const auto* value = map ? Field(*map, key) : nullptr;
+  if (value) {
+    if (auto v = std::get_if<int32_t>(value)) { *out = *v; return true; }
+    if (auto v = std::get_if<int64_t>(value)) { *out = *v; return true; }
+  }
+  return false;
+}
+
 std::wstring Wide(const std::string& text) {
   int count = MultiByteToWideChar(CP_UTF8, 0, text.data(),
                                 static_cast<int>(text.size()), nullptr, 0);
@@ -122,6 +131,7 @@ void ScreenshotHost::HandleMain(const flutter::MethodCall<Value>& call,
     }
     screen_ = monitor.rcMonitor;
     ++session_;
+    pinned_ = false;
     wait_for_compositor_ = args && Field(*args, "x");
     previous_foreground_ = GetForegroundWindow();
     prepared_ = true;
@@ -134,6 +144,7 @@ void ScreenshotHost::HandleMain(const flutter::MethodCall<Value>& call,
     snapshot_[Value("session")] = Value(session_);
     if (args) {
       if (auto styles = Field(*args, "styles")) snapshot_[Value("styles")] = *styles;
+      if (auto picker = Field(*args, "showColorPicker")) snapshot_[Value("showColorPicker")] = *picker;
     }
     if (!EnsureEditor()) {
       DestroyEditor();
@@ -147,11 +158,44 @@ void ScreenshotHost::HandleMain(const flutter::MethodCall<Value>& call,
                  SWP_NOACTIVATE);
     positioning_ = false;
     active_ = true;
+    local_shortcuts_ = false;
+    consumed_keys_.clear();
     SetTimer(window_, 1, 15000, nullptr);
     if (editor_ready_) {
       editor_channel_->InvokeMethod("start", std::make_unique<Value>(std::move(snapshot_)));
       snapshot_.clear();
     }
+    result->Success();
+  } else if (method == "pinImage") {
+    if (!active_) { result->Error("state", "截图窗口已关闭"); return; }
+    if (pinned_) { result->Success(); return; }
+    const auto* value = args ? Field(*args, "png") : nullptr;
+    const auto* png = value ? std::get_if<std::vector<uint8_t>>(value) : nullptr;
+    int64_t x, y;
+    if (!png || !Integer(args, "x", &x) || !Integer(args, "y", &y) ||
+        x < 0 || y < 0 || x >= screen_.right - screen_.left || y >= screen_.bottom - screen_.top) {
+      result->Error("region", "贴图内容或位置无效"); return;
+    }
+    const POINT origin{screen_.left + static_cast<LONG>(x), screen_.top + static_cast<LONG>(y)};
+    const auto copy = [this](HWND window, const std::vector<uint8_t>& image) {
+      const auto failed = [window, alive = alive_]() {
+        if (*alive && IsWindow(window)) {
+          MessageBoxW(window, L"无法复制贴图，请重试。", L"理梦剪藏", MB_OK | MB_ICONWARNING);
+        }
+      };
+      main_channel_->InvokeMethod("copyPinnedImage", std::make_unique<Value>(image),
+          std::make_unique<flutter::MethodResultFunctions<Value>>(
+              [](const Value*) {},
+              [failed](const std::string&, const std::string&, const Value*) { failed(); },
+              failed));
+    };
+    if (!pins_.Show(*png, origin, screen_, copy)) {
+      result->Error("window", "无法显示贴图，请重试"); return;
+    }
+    // Keep the editor reachable if history storage fails after pinning a full screen.
+    // Closing the session hides it and reveals the pinned window underneath.
+    SetWindowPos(window_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    pinned_ = true;
     result->Success();
   } else if (method == "chooseSavePath") {
     if (!active_) { result->Error("state", "截图窗口已关闭"); return; }
@@ -219,6 +263,11 @@ bool ScreenshotHost::Capture() {
       snapshot_[Value("pixels")] = Value(std::move(image));
       snapshot_[Value("width")] = Value(width);
       snapshot_[Value("height")] = Value(height);
+      POINT cursor{};
+      if (GetCursorPos(&cursor) && PtInRect(&screen_, cursor)) {
+        snapshot_[Value("initialCursorX")] = Value(static_cast<int32_t>(cursor.x - screen_.left));
+        snapshot_[Value("initialCursorY")] = Value(static_cast<int32_t>(cursor.y - screen_.top));
+      }
       WindowCandidates candidates{screen_, {}};
       EnumWindows(CollectWindows, reinterpret_cast<LPARAM>(&candidates));
       snapshot_[Value("windows")] = Value(std::move(candidates.windows));
@@ -270,18 +319,67 @@ bool ScreenshotHost::EnsureEditor() {
   return true;
 }
 
+// Run before TranslateMessage so an intercepted C cannot generate a WM_CHAR.
+// Route only the editor's own input, leaving normal typing and IME to Flutter.
+bool ScreenshotHost::HandleShortcut(const MSG& message) {
+  if (message.message != WM_KEYDOWN && message.message != WM_KEYUP) return false;
+  const char* action;
+  switch (message.wParam) {
+    case VK_ESCAPE: action = "escape"; break;
+    case VK_F2: action = "togglePicker"; break;
+    case 'C': action = "copyColor"; break;
+    default: return false;
+  }
+  if (!active_ || scroll_ || !IsWindowVisible(window_) || GetForegroundWindow() != window_) {
+    return false;
+  }
+  const HWND child = editor_->view()->GetNativeWindow();
+  const HWND focus = GetFocus();
+  if ((message.hwnd != child && message.hwnd != window_) ||
+      (focus != child && focus != window_)) return false;
+
+  if (message.message == WM_KEYUP) return consumed_keys_.erase(message.wParam) != 0;
+  if (message.lParam & (1L << 30)) return consumed_keys_.count(message.wParam) != 0;
+  consumed_keys_.erase(message.wParam);  // An earlier release may have gone to another window.
+  if (!local_shortcuts_ ||
+      (GetKeyState(VK_CONTROL) | GetKeyState(VK_SHIFT) | GetKeyState(VK_MENU) |
+       GetKeyState(VK_LWIN) | GetKeyState(VK_RWIN)) & 0x8000) return false;
+
+  consumed_keys_.insert(message.wParam);
+  editor_channel_->InvokeMethod("localShortcut", std::make_unique<Value>(Map{
+      {Value("session"), Value(session_)}, {Value("key"), Value(action)}}));
+  return true;
+}
+
 void ScreenshotHost::HandleEditor(const flutter::MethodCall<Value>& call,
                                   std::unique_ptr<Result> result) {
   const auto& name = call.method_name();
+  const auto* args = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
+  if (name == "setLocalShortcuts") {
+    int64_t session = 0;
+    const auto* value = args ? Field(*args, "enabled") : nullptr;
+    const auto* enabled = value ? std::get_if<bool>(value) : nullptr;
+    if (active_ && Integer(args, "session", &session) && session == session_ && enabled) {
+      local_shortcuts_ = *enabled;
+    }
+    result->Success();
+    return;
+  }
+  if (name == "copyColor") {
+    int64_t session = 0;
+    if (!active_ || scroll_ || !Integer(args, "token", &session) || session != session_) {
+      result->Error("state", "取色会话已结束"); return;
+    }
+    const auto* value = Field(*args, "hex");
+    const auto* hex = value ? std::get_if<std::string>(value) : nullptr;
+    if (!hex || hex->size() != 7 || hex->front() != '#' ||
+        hex->find_first_not_of("0123456789ABCDEFabcdef", 1) != std::string::npos) {
+      result->Error("color", "颜色值无效"); return;
+    }
+  }
   if (name == "beginScroll" || name == "scrollFrame") {
-    const auto* args = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
     auto integer = [&](const char* key, int64_t* out) {
-      const auto* value = args ? Field(*args, key) : nullptr;
-      if (value) {
-        if (auto v = std::get_if<int32_t>(value)) { *out = *v; return true; }
-        if (auto v = std::get_if<int64_t>(value)) { *out = *v; return true; }
-      }
-      return false;
+      return Integer(args, key, out);
     };
     int64_t session = 0;
     if (!active_ || !integer("session", &session) || session != session_) {
@@ -336,6 +434,7 @@ void ScreenshotHost::HandleEditor(const flutter::MethodCall<Value>& call,
       result->Success(); return;
     }
     KillTimer(window_, 1);
+    local_shortcuts_ = true;
     if (scroll_) {
       scroll_.reset();
       MONITORINFO monitor{};
@@ -348,7 +447,19 @@ void ScreenshotHost::HandleEditor(const flutter::MethodCall<Value>& call,
                  screen_.right - screen_.left, screen_.bottom - screen_.top,
                  SWP_SHOWWINDOW);
     positioning_ = false;
-    SetForegroundWindow(window_);
+    // Hiding the quick panel or opening from a background hotkey can leave
+    // another application's input queue in the foreground. A topmost popup
+    // remains visible in that case, but typing still goes to the other app.
+    if (!SetForegroundWindow(window_)) {
+      HWND foreground = GetForegroundWindow();
+      DWORD thread = GetCurrentThreadId();
+      DWORD other = foreground ? GetWindowThreadProcessId(foreground, nullptr) : 0;
+      if (foreground != window_ && other && other != thread &&
+          !IsHungAppWindow(foreground) && AttachThreadInput(thread, other, TRUE)) {
+        SetForegroundWindow(window_);
+        AttachThreadInput(thread, other, FALSE);
+      }
+    }
     SetFocus(editor_->view()->GetNativeWindow());
     result->Success();
   } else if (name == "close") {
@@ -358,7 +469,7 @@ void ScreenshotHost::HandleEditor(const flutter::MethodCall<Value>& call,
     if (active_ && ((id && *id == session_) || (small_id && *small_id == session_))) {
       PostMessage(owner_, kCloseMessage, 0, 0);
     }
-  } else if (name == "commit" || name == "styles") {
+  } else if (name == "commit" || name == "styles" || name == "copyColor") {
     ++pending_calls_;
     auto alive = alive_;
     auto response = std::shared_ptr<Result>(std::move(result));
@@ -442,7 +553,10 @@ LRESULT CALLBACK ScreenshotHost::WindowProc(HWND window, UINT message,
     }
     switch (message) {
       case WM_ACTIVATE:
-        if (LOWORD(wparam) != WA_INACTIVE && self->editor_) {
+        if (LOWORD(wparam) == WA_INACTIVE) return 0;
+        [[fallthrough]];
+      case WM_SETFOCUS:
+        if (self->editor_) {
           SetFocus(self->editor_->view()->GetNativeWindow());
         }
         return 0;

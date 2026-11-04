@@ -34,6 +34,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE instance, _In_opt_ HINSTANCE prev,
 
   ::MSG msg;
   while (::GetMessage(&msg, nullptr, 0, 0)) {
+    if (window.HandleScreenshotShortcut(msg)) continue;
     ::TranslateMessage(&msg);
     ::DispatchMessage(&msg);
   }
