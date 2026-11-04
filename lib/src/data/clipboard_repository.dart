@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:math';
 
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:uuid/uuid.dart';
@@ -31,7 +32,22 @@ class ClipboardRepository {
   Future<ClipboardItem> _item(Map<String, Object?> row) async =>
       ClipboardItem.fromMap(await _database.images?.hydrate(row) ?? row);
 
-  Future<List<ClipboardItem>> _items(List<Map<String, Object?>> rows) async {
+  Future<List<ClipboardItem>> _items(
+    List<Map<String, Object?>> rows, {
+    bool loadImages = true,
+  }) async {
+    if (!loadImages) {
+      final images = _database.images;
+      return rows
+          .map((row) {
+            final file = images?.fileFor(
+              row['type'] as String,
+              row['content'] as String,
+            );
+            return ClipboardItem.fromMap(row, imagePath: file?.path);
+          })
+          .toList(growable: false);
+    }
     final result = <ClipboardItem>[];
     // A large history must not open thousands of image files simultaneously.
     for (var offset = 0; offset < rows.length; offset += 16) {
@@ -92,10 +108,13 @@ class ClipboardRepository {
     String? operationId,
   }) => access(() async {
     if (payload.content.trim().isEmpty) return null;
-    final content = await _database.images?.persist(payload) ?? payload.content;
-    final deviceId = _deviceId ?? await initializeDevice();
     final hash = payload.hash;
+    final content =
+        await _database.images?.persist(payload, hash: hash) ?? payload.content;
+    final deviceId = _deviceId ?? await initializeDevice();
     final now = DateTime.now().millisecondsSinceEpoch;
+    ClipboardItem captured(Map<String, Object?> row) =>
+        ClipboardItem.fromMap({...row, 'content': payload.content});
 
     return _db.transaction((txn) async {
       if (operationId != null) {
@@ -113,7 +132,7 @@ class ClipboardRepository {
             where: 'id = ?',
             whereArgs: [receipts.single['item_id']],
           );
-          return rows.isEmpty ? null : await _item(rows.single);
+          return rows.isEmpty ? null : captured(rows.single);
         }
       }
       Future<void> receipt(String id) async {
@@ -155,7 +174,7 @@ class ClipboardRepository {
           whereArgs: [id],
         );
         await receipt(id);
-        return _item(rows.single);
+        return captured(rows.single);
       }
 
       final id = existing.single['id']! as String;
@@ -174,7 +193,7 @@ class ClipboardRepository {
         whereArgs: [id],
       );
       await receipt(id);
-      return _item(rows.single);
+      return captured(rows.single);
     });
   });
 
@@ -183,6 +202,8 @@ class ClipboardRepository {
     bool favoritesOnly = false,
     bool todayOnly = false,
     int? limit,
+    int offset = 0,
+    bool loadImages = true,
   }) => access(() async {
     final where = <String>['deleted = 0'];
     final args = <Object?>[];
@@ -212,10 +233,19 @@ class ClipboardRepository {
       'clipboard_item',
       where: where.join(' AND '),
       whereArgs: args,
-      orderBy: 'last_used_at DESC',
-      limit: limit,
+      orderBy: 'last_used_at DESC, rowid ASC',
+      limit: limit ?? (offset == 0 ? null : -1),
+      offset: offset == 0 ? null : offset,
     );
-    return _items(rows);
+    return _items(rows, loadImages: loadImages);
+  });
+
+  Future<ClipboardContent> readPayload(ClipboardItem item) => access(() async {
+    if (item.imagePath == null) return item.payload;
+    // Resolve against the current storage root, even if this row was selected
+    // immediately before a storage move.
+    final file = _database.images!.fileFor(item.type, item.content)!;
+    return ClipboardContent.image(await file.readAsBytes(), item.type);
   });
 
   Future<void> toggleFavorite(String id) => access(() async {
@@ -324,6 +354,19 @@ class ClipboardRepository {
     return rows.isEmpty ? null : rows.single['value'] as String;
   });
 
+  Future<Map<String, String>> getSettings(List<String> keys) =>
+      access(() async {
+        final rows = await _database.settings.query(
+          'app_setting',
+          columns: ['key', 'value'],
+          where: 'key IN (${List.filled(keys.length, '?').join(',')})',
+          whereArgs: keys,
+        );
+        return {
+          for (final row in rows) row['key'] as String: row['value'] as String,
+        };
+      });
+
   Future<void> setSetting(String key, String value) => access(() async {
     await _database.settings.insert('app_setting', {
       'key': key,
@@ -332,10 +375,12 @@ class ClipboardRepository {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   });
 
-  Future<List<ClipboardItem>> listForSync() => access(() async {
-    final rows = await _db.query('clipboard_item', orderBy: 'created_at ASC');
-    return _items(rows);
-  });
+  Future<List<ClipboardItem>> listForSync({bool loadImages = true}) => access(
+    () async {
+      final rows = await _db.query('clipboard_item', orderBy: 'created_at ASC');
+      return _items(rows, loadImages: loadImages);
+    },
+  );
 
   Future<int> mergeSyncData({
     required List<SyncRecord> records,
@@ -356,18 +401,41 @@ class ClipboardRepository {
         }, conflictAlgorithm: ConflictAlgorithm.replace);
       }
       for (final remote in records) {
-        final content =
-            await _database.images?.persist(
-              ClipboardContent(type: remote.type, content: remote.content),
-            ) ??
-            remote.content;
+        final images = _database.images;
+        final storedImage = images != null && remote.type.startsWith('image/');
         final rows = await txn.query(
           'clipboard_item',
+          columns: [
+            'id',
+            'created_at',
+            'updated_at',
+            'last_used_at',
+            'copy_count',
+            if (storedImage) 'content',
+          ],
           where: 'content_hash = ?',
           whereArgs: [remote.contentHash],
           limit: 1,
         );
-        if (rows.isEmpty) {
+        final local = rows.firstOrNull;
+        final payload = ClipboardContent(
+          type: remote.type,
+          content: remote.content,
+        );
+        if (local != null && remote.updatedAt <= (local['updated_at'] as int)) {
+          // A remote copy can still repair a missing local image without
+          // re-hashing each healthy image on every scheduled sync.
+          final reference = local['content'];
+          if (images != null && reference is String) {
+            final file = images.fileFor(remote.type, reference);
+            if (file != null && !await file.exists()) {
+              await images.persist(payload);
+            }
+          }
+          continue;
+        }
+        final content = await images?.persist(payload) ?? remote.content;
+        if (local == null) {
           await txn.insert('clipboard_item', {
             'id': remote.id,
             'type': remote.type,
@@ -387,27 +455,18 @@ class ClipboardRepository {
           continue;
         }
 
-        final local = ClipboardItem.fromMap(rows.single);
-        if (remote.updatedAt <= local.updatedAt.millisecondsSinceEpoch) {
-          continue;
-        }
         await txn.update(
           'clipboard_item',
           {
             'type': remote.type,
             'content': content,
-            'created_at':
-                remote.createdAt < local.createdAt.millisecondsSinceEpoch
-                ? remote.createdAt
-                : local.createdAt.millisecondsSinceEpoch,
+            'created_at': min(remote.createdAt, local['created_at'] as int),
             'updated_at': remote.updatedAt,
-            'last_used_at':
-                remote.lastUsedAt > local.lastUsedAt.millisecondsSinceEpoch
-                ? remote.lastUsedAt
-                : local.lastUsedAt.millisecondsSinceEpoch,
-            'copy_count': remote.copyCount > local.copyCount
-                ? remote.copyCount
-                : local.copyCount,
+            'last_used_at': max(
+              remote.lastUsedAt,
+              local['last_used_at'] as int,
+            ),
+            'copy_count': max(remote.copyCount, local['copy_count'] as int),
             'favorite': remote.favorite ? 1 : 0,
             'deleted': remote.deleted ? 1 : 0,
             'device_id': remote.deviceId,
@@ -415,7 +474,7 @@ class ClipboardRepository {
             'source_app': remote.sourceApp,
           },
           where: 'id = ?',
-          whereArgs: [local.id],
+          whereArgs: [local['id']],
         );
         changes++;
       }

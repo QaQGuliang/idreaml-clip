@@ -1,5 +1,6 @@
 import 'dart:ffi';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/foundation.dart';
@@ -12,7 +13,7 @@ import 'clipboard_service.dart';
 
 class WindowsClipboardService extends ClipboardService {
   int _owner = 0;
-  final Map<String, int> _formats = {};
+  static final Map<String, int> _formats = {};
   int? _readSequence;
 
   @override
@@ -21,7 +22,7 @@ class WindowsClipboardService extends ClipboardService {
   @override
   int? get lastWriteSequence => _writeSequence;
 
-  int _format(String name) => _formats.putIfAbsent(name, () {
+  static int _format(String name) => _formats.putIfAbsent(name, () {
     final native = name.toNativeUtf16();
     try {
       return RegisterClipboardFormat(native);
@@ -58,10 +59,10 @@ class WindowsClipboardService extends ClipboardService {
     }
   }
 
-  Never _fail(String message) =>
+  static Never _fail(String message) =>
       throw PlatformException(code: 'clipboard_unavailable', message: message);
 
-  Uint8List? _readBytes(int format) {
+  static Uint8List? _readBytes(int format) {
     if (format == 0 || IsClipboardFormatAvailable(format) == 0) return null;
     final handle = GetClipboardData(format);
     if (handle == 0) _fail('剪切板暂时不可用，请重试');
@@ -81,7 +82,18 @@ class WindowsClipboardService extends ClipboardService {
 
   @override
   Future<List<ClipboardContent>> read() async {
-    if (OpenClipboard(_window) == 0) _fail('剪切板正被其他程序使用');
+    // GetClipboardData can wait for another process to render a format. Polling
+    // starts at most one read at a time, and only after the sequence changes.
+    final (sequence, contents) = await Isolate.run(_readClipboard);
+    _readSequence = sequence;
+    return contents;
+  }
+
+  static Future<(int, List<ClipboardContent>)> _readClipboard() async {
+    // Read-only access needs no owner HWND. Open/read/close run synchronously
+    // on the same worker thread, before any file IO or image decoding.
+    if (OpenClipboard(0) == 0) _fail('剪切板正被其他程序使用');
+    late final int sequence;
     Uint8List? encoded;
     Uint8List? dib;
     String? text;
@@ -121,26 +133,26 @@ class WindowsClipboardService extends ClipboardService {
         }
         dib = _readBytes(CF_DIBV5) ?? _readBytes(CF_DIB);
       }
-      final unicode = _readBytes(CF_UNICODETEXT);
+      final unicode = encoded == null && dib == null
+          ? _readBytes(CF_UNICODETEXT)
+          : null;
       if (unicode != null) {
-        final units = ByteData.sublistView(unicode);
-        final chars = <int>[];
-        for (var i = 0; i + 1 < unicode.length; i += 2) {
-          final char = units.getUint16(i, Endian.little);
-          if (char == 0) break;
-          chars.add(char);
-        }
-        text = String.fromCharCodes(chars);
+        final units = unicode.buffer.asUint16List(
+          unicode.offsetInBytes,
+          unicode.length ~/ 2,
+        );
+        final end = units.indexOf(0);
+        text = String.fromCharCodes(units, 0, end < 0 ? units.length : end);
       }
     } finally {
       // Delayed rendering may itself advance the sequence. Capture the value
       // while the clipboard is still locked, before asynchronous image decoding.
-      _readSequence = sequence;
+      sequence = GetClipboardSequenceNumber();
       CloseClipboard();
     }
 
     // No asynchronous decoding or disk access while the system clipboard is locked.
-    if (encoded != null) return [await compute(encodedClipboardImage, encoded)];
+    if (encoded != null) return (sequence, [encodedClipboardImage(encoded)]);
     final images = <ClipboardContent>[];
     for (final path in paths) {
       if (!RegExp(
@@ -154,15 +166,14 @@ class WindowsClipboardService extends ClipboardService {
       if (await file.length() > maxClipboardImageBytes) {
         throw const FormatException('图片超过 32 MB，未记录');
       }
-      images.add(
-        await compute(encodedClipboardImage, await file.readAsBytes()),
-      );
+      images.add(encodedClipboardImage(await file.readAsBytes()));
     }
-    if (images.isNotEmpty) return images;
-    if (dib != null) return [await compute(dibClipboardImage, dib)];
-    return text == null || text.trim().isEmpty
-        ? []
-        : [ClipboardContent.text(text)];
+    if (images.isNotEmpty) return (sequence, images);
+    if (dib != null) return (sequence, [dibClipboardImage(dib)]);
+    return (
+      sequence,
+      [if (text != null && text.trim().isNotEmpty) ClipboardContent.text(text)],
+    );
   }
 
   Pointer _allocate(Uint8List bytes) {
@@ -205,7 +216,12 @@ class WindowsClipboardService extends ClipboardService {
       for (final entry in values.entries) {
         allocations[entry.key] = _allocate(entry.value);
       }
-      if (OpenClipboard(_window) == 0) _fail('剪切板正被其他程序使用，请重试');
+      // The background reader or another app may still hold its short lock.
+      // Keep the UI responsive and fail promptly if the owner stays blocked.
+      for (var attempt = 0; OpenClipboard(_window) == 0; attempt++) {
+        if (attempt == 4) _fail('剪切板正被其他程序使用，请重试');
+        await Future<void>.delayed(const Duration(milliseconds: 15));
+      }
       try {
         if (EmptyClipboard() == 0) _fail('无法更新剪切板');
         for (final entry in allocations.entries.toList()) {

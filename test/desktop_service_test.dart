@@ -309,6 +309,25 @@ void main() {
     expect(windowCalls.where((call) => call.method == 'hide'), hasLength(1));
   });
 
+  testWidgets('重复唤醒复用快捷窗口样式并更新鼠标位置，切回主窗口后重新配置', (tester) async {
+    useNativeDpi(tester);
+    await finish(tester, desktop.showQuick());
+    await desktop.hide();
+    windowCalls.clear();
+    physicalPointer = const Offset(600, 400);
+    await finish(tester, desktop.showQuick());
+    final methods = windowCalls.map((call) => call.method);
+    expect(methods, isNot(contains('hide')));
+    expect(methods, isNot(contains('setResizable')));
+    expect(methods, contains('show'));
+    expect(physicalBounds().topLeft, const Offset(612, 412));
+
+    await finish(tester, desktop.showMain());
+    windowCalls.clear();
+    await finish(tester, desktop.showQuick());
+    expect(windowCalls.map((call) => call.method), contains('setResizable'));
+  });
+
   testWidgets('失焦不关闭管理窗口，返回历史后也不会被旧 blur 事件隐藏', (tester) async {
     useNativeDpi(tester);
     desktop.onWindowBlur();

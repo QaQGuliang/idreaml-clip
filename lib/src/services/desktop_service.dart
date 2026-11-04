@@ -73,13 +73,16 @@ class DesktopService with TrayListener, WindowListener {
   bool _savingShortcut = false;
   bool _exiting = false;
   bool _changingMode = false;
+  bool _quickWindowConfigured = false;
   bool get _quickVisible => quickVisibility.value;
   set _quickVisible(bool value) => quickVisibility.value = value;
 
-  Future<void> initialize() async {
+  Future<void>? _windowReady;
+
+  Future<void> prepareWindow() => _windowReady ??= _prepareWindow();
+
+  Future<void> _prepareWindow() async {
     await windowManager.ensureInitialized();
-    windowManager.addListener(this);
-    await windowManager.setPreventClose(true);
 
     const options = WindowOptions(
       size: Size(1180, 760),
@@ -93,7 +96,12 @@ class DesktopService with TrayListener, WindowListener {
       await windowManager.show();
       await windowManager.focus();
     });
+  }
 
+  Future<void> initialize() async {
+    await prepareWindow();
+    windowManager.addListener(this);
+    await windowManager.setPreventClose(true);
     await hotKeyManager.unregisterAll();
     try {
       if (usesWinV) {
@@ -157,53 +165,49 @@ class DesktopService with TrayListener, WindowListener {
       _previewPlacement = null;
       // Read the pointer before activating or moving our own window.
       final initialScale = _windowCoordinateScale;
-      final pointer =
-          await screenRetriever.getCursorScreenPoint() * initialScale;
-      var displays = await screenRetriever.getAllDisplays();
-      if (displays.isEmpty) {
-        displays = [await screenRetriever.getPrimaryDisplay()];
-      }
-      // Windows reports each display using its own DPI, while the pointer uses
-      // our window's DPI. Compare all coordinates in physical pixels there.
-      final workAreas = displays.map((display) {
-        final scale = Platform.isWindows
-            ? (display.scaleFactor ?? 1).toDouble()
-            : 1.0;
-        return Rect.fromLTWH(
-          (display.visiblePosition?.dx ?? 0) * scale,
-          (display.visiblePosition?.dy ?? 0) * scale,
-          (display.visibleSize ?? display.size).width * scale,
-          (display.visibleSize ?? display.size).height * scale,
-        );
-      }).toList();
-      final area = nearestWorkArea(pointer, workAreas);
-      final display = displays[workAreas.indexOf(area)];
+      final (cursor, displays) = await (
+        screenRetriever.getCursorScreenPoint(),
+        _getDisplays(),
+      ).wait;
+      final pointer = cursor * initialScale;
+      final areas = displays.map(_workArea).toList();
+      final area = nearestWorkArea(pointer, areas);
+      final targetScale = _displayScale(displays[areas.indexOf(area)]);
       final bounds = placeQuickPanel(
         pointer: pointer,
         workAreas: [area],
-        scale: Platform.isWindows ? (display.scaleFactor ?? 1).toDouble() : 1,
+        scale: targetScale,
       );
-      await windowManager.hide();
-      if (await windowManager.isMinimized()) await windowManager.restore();
-      if (await windowManager.isMaximized()) await windowManager.unmaximize();
+      if (!_quickWindowConfigured) {
+        await windowManager.hide();
+        if (await windowManager.isMinimized()) await windowManager.restore();
+        if (await windowManager.isMaximized()) await windowManager.unmaximize();
+      }
       await controller.enterQuickMode();
       await windowManager.setMinimumSize(Size.zero);
-      await windowManager.setResizable(false);
-      if (Platform.isWindows) {
-        await windowManager.setAsFrameless();
-        await windowManager.setHasShadow(false);
+      if (!_quickWindowConfigured) {
+        await windowManager.setResizable(false);
+        if (Platform.isWindows) {
+          await windowManager.setAsFrameless();
+          await windowManager.setHasShadow(false);
+        }
+        await windowManager.setAlwaysOnTop(true);
+        await windowManager.setSkipTaskbar(true);
+        await windowManager.setBackgroundColor(const Color(0x00000000));
+        _quickWindowConfigured = true;
       }
-      await windowManager.setAlwaysOnTop(true);
-      await windowManager.setSkipTaskbar(true);
-      await windowManager.setBackgroundColor(const Color(0x00000000));
       await windowManager.setBounds(_toWindowCoordinates(bounds));
       await windowManager.show();
-      // Moving between monitors can change the window's DPI. Reapply after
-      // Flutter receives the new metrics, then enforce the final minimum size.
-      await WidgetsBinding.instance.endOfFrame;
-      final finalBounds = _toWindowCoordinates(bounds);
-      await windowManager.setBounds(finalBounds);
-      await windowManager.setMinimumSize(finalBounds.size);
+      if (initialScale != targetScale) {
+        // Windows may adjust the bounds when changing DPI. A suspended
+        // renderer must not hold the window transition lock indefinitely.
+        await WidgetsBinding.instance.endOfFrame.timeout(
+          const Duration(milliseconds: 100),
+          onTimeout: () {},
+        );
+        await windowManager.setBounds(_toWindowCoordinates(bounds));
+      }
+      await windowManager.setMinimumSize(_toWindowCoordinates(bounds).size);
       await windowManager.focus();
       _quickVisible = true;
     } finally {
@@ -213,6 +217,27 @@ class DesktopService with TrayListener, WindowListener {
 
   double get _windowCoordinateScale =>
       Platform.isWindows ? windowManager.getDevicePixelRatio() : 1;
+
+  Future<List<Display>> _getDisplays() async {
+    final displays = await screenRetriever.getAllDisplays();
+    return displays.isEmpty
+        ? [await screenRetriever.getPrimaryDisplay()]
+        : displays;
+  }
+
+  double _displayScale(Display display) =>
+      Platform.isWindows ? (display.scaleFactor ?? 1).toDouble() : 1;
+
+  Rect _workArea(Display display) {
+    final scale = _displayScale(display);
+    final size = display.visibleSize ?? display.size;
+    return Rect.fromLTWH(
+      (display.visiblePosition?.dx ?? 0) * scale,
+      (display.visiblePosition?.dy ?? 0) * scale,
+      size.width * scale,
+      size.height * scale,
+    );
+  }
 
   Rect _toWindowCoordinates(Rect bounds) {
     final scale = _windowCoordinateScale;
@@ -227,6 +252,7 @@ class DesktopService with TrayListener, WindowListener {
   Future<void> showMain() async {
     if (_changingMode || _exiting) return;
     _changingMode = true;
+    _quickWindowConfigured = false;
     _quickEpoch++;
     _quickPasteTarget = null;
     _quickVisible = false;
@@ -311,21 +337,7 @@ class DesktopService with TrayListener, WindowListener {
           original.width * scale,
           original.height * scale,
         );
-        var displays = await screenRetriever.getAllDisplays();
-        if (displays.isEmpty) {
-          displays = [await screenRetriever.getPrimaryDisplay()];
-        }
-        final areas = displays.map((display) {
-          final dpi = Platform.isWindows
-              ? (display.scaleFactor ?? 1).toDouble()
-              : 1.0;
-          return Rect.fromLTWH(
-            (display.visiblePosition?.dx ?? 0) * dpi,
-            (display.visiblePosition?.dy ?? 0) * dpi,
-            (display.visibleSize ?? display.size).width * dpi,
-            (display.visibleSize ?? display.size).height * dpi,
-          );
-        }).toList();
+        final areas = (await _getDisplays()).map(_workArea).toList();
         final placement = placeQuickPreview(
           panel: panel,
           workArea: nearestWorkArea(panel.center, areas),

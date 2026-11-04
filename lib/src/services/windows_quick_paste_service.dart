@@ -2,6 +2,7 @@ import 'dart:ffi';
 import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart';
 import 'package:win32/win32.dart';
 
 import 'quick_paste_service.dart';
@@ -9,7 +10,14 @@ import 'restoring_quick_paste_target.dart';
 import 'windows_automation_focus.dart';
 
 class WindowsQuickPasteService implements QuickPasteService {
-  WindowsQuickPasteService({this.onDiagnostic});
+  WindowsQuickPasteService({this.onDiagnostic})
+    : _capture = _captureNativeTarget;
+
+  @visibleForTesting
+  WindowsQuickPasteService.withCapture(this._capture, {this.onDiagnostic});
+
+  final WindowsPasteCapture? Function(void Function(String)? trace) _capture;
+  final _automationCapture = _NativePasteOperation();
 
   /// Optional developer diagnostics: window metadata and outcomes only, never
   /// clipboard contents or the text of the destination editor.
@@ -18,56 +26,129 @@ class WindowsQuickPasteService implements QuickPasteService {
   @override
   Future<QuickPasteTarget?> captureTarget() async {
     // Capture HWNDs synchronously, before any await can change the foreground.
-    final native = _captureNativeTarget(onDiagnostic);
+    final native = _capture(onDiagnostic);
     if (native == null) return null;
-    final java = isJavaPasteWindow(native.windowClass, native.focusClass);
-    onDiagnostic?.call('capture java=$java nativeCaret=${native.nativeCaret}');
+    // Desktop/taskbar surfaces are not application input targets. Explorer
+    // remains edit-only so choosing text cannot trigger a folder paste action.
+    if (const {
+      'Progman',
+      'WorkerW',
+      'Shell_TrayWnd',
+      'Shell_SecondaryTrayWnd',
+    }.contains(native.windowClass)) {
+      return null;
+    }
+    final explorer =
+        native.windowClass == 'CabinetWClass' ||
+        native.windowClass == 'ExploreWClass';
     WindowsAutomationCapture? automation;
-    if (native.explorer || (!native.nativeCaret && !java)) {
+    if (explorer) {
       try {
-        automation =
-            await Isolate.run(
-              () => captureAutomationFocus(
-                native.window,
-                native.processId,
-                retainSelection: native.explorer,
-              ),
-            ).timeout(
-              const Duration(milliseconds: 650),
-              onTimeout: () => const WindowsAutomationCapture(false, null),
-            );
+        automation = await _automationCapture.run(
+          native.captureAutomation,
+          const Duration(milliseconds: 650),
+          const WindowsAutomationCapture(false, null),
+        );
       } catch (_) {
         automation = null;
       }
     }
-    if (GetForegroundWindow() != native.window) return null;
-    if (!native.nativeCaret && !java && automation?.editable != true) {
-      onDiagnostic?.call('capture rejected: no editable target');
+    if (!native.foreground) return null;
+    if (explorer && automation?.editable != true) {
+      onDiagnostic?.call('capture rejected: no Explorer editor');
       return null;
     }
+    // Custom editors (Qt, Chromium, AWT, etc.) may draw their own caret and
+    // expose no UIA Edit/Value pattern. Retain their keyboard focus owner and
+    // let the app route Ctrl+V, just as it routes the user's manual shortcut.
+    onDiagnostic?.call(
+      'capture accepted: ${explorer ? 'Explorer editor' : 'application focus'}',
+    );
     return RestoringQuickPasteTarget(
-      _WindowsPasteRestoration(native, automation?.focus, onDiagnostic),
+      native.restoration(automation?.focus, onDiagnostic),
     );
   }
 }
 
-class _NativeTarget {
+/// A timeout releases the caller, but an external UIA provider or window can
+/// still be blocking its worker. Only start another once that worker returns.
+class _NativePasteOperation {
+  bool _running = false;
+
+  Future<T> run<T>(Future<T> Function() action, Duration timeout, T fallback) {
+    if (_running) return Future.value(fallback);
+    _running = true;
+    Future<T> perform() async {
+      try {
+        return await action();
+      } finally {
+        _running = false;
+      }
+    }
+
+    return perform().timeout(timeout, onTimeout: () => fallback);
+  }
+}
+
+/// Capture and restoration are separate: the panel takes focus between them.
+/// This boundary also lets regression tests exercise capture without sending
+/// keyboard input to applications on the user's desktop.
+abstract class WindowsPasteCapture {
+  String get windowClass;
+  bool get foreground;
+  Future<WindowsAutomationCapture> captureAutomation();
+  QuickPasteRestoration restoration(
+    WindowsAutomationFocus? automation,
+    void Function(String)? trace,
+  );
+}
+
+class _NativeTarget implements WindowsPasteCapture {
   const _NativeTarget(
     this.window,
     this.focus,
     this.processId,
+    this.focusProcessId,
     this.focusThread,
     this.windowClass,
     this.focusClass,
-    this.nativeCaret,
     this.selection,
   );
-  final int window, focus, processId, focusThread;
-  final String windowClass, focusClass;
-  final bool nativeCaret;
+  final int window, focus, processId, focusProcessId, focusThread;
+  @override
+  final String windowClass;
+  final String focusClass;
   final (int, int)? selection;
-  bool get explorer =>
-      windowClass == 'CabinetWClass' || windowClass == 'ExploreWClass';
+
+  @override
+  bool get foreground => GetForegroundWindow() == window;
+
+  bool get originalFocusValid => using((arena) {
+    if (IsWindow(focus) == 0 ||
+        (focus != window && IsChild(window, focus) == 0)) {
+      return false;
+    }
+    final pid = arena<Uint32>();
+    final thread = GetWindowThreadProcessId(focus, pid);
+    return thread == focusThread &&
+        pid.value == focusProcessId &&
+        _windowClass(focus) == focusClass;
+  });
+
+  @override
+  Future<WindowsAutomationCapture> captureAutomation() {
+    final hwnd = window;
+    final pid = processId;
+    return Isolate.run(
+      () => captureAutomationFocus(hwnd, pid, retainSelection: true),
+    );
+  }
+
+  @override
+  QuickPasteRestoration restoration(
+    WindowsAutomationFocus? automation,
+    void Function(String)? trace,
+  ) => _WindowsPasteRestoration(this, automation, trace);
 }
 
 _NativeTarget? _captureNativeTarget(void Function(String)? trace) =>
@@ -82,7 +163,8 @@ _NativeTarget? _captureNativeTarget(void Function(String)? trace) =>
       trace?.call(
         'capture window=$window class=${_windowClass(window)} '
         'pid=${pid.value} thread=$thread gui=$guiFound flags=${info.ref.flags} '
-        'focus=${info.ref.hwndFocus} class=${_windowClass(info.ref.hwndFocus)}',
+        'focus=${info.ref.hwndFocus} class=${_windowClass(info.ref.hwndFocus)} '
+        'nativeCaret=${info.ref.hwndCaret != 0}',
       );
       if (guiFound == 0 ||
           info.ref.hwndFocus == 0 ||
@@ -95,7 +177,13 @@ _NativeTarget? _captureNativeTarget(void Function(String)? trace) =>
       if (focus != window && IsChild(window, focus) == 0) return null;
       final focusPid = arena<Uint32>();
       final focusThread = GetWindowThreadProcessId(focus, focusPid);
-      if (focusPid.value != pid.value) return null;
+      // Hosted HWNDs (including embedded WebViews) can belong to a different
+      // process. Pin the identity of both the host and its focused descendant.
+      if (focusThread == 0 ||
+          focusPid.value == 0 ||
+          focusPid.value == GetCurrentProcessId()) {
+        return null;
+      }
       final focusClass = _windowClass(focus);
       (int, int)? selection;
       if (_isNativeEdit(focusClass)) {
@@ -119,10 +207,10 @@ _NativeTarget? _captureNativeTarget(void Function(String)? trace) =>
         window,
         focus,
         pid.value,
+        focusPid.value,
         focusThread,
         _windowClass(window),
         focusClass,
-        info.ref.hwndCaret != 0,
         selection,
       );
     });
@@ -133,8 +221,42 @@ String _windowClass(int window) => using((arena) {
   return length > 0 ? buffer.toDartString(length: length) : '';
 });
 
-bool _isNativeEdit(String name) =>
-    name.toLowerCase() == 'edit' || name.toLowerCase().startsWith('richedit');
+bool _isNativeEdit(String name) => const {
+  'edit',
+  'richedit',
+  'richedit20a',
+  'richedit20w',
+  'richedit50w',
+  'richeditd2d',
+  'richeditd2dpt',
+}.contains(name.toLowerCase());
+
+/// Called with the verified focus owner after selection restoration. Null lets
+/// the app handle a non-native editor or non-text format through its shortcut.
+/// After dispatch, even a timeout must never fall through to a second paste.
+bool? pasteTextIntoWindowsEdit(int hwnd) {
+  if (!_isNativeEdit(_windowClass(hwnd)) ||
+      IsClipboardFormatAvailable(CF_UNICODETEXT) == 0) {
+    return null;
+  }
+  if (IsWindowEnabled(hwnd) == 0 ||
+      GetWindowLongPtr(hwnd, GWL_STYLE) & ES_READONLY != 0) {
+    return false;
+  }
+  return using(
+    (arena) =>
+        SendMessageTimeout(
+          hwnd,
+          WM_PASTE,
+          0,
+          0,
+          SMTO_ABORTIFHUNG | SMTO_BLOCK,
+          100,
+          arena<IntPtr>(),
+        ) !=
+        0,
+  );
+}
 
 class _WindowsPasteRestoration implements QuickPasteRestoration {
   _WindowsPasteRestoration(this.target, this.automation, this.trace);
@@ -142,6 +264,7 @@ class _WindowsPasteRestoration implements QuickPasteRestoration {
   final WindowsAutomationFocus? automation;
   final void Function(String)? trace;
   int _restoredFocus = 0;
+  static final _focusOperation = _NativePasteOperation();
 
   @override
   bool get valid => using((arena) {
@@ -154,20 +277,7 @@ class _WindowsPasteRestoration implements QuickPasteRestoration {
       return false;
     }
     // XAML can recreate its input host when the Explorer address bar collapses.
-    return automation != null || _originalFocusValid;
-  });
-
-  bool get _originalFocusValid => using((arena) {
-    if (IsWindow(target.focus) == 0 ||
-        (target.focus != target.window &&
-            IsChild(target.window, target.focus) == 0)) {
-      return false;
-    }
-    final pid = arena<Uint32>();
-    final thread = GetWindowThreadProcessId(target.focus, pid);
-    return thread == target.focusThread &&
-        pid.value == target.processId &&
-        _windowClass(target.focus) == target.focusClass;
+    return automation != null || target.originalFocusValid;
   });
 
   @override
@@ -223,32 +333,34 @@ class _WindowsPasteRestoration implements QuickPasteRestoration {
   Future<bool> restoreFocus() async {
     if (!valid || !foreground || !keysReleased) return false;
     final saved = automation;
+    final native = target;
+    final deadline = DateTime.now().millisecondsSinceEpoch + 1000;
+    const timeout = Duration(milliseconds: 1100);
     if (saved != null) {
-      final window = target.window;
-      final processId = target.processId;
-      final deadline = DateTime.now().millisecondsSinceEpoch + 1000;
-      final restored = await Isolate.run(
-        () => restoreAutomationFocus(window, processId, saved, deadline),
-      ).timeout(const Duration(milliseconds: 1100), onTimeout: () => false);
+      final restored = await _focusOperation.run(
+        () => Isolate.run(
+          () => restoreAutomationFocus(
+            native.window,
+            native.processId,
+            saved,
+            deadline,
+          ),
+        ),
+        timeout,
+        false,
+      );
       if (!restored || !valid || !foreground) return false;
       _restoredFocus = _focusedWindow;
       return _restoredFocus == target.window ||
           IsChild(target.window, _restoredFocus) != 0;
     }
-    if (!_originalFocusValid) return false;
     if (_focusedWindow != target.focus) {
-      final ownThread = GetCurrentThreadId();
-      final attached = ownThread != target.focusThread;
-      if (attached &&
-          AttachThreadInput(ownThread, target.focusThread, TRUE) == 0) {
-        return false;
-      }
-      try {
-        if (!foreground || !_originalFocusValid) return false;
-        SetFocus(target.focus);
-      } finally {
-        if (attached) AttachThreadInput(ownThread, target.focusThread, FALSE);
-      }
+      final restored = await _focusOperation.run(
+        () => Isolate.run(() => _focusNativeChild(native, deadline)),
+        timeout,
+        false,
+      );
+      if (!restored || !valid || !keysReleased) return false;
     }
     if (!foreground || _focusedWindow != target.focus) return false;
     final selection = target.selection;
@@ -275,6 +387,8 @@ class _WindowsPasteRestoration implements QuickPasteRestoration {
   @override
   bool sendPaste() {
     if (!valid || !focused || !keysReleased) return false;
+    final delivered = pasteTextIntoWindowsEdit(_restoredFocus);
+    if (delivered != null) return delivered;
     return using((arena) {
       final inputs = arena<INPUT>(4);
       for (var i = 0; i < 4; i++) {
@@ -302,6 +416,31 @@ class _WindowsPasteRestoration implements QuickPasteRestoration {
     });
   }
 }
+
+bool _focusNativeChild(_NativeTarget target, int deadline) => using((arena) {
+  // AttachThreadInput requires a message queue on both threads. A fresh Dart
+  // worker may not have one yet. SetFocus can wait on a hung target thread.
+  PeekMessage(arena<MSG>(), 0, 0, 0, PM_NOREMOVE);
+  final thread = GetCurrentThreadId();
+  final attached = thread != target.focusThread;
+  if (attached && AttachThreadInput(thread, target.focusThread, TRUE) == 0) {
+    return false;
+  }
+  try {
+    final pid = arena<Uint32>();
+    GetWindowThreadProcessId(target.window, pid);
+    if (DateTime.now().millisecondsSinceEpoch >= deadline ||
+        !target.foreground ||
+        pid.value != target.processId ||
+        !target.originalFocusValid) {
+      return false;
+    }
+    SetFocus(target.focus);
+    return GetFocus() == target.focus;
+  } finally {
+    if (attached) AttachThreadInput(thread, target.focusThread, FALSE);
+  }
+});
 
 int _wakeOwnWindow(int hwnd, int unused) {
   return using((arena) {

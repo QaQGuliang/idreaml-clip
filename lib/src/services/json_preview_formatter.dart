@@ -4,6 +4,11 @@ import '../models/json_document.dart';
 
 String _format(String content) => parseJsonDocument(content).formatted;
 
+Future<JsonDocument?> identifyJsonPreview(String content) =>
+    content.length > 16384
+    ? compute(tryParseJsonDocument, content)
+    : SynchronousFuture(tryParseJsonDocument(content));
+
 Future<JsonDocument> loadJsonPreview(String content) {
   if (content.length > 16384) return compute(parseJsonDocument, content);
   try {

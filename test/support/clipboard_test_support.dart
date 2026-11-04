@@ -28,12 +28,19 @@ class MemoryClipboardRepository extends ClipboardRepository {
 
   final List<ClipboardItem> items;
   final List<String> usedIds = [];
+  final List<String> listQueries = [];
   final List<String> deletedIds = [];
   final Map<String, String> settings = {};
   bool failSettingWrite = false;
 
   @override
   Future<String?> getSetting(String key) async => settings[key];
+
+  @override
+  Future<Map<String, String>> getSettings(List<String> keys) async => {
+    for (final key in keys)
+      if (settings.containsKey(key)) key: settings[key]!,
+  };
 
   @override
   Future<void> setSetting(String key, String value) async {
@@ -47,13 +54,19 @@ class MemoryClipboardRepository extends ClipboardRepository {
     bool favoritesOnly = false,
     bool todayOnly = false,
     int? limit,
-  }) async => items
-      .where(
-        (item) =>
-            item.content.contains(query) && (!favoritesOnly || item.favorite),
-      )
-      .take(limit ?? items.length)
-      .toList();
+    int offset = 0,
+    bool loadImages = true,
+  }) async {
+    listQueries.add(query);
+    return items
+        .where(
+          (item) =>
+              item.content.contains(query) && (!favoritesOnly || item.favorite),
+        )
+        .skip(offset)
+        .take(limit ?? items.length)
+        .toList();
+  }
 
   @override
   Future<ClipboardStats> stats() async => ClipboardStats(

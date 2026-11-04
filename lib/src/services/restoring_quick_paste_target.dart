@@ -60,14 +60,3 @@ class RestoringQuickPasteTarget implements QuickPasteTarget {
     return false;
   }
 }
-
-/// Swing editors draw their own caret and often expose no UIA Edit element.
-/// In that case let the focused AWT window route Ctrl+V to its focus owner.
-bool isJavaPasteWindow(String windowClass, String focusClass) =>
-    const {'SunAwtFrame', 'SunAwtDialog'}.contains(windowClass) &&
-    const {
-      'SunAwtFrame',
-      'SunAwtDialog',
-      'SunAwtCanvas',
-      'SunAwtWindow',
-    }.contains(focusClass);

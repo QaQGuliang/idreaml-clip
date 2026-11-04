@@ -34,6 +34,16 @@ class ClipboardContent {
     return tryParseJsonDocument(content) == null ? 'TEXT' : 'JSON';
   }
 
-  String get summary =>
-      isImage ? '$typeLabel 图片' : content.replaceAll(RegExp(r'[\r\n]+'), ' ');
+  static final _lineBreaks = RegExp(r'[\r\n]+');
+
+  String get summary {
+    if (isImage) return '$typeLabel 图片';
+    const limit = 256;
+    if (content.length <= limit) return content.replaceAll(_lineBreaks, ' ');
+    // Rows display one line. Avoid shaping or normalizing the entire entry,
+    // and keep the last visible Unicode character intact.
+    final last = content.codeUnitAt(limit - 1);
+    final end = last >= 0xd800 && last <= 0xdbff ? limit - 1 : limit;
+    return '${content.substring(0, end).replaceAll(_lineBreaks, ' ')}…';
+  }
 }

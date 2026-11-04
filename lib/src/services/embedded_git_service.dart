@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'dart:io';
+import 'dart:isolate';
 
+import 'package:ffi/ffi.dart';
 import 'package:git2dart/git2dart.dart';
 
 import '../models/sync_models.dart';
@@ -14,95 +16,116 @@ class EmbeddedGitService {
   }) async {
     Object? lastError;
     for (var attempt = 0; attempt < 3; attempt++) {
-      Repository? repo;
-      Remote? remote;
       try {
-        repo = await _open(directory, config.remoteUrl, config.branch);
-        final callbacks = Callbacks(
-          credentials: UserPass(
-            username: config.username.isEmpty ? 'git' : config.username,
-            password: token,
-          ),
-        );
-        remote = Remote.lookup(repo: repo, name: 'origin');
-        remote.fetch(
-          refspecs: [
-            '+refs/heads/${config.branch}:refs/remotes/origin/${config.branch}',
-          ],
-          callbacks: callbacks,
-        );
-        _resetToRemote(repo, config.branch);
+        await _transfer(directory.path, config, token, push: false);
         final value = await reconcile();
-        _commitChanges(repo, config.branch);
-        remote.push(
-          refspecs: ['refs/heads/${config.branch}:refs/heads/${config.branch}'],
-          callbacks: callbacks,
-        );
+        await _transfer(directory.path, config, token, push: true);
         return value;
       } catch (error) {
         lastError = error;
         if (attempt < 2) await Future<void>.delayed(const Duration(seconds: 1));
-      } finally {
-        remote?.free();
-        repo?.free();
       }
     }
     throw StateError(_safeMessage(lastError));
   }
 
-  Future<Repository> _open(
-    Directory directory,
-    String remoteUrl,
-    String branch,
-  ) async {
-    await directory.create(recursive: true);
-    final gitDirectory = Directory(
-      '${directory.path}${Platform.pathSeparator}.git',
-    );
-    final repo = gitDirectory.existsSync()
-        ? Repository.open(directory.path)
-        : Repository.init(path: directory.path, initialHead: branch);
-    if (Remote.list(repo).contains('origin')) {
-      Remote.setUrl(repo: repo, remote: 'origin', url: remoteUrl);
-    } else {
-      Remote.create(repo: repo, name: 'origin', url: remoteUrl).free();
-    }
-    return repo;
-  }
+  // libgit2 network calls are synchronous. Keep the database reconciliation on
+  // its original isolate and open native handles only inside each worker.
+  static Future<void> _transfer(
+    String path,
+    SyncConfig config,
+    String token, {
+    required bool push,
+  }) => Isolate.run(() {
+    final directory = Directory(path)..createSync(recursive: true);
+    using((arena) {
+      arena.onReleaseAll(Libgit2.shutdown);
+      final repo =
+          Directory('${directory.path}${Platform.pathSeparator}.git')
+              .existsSync()
+          ? Repository.open(path)
+          : Repository.init(path: path, initialHead: config.branch);
+      arena.onReleaseAll(repo.free);
+      if (!push) {
+        if (Remote.list(repo).contains('origin')) {
+          Remote.setUrl(repo: repo, remote: 'origin', url: config.remoteUrl);
+        } else {
+          Remote.create(
+            repo: repo,
+            name: 'origin',
+            url: config.remoteUrl,
+          ).free();
+        }
+      }
+      final remote = Remote.lookup(repo: repo, name: 'origin');
+      arena.onReleaseAll(remote.free);
+      final callbacks = Callbacks(
+        credentials: UserPass(
+          username: config.username.isEmpty ? 'git' : config.username,
+          password: token,
+        ),
+      );
+      final branch = config.branch;
+      if (push) {
+        _commitChanges(arena, repo, branch);
+        remote.push(
+          refspecs: ['refs/heads/$branch:refs/heads/$branch'],
+          callbacks: callbacks,
+        );
+      } else {
+        remote.fetch(
+          refspecs: ['+refs/heads/$branch:refs/remotes/origin/$branch'],
+          callbacks: callbacks,
+        );
+        _resetToRemote(arena, repo, branch);
+      }
+    });
+  });
 
-  void _resetToRemote(Repository repo, String branch) {
+  static void _resetToRemote(Arena arena, Repository repo, String branch) {
     final remoteRef = 'refs/remotes/origin/$branch';
     if (!Reference.list(repo).contains(remoteRef)) return;
     final remoteReference = Reference.lookup(repo: repo, name: remoteRef);
+    arena.onReleaseAll(remoteReference.free);
     final target = remoteReference.target;
+    arena.onReleaseAll(target.free);
     Reference.create(
       repo: repo,
       name: 'refs/heads/$branch',
       target: target,
       force: true,
     ).free();
-    remoteReference.free();
     repo.setHead('refs/heads/$branch');
     Checkout.head(repo: repo, strategy: {GitCheckout.force});
   }
 
-  void _commitChanges(Repository repo, String branch) {
+  static void _commitChanges(Arena arena, Repository repo, String branch) {
     // libgit2 may report an empty status map for an unborn branch even when
     // the worktree already contains the first files.
     if (!repo.isBranchUnborn && repo.status.isEmpty) return;
     final index = repo.index;
+    arena.onReleaseAll(index.free);
     index.addAll(['*']);
     index.updateAll(['*']);
     index.write();
     final treeOid = index.writeTree();
+    arena.onReleaseAll(treeOid.free);
     final tree = Tree.lookup(repo: repo, oid: treeOid);
+    arena.onReleaseAll(tree.free);
     final signature = Signature.create(
       name: 'Idreaml Clip',
       email: 'sync@idreaml.local',
     );
+    arena.onReleaseAll(signature.free);
     final parents = <Commit>[];
     if (!repo.isBranchUnborn) {
-      parents.add(Commit.lookup(repo: repo, oid: repo.head.target));
+      final head = repo.head;
+      arena.onReleaseAll(head.free);
+      final oid = head.target;
+      arena.onReleaseAll(oid.free);
+      final parent = Commit.lookup(repo: repo, oid: oid);
+      arena.onReleaseAll(parent.free);
+      parents.add(parent);
     } else {
       repo.setHead('refs/heads/$branch');
     }
@@ -114,12 +137,7 @@ class EmbeddedGitService {
       message: 'Idreaml Clip sync',
       tree: tree,
       parents: parents,
-    );
-    for (final parent in parents) {
-      parent.free();
-    }
-    signature.free();
-    tree.free();
+    ).free();
   }
 
   String _safeMessage(Object? error) {

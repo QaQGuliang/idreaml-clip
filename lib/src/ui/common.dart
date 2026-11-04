@@ -151,3 +151,36 @@ void showMessage(BuildContext context, String message) {
     ..hideCurrentSnackBar()
     ..showSnackBar(SnackBar(content: Text(message)));
 }
+
+class ListPageButtons extends StatelessWidget {
+  const ListPageButtons({
+    super.key,
+    required this.page,
+    required this.hasNext,
+    required this.onChange,
+  });
+
+  final int page;
+  final bool hasNext;
+  final ValueChanged<int> onChange;
+
+  @override
+  Widget build(BuildContext context) => Row(
+    mainAxisSize: MainAxisSize.min,
+    children: [
+      IconButton(
+        visualDensity: VisualDensity.compact,
+        tooltip: '上一页',
+        onPressed: page > 0 ? () => onChange(-1) : null,
+        icon: const Icon(Icons.chevron_left, size: 16),
+      ),
+      Text('第 ${page + 1} 页', style: Theme.of(context).textTheme.bodySmall),
+      IconButton(
+        visualDensity: VisualDensity.compact,
+        tooltip: '下一页',
+        onPressed: hasNext ? () => onChange(1) : null,
+        icon: const Icon(Icons.chevron_right, size: 16),
+      ),
+    ],
+  );
+}

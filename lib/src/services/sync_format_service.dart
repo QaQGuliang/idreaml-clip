@@ -1,5 +1,6 @@
 import 'dart:convert';
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:path/path.dart' as p;
 
@@ -29,7 +30,7 @@ class SyncFormatService {
     required String deviceId,
     required String deviceName,
     required List<ClipboardItem> items,
-  }) async {
+  }) => Isolate.run(() async {
     await _writeJson(File(p.join(repository.path, 'schema.json')), {
       'name': 'idreaml-clip-sync',
       'schema_version': 1,
@@ -50,11 +51,11 @@ class SyncFormatService {
       p.join(repository.path, 'records', deviceId),
     );
     await recordDirectory.create(recursive: true);
-    final groups = <String, List<SyncRecord>>{};
+    final groups = <String, List<ClipboardItem>>{};
     for (final item in items.where((item) => !item.deleted)) {
       final date = item.createdAt.toUtc();
       final month = '${date.year}-${date.month.toString().padLeft(2, '0')}';
-      groups.putIfAbsent(month, () => []).add(SyncRecord.fromItem(item));
+      groups.putIfAbsent(month, () => []).add(item);
     }
     final expectedFiles = <String>{};
     for (final entry in groups.entries) {
@@ -77,8 +78,13 @@ class SyncFormatService {
         buffer = StringBuffer();
       }
 
-      for (final record in entry.value) {
-        final line = '${jsonEncode(record.toJson())}\n';
+      for (final item in entry.value) {
+        final record = SyncRecord.fromItem(item).toJson();
+        final path = item.imagePath;
+        if (path != null) {
+          record['content'] = base64Encode(await File(path).readAsBytes());
+        }
+        final line = '${jsonEncode(record)}\n';
         final bytes = utf8.encode(line).length;
         if (bytes > maxFileBytes) throw const FormatException('单条同步记录过大');
         if (size + bytes > maxFileBytes) await flush();
@@ -109,9 +115,9 @@ class SyncFormatService {
       tombstones,
     );
     return items.length;
-  }
+  });
 
-  Future<SyncImportData> readAll(Directory repository) async {
+  Future<SyncImportData> readAll(Directory repository) => Isolate.run(() async {
     final records = <SyncRecord>[];
     final tombstones = <SyncTombstone>[];
     final devices = <SyncDevice>[];
@@ -153,7 +159,7 @@ class SyncFormatService {
       tombstones: tombstones,
       devices: devices,
     );
-  }
+  });
 
   Future<List<Map<String, dynamic>>> _readJsonLines(File file) async {
     if (await file.length() > maxFileBytes) {

@@ -33,6 +33,8 @@ class DataStorage {
   late String defaultPath;
   late File _locator;
   Map<String, String>? _pendingCleanup;
+  bool get hasPendingCleanup => _pendingCleanup != null;
+  String? _savedPath;
   static const markerName = '.idreaml-clip-data';
   bool needsLegacyMigration = false;
 
@@ -79,6 +81,7 @@ class DataStorage {
           throw const FormatException();
         }
         root = Directory(await _canonical(root.path));
+        _savedPath = saved['path'] as String;
         if (saved['cleanup'] != null) {
           _pendingCleanup = Map<String, String>.from(saved['cleanup'] as Map);
         }
@@ -102,7 +105,9 @@ class DataStorage {
     await prepare();
   }
 
-  Future<void> rememberLocation() => _saveLocation(root.path);
+  Future<void> rememberLocation() async {
+    if (_savedPath != root.path) await _saveLocation(root.path);
+  }
 
   /// The committed locator retains cleanup work across an interrupted exit.
   /// Call only after the destination databases have opened successfully.
@@ -214,6 +219,7 @@ class DataStorage {
         flush: true,
       );
       await temporary.rename(_locator.path);
+      _savedPath = value;
     } finally {
       // Once rename commits, a temporary-file cleanup error must not roll back
       // the data directory while the locator already points to the new copy.

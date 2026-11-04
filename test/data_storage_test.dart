@@ -5,6 +5,7 @@ import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:ffi/ffi.dart';
+import 'package:idreaml_clip/src/app_controller.dart';
 import 'package:idreaml_clip/src/data/clipboard_database.dart';
 import 'package:idreaml_clip/src/data/clipboard_repository.dart';
 import 'package:idreaml_clip/src/data/data_storage.dart';
@@ -80,6 +81,34 @@ void main() {
   tearDown(() async {
     await database.close();
     await sandbox.delete(recursive: true);
+  });
+
+  test('列表仅读取图片引用，迁移后从当前目录复制，丢失的图片不阻塞列表', () async {
+    final saved = (await repository.capture(picture))!;
+    final before = (await repository.list(loadImages: false)).single;
+    expect(before.imagePath, isNotNull);
+    expect(before.content, startsWith(ImageStore.prefix));
+    await repository.moveStorage(p.join(sandbox.path, 'moved-images'));
+    expect(
+      (await repository.readPayload(before)).imageBytes,
+      picture.imageBytes,
+    );
+    final after = (await repository.list(loadImages: false)).single;
+    expect(after.imagePath, isNot(before.imagePath));
+    await File(after.imagePath!).delete();
+    expect((await repository.list(loadImages: false)).single.id, before.id);
+    await expectLater(
+      repository.readPayload(after),
+      throwsA(isA<FileSystemException>()),
+    );
+    await repository.mergeSyncData(
+      records: [SyncRecord.fromItem(saved)],
+      tombstones: [],
+    );
+    expect(
+      (await repository.readPayload(after)).imageBytes,
+      picture.imageBytes,
+    );
   });
 
   test('只读 Git 对象可迁移并清理旧目录，无需管理员权限', () async {
@@ -389,10 +418,12 @@ void main() {
     expect(await repository.list(), hasLength(2));
   });
 
-  test('同步操作完成才迁移，后续同步缓存位于新目录', () async {
+  test('同步刷新与排队的列表查询能完成，迁移后使用新目录', () async {
     final git = _Git();
     final sync = SyncService(repository, _Token(), git: git);
-    addTearDown(sync.dispose);
+    final controller = AppController(repository, sync);
+    addTearDown(controller.dispose);
+    await repository.captureText('同步记录');
     await sync.saveConfig(
       const SyncConfig(
         provider: SyncProvider.custom,
@@ -405,13 +436,18 @@ void main() {
     await git.started.future;
     final old = storage.root.path;
     final destination = p.join(sandbox.path, 'after-sync');
-    final moving = repository.moveStorage(destination);
+    final moving = controller.changeStoragePath(destination);
     await Future<void>.delayed(Duration.zero);
+    final history = controller.setHistorySearch('同步');
+    final quick = controller.setQuickSearch('同步');
     expect(storage.root.path, old);
     expect(p.isWithin(storage.sync.path, git.directory!.path), isTrue);
     git.finish.complete();
-    expect(await syncing, isNotNull);
-    await moving;
+    expect(await syncing.timeout(const Duration(seconds: 5)), isNotNull);
+    await Future.wait<void>([moving.then((_) {}), history, quick])
+        .timeout(const Duration(seconds: 5));
+    expect(controller.history.single.content, '同步记录');
+    expect(controller.quickItems.single.content, '同步记录');
     final nextGit = _Git()..finish.complete();
     final nextSync = SyncService(repository, _Token(), git: nextGit);
     addTearDown(nextSync.dispose);
@@ -497,7 +533,7 @@ void main() {
       repository: export,
       deviceId: repository.deviceId,
       deviceName: 'Test',
-      items: await repository.listForSync(),
+      items: await repository.listForSync(loadImages: false),
     );
     final imported = await format.readAll(export);
     expect(imported.records.single.content, picture.content);

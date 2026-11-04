@@ -105,6 +105,7 @@ class AppController extends ChangeNotifier {
   bool busy = true;
   bool quickFavoritesOnly = false;
   int quickCount = 30;
+  static const _quickCounts = [20, 30, 40, 50];
   int historyLimit = 10000;
   int autoCleanupDays = 0;
   int selectedQuickIndex = 0;
@@ -112,6 +113,17 @@ class AppController extends ChangeNotifier {
   String historySearch = '';
   String quickSearch = '';
   bool historyTodayOnly = false;
+  static const _pageSize = 100;
+  int historyPage = 0;
+  int quickSearchPage = 0;
+  bool hasNextHistoryPage = false;
+  bool hasNextQuickPage = false;
+  int _historyRevision = 0;
+  int _quickRevision = 0;
+  int _overviewRevision = 0;
+  final _historyQueries = AsyncGate();
+  final _quickQueries = AsyncGate();
+  List<ClipboardItem>? _recentQuickItems;
 
   ClipboardItem? get selectedHistory {
     for (final item in history) {
@@ -126,27 +138,27 @@ class AppController extends ChangeNotifier {
 
   Future<void> initialize({bool startMonitor = true}) async {
     await repository.initializeDevice();
-    workspaceLayout = WorkspaceLayout.decode(
-      await repository.getSetting('workspace_layout'),
-    );
-    quickShortcut = QuickShortcut.decode(
-      await repository.getSetting('quick_shortcut'),
-    );
+    final settings = await repository.getSettings([
+      'workspace_layout',
+      'quick_shortcut',
+      'screenshot_shortcut',
+      'win_v_shortcut_enabled',
+      'quick_count',
+      'history_limit',
+      'auto_cleanup_days',
+    ]);
+    workspaceLayout = WorkspaceLayout.decode(settings['workspace_layout']);
+    quickShortcut = QuickShortcut.decode(settings['quick_shortcut']);
     screenshotShortcut = QuickShortcut.decode(
-      await repository.getSetting('screenshot_shortcut'),
+      settings['screenshot_shortcut'],
       fallback: defaultScreenshotShortcut,
     );
-    winVShortcutEnabled =
-        await repository.getSetting('win_v_shortcut_enabled') == 'true';
-    quickCount =
-        int.tryParse(await repository.getSetting('quick_count') ?? '') ?? 30;
-    historyLimit =
-        int.tryParse(await repository.getSetting('history_limit') ?? '') ??
-        10000;
+    winVShortcutEnabled = settings['win_v_shortcut_enabled'] == 'true';
+    quickCount = int.tryParse(settings['quick_count'] ?? '') ?? 30;
+    if (!_quickCounts.contains(quickCount)) quickCount = 30;
+    historyLimit = int.tryParse(settings['history_limit'] ?? '') ?? 10000;
     if (historyLimit < 1) historyLimit = 10000;
-    autoCleanupDays =
-        int.tryParse(await repository.getSetting('auto_cleanup_days') ?? '') ??
-        0;
+    autoCleanupDays = int.tryParse(settings['auto_cleanup_days'] ?? '') ?? 0;
     await repository.cleanupOlderThan(autoCleanupDays);
     await repository.enforceHistoryLimit(historyLimit);
     await reload();
@@ -202,7 +214,9 @@ class AppController extends ChangeNotifier {
         return;
       }
       // A newer clipboard value arriving during decoding is read on the next poll.
-      final signature = contents.map((content) => content.hash).join(':');
+      final signature = sequence == null
+          ? contents.map((content) => content.hash).join(':')
+          : null;
       if (sequence == null && signature == _lastSignature) return;
       await _clipboardGate.run(() async {
         if (_disposed ||
@@ -233,63 +247,141 @@ class AppController extends ChangeNotifier {
     }
   }
 
-  Future<void> reload() async {
-    final results = await Future.wait<Object>([
-      repository.list(
-        query: historySearch,
-        favoritesOnly: page == AppPage.favorites,
-        todayOnly: historyTodayOnly,
-      ),
-      repository.list(
-        query: quickSearch,
-        favoritesOnly: quickFavoritesOnly,
-        limit: quickSearch.trim().isEmpty ? quickCount : null,
-      ),
-      repository.stats(),
-      repository.listDevices(),
-    ]);
-    history = results[0] as List<ClipboardItem>;
-    quickItems = results[1] as List<ClipboardItem>;
-    stats = results[2] as ClipboardStats;
-    devices = results[3] as List<DeviceInfo>;
-    selectedQuickIndex = quickItems.isEmpty
-        ? 0
-        : selectedQuickIndex.clamp(0, quickItems.length - 1);
+  Future<void> _readHistory() async {
+    final revision = ++_historyRevision;
+    // A sync may refresh these lists inside an existing storage lease.
+    // Always take the lease before the query gate so relocation can drain it.
+    final rows = await repository.access(
+      () => _historyQueries.run(() async {
+        if (_disposed || revision != _historyRevision) return null;
+        return repository.list(
+          query: historySearch,
+          favoritesOnly: page == AppPage.favorites,
+          todayOnly: historyTodayOnly,
+          limit: _pageSize + 1,
+          offset: historyPage * _pageSize,
+          loadImages: false,
+        );
+      }),
+    );
+    if (_disposed || revision != _historyRevision || rows == null) return;
+    if (rows.isEmpty && historyPage > 0) {
+      historyPage = 0;
+      return _readHistory();
+    }
+    hasNextHistoryPage = rows.length > _pageSize;
+    history = rows.take(_pageSize).toList(growable: false);
     if (selectedHistoryId == null ||
         !history.any((item) => item.id == selectedHistoryId)) {
       selectedHistoryId = history.isEmpty ? null : history.first.id;
     }
-    notifyListeners();
+  }
+
+  Future<void> _readQuick() async {
+    final revision = ++_quickRevision;
+    final searching = quickSearch.trim().isNotEmpty;
+    final size = searching ? _pageSize : quickCount;
+    final rows = await repository.access(
+      () => _quickQueries.run(() async {
+        if (_disposed || revision != _quickRevision) return null;
+        return repository.list(
+          query: quickSearch,
+          favoritesOnly: quickFavoritesOnly,
+          limit: searching ? size + 1 : size,
+          offset: quickSearchPage * size,
+          loadImages: false,
+        );
+      }),
+    );
+    if (_disposed || revision != _quickRevision || rows == null) return;
+    if (rows.isEmpty && quickSearchPage > 0) {
+      quickSearchPage = 0;
+      return _readQuick();
+    }
+    hasNextQuickPage = searching && rows.length > size;
+    quickItems = rows.take(size).toList(growable: false);
+    if (!searching && !quickFavoritesOnly) _recentQuickItems = quickItems;
+    selectedQuickIndex = quickItems.isEmpty
+        ? 0
+        : selectedQuickIndex.clamp(0, quickItems.length - 1);
+  }
+
+  Future<void> _readOverview() async {
+    final revision = ++_overviewRevision;
+    final results = await Future.wait<Object>([
+      repository.stats(),
+      repository.listDevices(),
+    ]);
+    if (_disposed || revision != _overviewRevision) return;
+    stats = results[0] as ClipboardStats;
+    devices = results[1] as List<DeviceInfo>;
+  }
+
+  Future<void> reload() async {
+    _recentQuickItems = null;
+    await Future.wait([_readHistory(), _readQuick(), _readOverview()]);
+    if (!_disposed) notifyListeners();
+  }
+
+  Future<void> changeHistoryPage(int delta) async {
+    if ((delta != 1 || !hasNextHistoryPage) &&
+        (delta != -1 || historyPage == 0)) {
+      return;
+    }
+    historyPage += delta;
+    await _readHistory();
+    if (!_disposed) notifyListeners();
+  }
+
+  Future<void> changeQuickPage(int delta) async {
+    if ((delta != 1 || !hasNextQuickPage) &&
+        (delta != -1 || quickSearchPage == 0)) {
+      return;
+    }
+    quickSearchPage += delta;
+    selectedQuickIndex = 0;
+    await _readQuick();
+    if (!_disposed) notifyListeners();
   }
 
   Future<void> setPage(AppPage value) async {
     page = value;
     historyTodayOnly = false;
-    await reload();
+    historyPage = 0;
+    if (value == AppPage.history || value == AppPage.favorites) {
+      await _readHistory();
+    }
+    if (!_disposed) notifyListeners();
   }
 
   Future<void> setHistorySearch(String value) async {
     historySearch = value;
-    await reload();
+    historyPage = 0;
+    await _readHistory();
+    if (!_disposed) notifyListeners();
   }
 
   Future<void> setQuickSearch(String value) async {
     quickSearch = value;
-    await reload();
+    quickSearchPage = 0;
     selectedQuickIndex = 0;
-    notifyListeners();
+    await _readQuick();
+    if (!_disposed) notifyListeners();
   }
 
   Future<void> setQuickFavoritesOnly(bool value) async {
     quickFavoritesOnly = value;
-    await reload();
+    quickSearchPage = 0;
     selectedQuickIndex = 0;
-    notifyListeners();
+    await _readQuick();
+    if (!_disposed) notifyListeners();
   }
 
   Future<void> setHistoryTodayOnly(bool value) async {
     historyTodayOnly = value;
-    await reload();
+    historyPage = 0;
+    await _readHistory();
+    if (!_disposed) notifyListeners();
   }
 
   void selectHistory(String id) {
@@ -312,10 +404,11 @@ class AppController extends ChangeNotifier {
     return _clipboardGate.run(() async {
       _writingClipboard = true;
       try {
-        await clipboard.write(item.payload);
+        final payload = await repository.readPayload(item);
+        await clipboard.write(payload);
         _lastSequence = clipboard.lastWriteSequence ?? clipboard.sequence;
         copiedClipboardSequence = _lastSequence;
-        _lastSignature = item.payload.hash;
+        _lastSignature = item.contentHash;
         clipboardError = null;
         await repository.markUsed(item.id);
         await reload();
@@ -342,15 +435,16 @@ class AppController extends ChangeNotifier {
     await _clipboardGate.run(() async {
       _writingClipboard = true;
       try {
+        final hash = image.hash;
         final previous = _copiedScreenshots[operationId];
-        if (previous != null && previous != image.hash) {
+        if (previous != null && previous != hash) {
           throw StateError('请先完成当前截图结果的处理');
         }
         if (previous == null) {
           await clipboard.write(image);
-          _copiedScreenshots[operationId] = image.hash;
+          _copiedScreenshots[operationId] = hash;
           _lastSequence = clipboard.lastWriteSequence ?? clipboard.sequence;
-          _lastSignature = image.hash;
+          _lastSignature = hash;
         }
         await repository.captureScreenshot(operationId, image);
         await repository.enforceHistoryLimit(historyLimit);
@@ -395,7 +489,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> setQuickCount(int value) async {
-    if (!const [20, 30, 40, 50].contains(value)) return;
+    if (!_quickCounts.contains(value)) return;
     quickCount = value;
     await repository.setSetting('quick_count', '$value');
     await reload();
@@ -458,7 +552,16 @@ class AppController extends ChangeNotifier {
     quickFavoritesOnly = false;
     selectedQuickIndex = 0;
     quickSearch = '';
-    await reload();
+    quickSearchPage = 0;
+    hasNextQuickPage = false;
+    final recent = _recentQuickItems;
+    if (recent == null) {
+      await _readQuick();
+    } else {
+      _quickRevision++;
+      quickItems = recent;
+    }
+    if (!_disposed) notifyListeners();
   }
 
   void leaveQuickMode() {

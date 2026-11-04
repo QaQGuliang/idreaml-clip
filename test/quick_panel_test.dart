@@ -25,6 +25,38 @@ void main() {
   });
   tearDown(() => controller.dispose());
 
+  test('历史与快捷搜索分页，唤醒复用最近列表，连续搜索跳过过期查询', () async {
+    repository.items.addAll(List.generate(220, (i) => sampleItem(i + 20)));
+    await controller.reload();
+    expect(controller.history, hasLength(100));
+    expect(controller.stats.history, 240);
+    await controller.changeHistoryPage(1);
+    expect(controller.history.first.id, 'item-100');
+    await controller.changeHistoryPage(1);
+    expect(controller.history, hasLength(40));
+    expect(controller.hasNextHistoryPage, isFalse);
+
+    repository.listQueries.clear();
+    await controller.enterQuickMode();
+    expect(repository.listQueries, isEmpty);
+    expect(controller.quickItems, hasLength(controller.quickCount));
+    await Future.wait([
+      controller.setQuickSearch('a'),
+      controller.setQuickSearch('b'),
+      controller.setQuickSearch('内容'),
+    ]);
+    expect(repository.listQueries, ['a', '内容']);
+    expect(controller.quickItems, hasLength(100));
+    expect(controller.hasNextQuickPage, isTrue);
+    await controller.changeQuickPage(1);
+    expect(controller.quickItems.first.id, 'item-100');
+    expect(controller.historyPage, 2);
+    repository.listQueries.clear();
+    await controller.enterQuickMode();
+    expect(repository.listQueries, isEmpty);
+    expect(controller.quickItems.first.id, 'item-0');
+  });
+
   Future<void> mount(WidgetTester tester) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = quickPanelSize;

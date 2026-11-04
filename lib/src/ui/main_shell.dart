@@ -3,6 +3,8 @@ import 'package:window_manager/window_manager.dart';
 
 import '../app_controller.dart';
 import '../models/clipboard_item.dart';
+import '../models/json_document.dart';
+import '../services/json_preview_formatter.dart';
 import '../models/sync_models.dart';
 import '../models/workspace_layout.dart';
 import '../services/desktop_service.dart';
@@ -630,10 +632,18 @@ class _HistoryWorkspaceState extends State<_HistoryWorkspace> {
                           onTap: () => controller.setHistoryTodayOnly(true),
                         ),
                         const Spacer(),
-                        Text(
-                          '${controller.history.length} 条记录',
-                          style: Theme.of(context).textTheme.bodySmall,
-                        ),
+                        if (controller.historyPage > 0 ||
+                            controller.hasNextHistoryPage)
+                          ListPageButtons(
+                            page: controller.historyPage,
+                            hasNext: controller.hasNextHistoryPage,
+                            onChange: controller.changeHistoryPage,
+                          )
+                        else
+                          Text(
+                            '${controller.history.length} 条记录',
+                            style: Theme.of(context).textTheme.bodySmall,
+                          ),
                       ],
                     ),
                   ),
@@ -649,6 +659,7 @@ class _HistoryWorkspaceState extends State<_HistoryWorkspace> {
                                 : '试试更短的关键词',
                           )
                         : ListView.separated(
+                            key: ValueKey(controller.historyPage),
                             padding: const EdgeInsets.all(8),
                             itemCount: controller.history.length,
                             separatorBuilder: (_, _) =>
@@ -701,6 +712,7 @@ class _HistoryWorkspaceState extends State<_HistoryWorkspace> {
             Expanded(
               key: const ValueKey('content-preview'),
               child: _DetailCard(
+                key: ValueKey(controller.selectedHistory?.contentHash),
                 item: controller.selectedHistory,
                 onUse: () async {
                   final copied = await controller.useItem(
@@ -903,8 +915,9 @@ class _HistoryItem extends StatelessWidget {
   );
 }
 
-class _DetailCard extends StatelessWidget {
+class _DetailCard extends StatefulWidget {
   const _DetailCard({
+    super.key,
     required this.item,
     required this.onUse,
     required this.onFavorite,
@@ -914,7 +927,25 @@ class _DetailCard extends StatelessWidget {
   final VoidCallback? onFavorite;
 
   @override
-  Widget build(BuildContext context) => AppCard(
+  State<_DetailCard> createState() => _DetailCardState();
+}
+
+class _DetailCardState extends State<_DetailCard> {
+  ClipboardItem? get item => widget.item;
+  late final _preview = item == null || item!.isImage
+      ? null
+      : identifyJsonPreview(item!.content);
+
+  @override
+  Widget build(BuildContext context) => FutureBuilder<JsonDocument?>(
+    future: _preview,
+    builder: (context, snapshot) => _card(
+      snapshot.data,
+      parsing: snapshot.connectionState == ConnectionState.waiting,
+    ),
+  );
+
+  Widget _card(JsonDocument? document, {required bool parsing}) => AppCard(
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
@@ -923,11 +954,17 @@ class _DetailCard extends StatelessWidget {
             const Text('内容详情', style: TextStyle(fontWeight: FontWeight.w700)),
             const Spacer(),
             StatusPill(
-              label: item?.typeLabel ?? '—',
+              label: item == null || parsing
+                  ? '—'
+                  : item!.isImage
+                  ? item!.typeLabel
+                  : document == null
+                  ? 'TEXT'
+                  : 'JSON',
               color: AppColors.primary,
               icon: item?.isImage == true
                   ? Icons.image_outlined
-                  : item?.typeLabel == 'JSON'
+                  : document != null
                   ? Icons.data_object_rounded
                   : Icons.text_fields_rounded,
             ),
@@ -937,7 +974,7 @@ class _DetailCard extends StatelessWidget {
         Expanded(
           child: Container(
             width: double.infinity,
-            padding: item?.typeLabel == 'JSON'
+            padding: document != null
                 ? EdgeInsets.zero
                 : const EdgeInsets.all(14),
             decoration: BoxDecoration(
@@ -948,10 +985,13 @@ class _DetailCard extends StatelessWidget {
             clipBehavior: Clip.antiAlias,
             child: item?.isImage == true
                 ? ClipboardImage(item: item!)
-                : item?.typeLabel == 'JSON'
+                : parsing
+                ? const Center(child: CircularProgressIndicator())
+                : document != null
                 ? JsonSplitPreview(
                     key: ValueKey(item!.contentHash),
                     content: item!.content,
+                    document: document,
                   )
                 : SingleChildScrollView(
                     child: SelectableText(
@@ -977,7 +1017,7 @@ class _DetailCard extends StatelessWidget {
           children: [
             Expanded(
               child: FilledButton.icon(
-                onPressed: item == null ? null : onUse,
+                onPressed: item == null ? null : widget.onUse,
                 icon: const Icon(Icons.copy_rounded, size: 16),
                 label: const Text('复制内容'),
               ),
@@ -985,7 +1025,7 @@ class _DetailCard extends StatelessWidget {
             const SizedBox(width: 8),
             IconButton.outlined(
               tooltip: item?.favorite == true ? '取消收藏' : '收藏',
-              onPressed: onFavorite,
+              onPressed: widget.onFavorite,
               icon: Icon(
                 item?.favorite == true
                     ? Icons.star_rounded

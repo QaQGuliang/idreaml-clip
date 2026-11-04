@@ -14,6 +14,7 @@ class ClipboardItem {
     required this.deviceId,
     required this.syncState,
     this.sourceApp,
+    this.imagePath,
     this.type = 'text',
   });
 
@@ -31,13 +32,20 @@ class ClipboardItem {
   final String syncState;
   final String? sourceApp;
 
+  /// Only list views use a file-backed image. Export and clipboard writes
+  /// resolve the full payload separately.
+  final String? imagePath;
+
   ClipboardContent get payload =>
       ClipboardContent(type: type, content: content);
   bool get isImage => payload.isImage;
   String get typeLabel => payload.typeLabel;
   String get summary => payload.summary;
 
-  factory ClipboardItem.fromMap(Map<String, Object?> map) => ClipboardItem(
+  factory ClipboardItem.fromMap(
+    Map<String, Object?> map, {
+    String? imagePath,
+  }) => ClipboardItem(
     id: map['id']! as String,
     type: map['type']! as String,
     content: map['content']! as String,
@@ -53,5 +61,6 @@ class ClipboardItem {
     deviceId: map['device_id']! as String,
     syncState: map['sync_state']! as String,
     sourceApp: map['source_app'] as String?,
+    imagePath: imagePath,
   );
 }

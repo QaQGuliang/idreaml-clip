@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
@@ -55,6 +54,12 @@ Future<void> main(List<String> arguments) async {
 
   final instance = Platform.isWindows ? WindowsAppInstance.acquire() : null;
   if (instance != null && instance.launch != InstanceLaunch.primary) exit(0);
+  runApp(
+    const MaterialApp(
+      debugShowCheckedModeBanner: false,
+      home: Scaffold(body: Center(child: Text('正在打开剪切板历史…'))),
+    ),
+  );
   await _startApplication(instance, locatorPath: restart.locatorPath);
 }
 
@@ -66,6 +71,22 @@ Future<void> _startApplication(
   final storage = DataStorage();
   final database = ClipboardDatabase(storage: storage);
   String? storageMessage;
+  Future<void> showStorageError(Object error) async {
+    await database.close();
+    runApp(
+      StorageStartupError(
+        message: error is StorageException
+            ? error.message
+            : '无法读取或写入数据文件${error is FileSystemException ? '：${error.path ?? ''}' : '。'}',
+        retry: (path) => _startApplication(
+          instance,
+          initialPath: path,
+          locatorPath: locatorPath,
+        ),
+      ),
+    );
+  }
+
   try {
     await storage.initialize(
       initialPath: initialPath,
@@ -82,24 +103,19 @@ Future<void> _startApplication(
     }
     await storage.rememberLocation();
   } catch (error) {
-    await database.close();
-    runApp(
-      StorageStartupError(
-        message: error is StorageException
-            ? error.message
-            : '无法读取或写入数据文件${error is FileSystemException ? '：${error.path ?? ''}' : '。'}',
-        retry: (path) => _startApplication(
-          instance,
-          initialPath: path,
-          locatorPath: locatorPath,
-        ),
-      ),
-    );
+    await showStorageError(error);
     return;
   }
   final repository = ClipboardRepository(database);
   final administrator = AdministratorLaunchService(repository);
-  if (await administrator.initialize()) {
+  final bool restarting;
+  try {
+    restarting = await administrator.initialize();
+  } catch (error) {
+    await showStorageError(error);
+    return;
+  }
+  if (restarting) {
     instance?.stopListening();
     await storage.access.exclusive(database.close);
     exit(0);
@@ -116,7 +132,6 @@ Future<void> _startApplication(
         : TextClipboardService(),
   );
   controller.storageMessage = storageMessage;
-  await controller.initialize();
 
   final desktopService = DesktopService(
     controller,
@@ -129,14 +144,21 @@ Future<void> _startApplication(
       });
     },
   );
+  try {
+    await Future.wait([
+      desktopService.prepareWindow(),
+      controller.initialize(),
+    ]);
+  } catch (error) {
+    controller.dispose();
+    await showStorageError(error);
+    return;
+  }
   await desktopService.initialize();
 
   runApp(
     IdreamlClipApp(controller: controller, desktopService: desktopService),
   );
-  WidgetsBinding.instance.addPostFrameCallback((_) {
-    unawaited(desktopService.screenshots.warmUp());
-  });
   instance?.listen(
     onActivate: desktopService.showHistory,
     onShutdown: desktopService.exitApp,

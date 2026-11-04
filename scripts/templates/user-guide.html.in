@@ -88,7 +88,7 @@
       <div class="quick-instructions"><h3>从输入位置唤起，再选一条</h3><div class="hotkey" aria-label="Windows 默认快捷键 Ctrl Shift V"><kbd>Ctrl</kbd><b>+</b><kbd>Shift</kbd><b>+</b><kbd>V</kbd></div><ol><li>先把光标放进目标输入框，或选中准备替换的文字。</li><li>按快捷键打开面板，输入关键词查找，或切换到“收藏”。</li><li>单击条目，或用方向键选择后按 Enter；Windows 会尝试返回原输入位置粘贴。Mac 当前只复制，需要返回目标位置按 Command + V。</li></ol><p class="mini">没有可编辑目标或目标应用不接受粘贴时，内容仍会留在系统剪贴板中，可以手动按 Ctrl + V。</p></div>
     </div>
     <div class="subsection"><h3>这几个操作值得记住</h3><div class="keyboard-grid"><div><kbd>↑</kbd><kbd>↓</kbd><span>选择上一条 / 下一条</span></div><div><kbd>Enter</kbd><span>使用选中条目</span></div><div><kbd>Esc</kbd><span>关闭快捷面板</span></div><div><kbd>右键</kbd><span>仅复制，或删除记录</span></div></div><p class="mini" style="margin-top:12px">点击面板外部也会关闭。右键菜单中的“复制”只更新剪贴板，不触发自动粘贴。</p></div>
-    <div class="notice warn"><strong>IDEA 用户注意：</strong>已验证 Ctrl + Shift + V 模式可以在 IDEA 中插入内容和替换选区；Win + V 模式的自动粘贴问题在 {{version}} 中仍待解决。遇到这种情况，可先使用默认组合，或在选取内容后手动 Ctrl + V。</div>
+    <div class="notice warn"><strong>自动粘贴兼容性</strong>　Windows 会恢复唤起前的窗口和输入焦点。标准 Edit、RichEdit 输入框使用原生命令粘贴文本，其他编辑器和图片粘贴由目标应用处理一次 Ctrl + V。QQ、微信、飞书、IDEA 等软件仍需实机复测。如果应用自定义了粘贴快捷键、拒绝模拟输入或以更高权限运行，内容仍可使用该应用自己的粘贴命令插入。</div>
   </section>
   <section class="chapter" id="preview">
     <div class="chapter-heading"><span class="chapter-number">04</span><div><p class="kicker">SEE BEFORE YOU USE</p><h2>图片看完整，JSON 看层级</h2></div></div>
@@ -129,7 +129,7 @@
     <div class="faq">
       <details open><summary>点了窗口关闭按钮，为什么还在记录？</summary><p>主窗口关闭后，程序会留在系统托盘继续运行。左键单击托盘图标打开全部历史；需要彻底退出时，右键选择“退出应用程序”。1.0.3 的托盘右键菜单只保留这一项。</p></details>
       <details><summary>为什么按自定义快捷键没有反应？</summary><p>先确认应用正在运行，再检查是否开启了固定 Win + V：开启后，自定义组合会停用。若未开启，查看设置页是否提示快捷键被占用，必要时重新录入一个可注册的组合。</p></details>
-      <details><summary>点击快捷条目后，没有填入输入框怎么办？</summary><p>先确认唤起面板前，目标输入框确实有光标或选区。条目复制成功后，可以返回目标位置手动按 Ctrl + V。IDEA 的 Win + V 自动粘贴仍待解决，可先关闭固定 Win + V，使用已验证的 Ctrl + Shift + V。</p></details>
+      <details><summary>点击快捷条目后，没有填入输入框怎么办？</summary><p>先确认唤起面板前，已点击目标输入框或选中准备替换的文字。若手动 Ctrl + V 可以粘贴，请记录软件名称、版本及是否以管理员身份运行，便于排查焦点恢复和权限差异。桌面、任务栏及未聚焦输入框的资源管理器仅复制；自动粘贴失败时内容仍在剪切板中。</p></details>
       <details><summary>为什么复制过的内容没有出现在历史中？</summary><p>确认程序正在运行。图片需实际进入系统剪贴板，只保存外部截图文件不会触发采集。超出图片大小限制时会有提示；此外，相同内容会合并，所以未必增加一条新记录。</p></details>
       <details><summary>收藏内容也会被自动清理吗？</summary><p>常规的保存数量限制和按时间自动清理会保留收藏记录。但主动删除或“清空历史”属于另一类操作；清空会删除全部记录，请先确认再执行。</p></details>
       <details><summary>为什么再次打开程序，没有多出一个窗口？</summary><p>应用采用单实例运行。同一 Windows 登录会话中重复启动，会打开已有实例的全部历史，避免重复监听、多个托盘图标和快捷键冲突。</p></details>

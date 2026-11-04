@@ -6,6 +6,15 @@ import 'package:idreaml_clip/src/models/clipboard_content.dart';
 import 'package:idreaml_clip/src/services/clipboard_image_codec.dart';
 
 void main() {
+  test('列表摘要折叠换行并截断长条目，保留完整的复制内容', () {
+    final prefix = 'a' * 255;
+    final text = '$prefix😀\n结尾';
+    final payload = ClipboardContent.text(text);
+    expect(payload.summary, '$prefix…');
+    expect(payload.content, text);
+    expect(const ClipboardContent.text('a\r\nb').summary, 'a b');
+  });
+
   test('JSON 对象和数组经过解析识别，普通或不完整文本仍为 TEXT', () {
     expect(const ClipboardContent.text(' {"a": [1, true]} ').typeLabel, 'JSON');
     expect(const ClipboardContent.text('[1, "text"]').typeLabel, 'JSON');

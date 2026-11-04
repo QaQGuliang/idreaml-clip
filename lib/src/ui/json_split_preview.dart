@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../models/json_document.dart';
@@ -6,9 +7,10 @@ import 'app_theme.dart';
 import 'json_tree_view.dart';
 
 class JsonSplitPreview extends StatefulWidget {
-  const JsonSplitPreview({super.key, required this.content});
+  const JsonSplitPreview({super.key, required this.content, this.document});
 
   final String content;
+  final JsonDocument? document;
 
   @override
   State<JsonSplitPreview> createState() => _JsonSplitPreviewState();
@@ -17,17 +19,22 @@ class JsonSplitPreview extends StatefulWidget {
 class _JsonSplitPreviewState extends State<JsonSplitPreview> {
   late Future<JsonDocument> _formatted;
 
+  Future<JsonDocument> _load() => widget.document == null
+      ? loadJsonPreview(widget.content)
+      : SynchronousFuture(widget.document!);
+
   @override
   void initState() {
     super.initState();
-    _formatted = loadJsonPreview(widget.content);
+    _formatted = _load();
   }
 
   @override
   void didUpdateWidget(covariant JsonSplitPreview oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.content != widget.content) {
-      _formatted = loadJsonPreview(widget.content);
+    if (oldWidget.content != widget.content ||
+        oldWidget.document != widget.document) {
+      _formatted = _load();
     }
   }
 

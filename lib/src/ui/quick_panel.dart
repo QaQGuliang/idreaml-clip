@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
@@ -9,6 +10,7 @@ import '../app_controller.dart';
 import '../models/clipboard_item.dart';
 import '../services/desktop_service.dart';
 import '../services/clipboard_image_codec.dart';
+import '../services/json_preview_formatter.dart';
 import '../services/quick_panel_placement.dart';
 import '../services/quick_preview_placement.dart';
 import 'app_theme.dart';
@@ -41,6 +43,7 @@ class _QuickPanelState extends State<QuickPanel> {
   Timer? _previewCloseTimer;
   int _hoverGeneration = 0;
   ClipboardItem? _previewItem;
+  String? _formattedJson;
   QuickPreviewPlacement? _previewPlacement;
   bool _previewFocused = false;
   ClipboardItem? _hoveredItem;
@@ -141,6 +144,7 @@ class _QuickPanelState extends State<QuickPanel> {
     _hoverGeneration++;
     setState(() {
       _previewItem = null;
+      _formattedJson = null;
       _previewPlacement = null;
       _previewFocused = false;
       _hoveredItem = null;
@@ -164,7 +168,7 @@ class _QuickPanelState extends State<QuickPanel> {
     _hoverTimer?.cancel();
     _hoveredItem = item;
     final generation = ++_hoverGeneration;
-    if (_contextMenuOpen || (!item.isImage && item.typeLabel != 'JSON')) {
+    if (_contextMenuOpen) {
       unawaited(_clearPreview());
       return;
     }
@@ -175,16 +179,30 @@ class _QuickPanelState extends State<QuickPanel> {
         if (!itemContext.mounted) return;
         if (pointer != null && !_containsPointer(itemContext, pointer)) return;
         _previewOperations.add(generation);
-        final imageSize = item.isImage
-            ? _imageSizes.putIfAbsent(item.contentHash, () {
-                final dimensions = clipboardImageDimensions(
-                  item.payload.imageBytes,
-                );
-                return dimensions == null
-                    ? null
-                    : Size(dimensions.$1.toDouble(), dimensions.$2.toDouble());
-              })
-            : null;
+        // Validate and format only after the pointer settles. Large JSON is
+        // parsed on a worker, and the preview reuses that result.
+        final json = item.isImage
+            ? null
+            : await formatJsonPreview(item.content);
+        if (!mounted || generation != _hoverGeneration) return;
+        Size? imageSize;
+        if (item.isImage) {
+          if (!_imageSizes.containsKey(item.contentHash)) {
+            final path = item.imagePath;
+            final bytes = path == null
+                ? item.payload.imageBytes
+                : await File(path).readAsBytes();
+            if (!mounted || generation != _hoverGeneration) return;
+            final dimensions = clipboardImageDimensions(bytes);
+            if (_imageSizes.length >= 64) {
+              _imageSizes.remove(_imageSizes.keys.first);
+            }
+            _imageSizes[item.contentHash] = dimensions == null
+                ? null
+                : Size(dimensions.$1.toDouble(), dimensions.$2.toDouble());
+          }
+          imageSize = _imageSizes[item.contentHash];
+        }
         final placement = await widget.desktopService.expandQuickPreview(
           imageSize: imageSize,
         );
@@ -193,6 +211,7 @@ class _QuickPanelState extends State<QuickPanel> {
         }
         setState(() {
           _previewItem = item;
+          _formattedJson = json;
           _previewPlacement = placement;
         });
       } catch (_) {
@@ -275,6 +294,7 @@ class _QuickPanelState extends State<QuickPanel> {
     if (mounted) {
       setState(() {
         _previewItem = null;
+        _formattedJson = null;
         _previewFocused = false;
       });
     }
@@ -330,6 +350,7 @@ class _QuickPanelState extends State<QuickPanel> {
                       onFocusChange: (focused) => _previewFocused = focused,
                       child: QuickHoverPreview(
                         item: _previewItem!,
+                        formattedJson: _formattedJson,
                         onClose: () => unawaited(_clearPreview()),
                       ),
                     ),
@@ -405,12 +426,26 @@ class _QuickPanelState extends State<QuickPanel> {
                       },
                     ),
                     const Spacer(),
-                    Text(
-                      controller.quickSearch.trim().isEmpty
-                          ? '最近 ${controller.quickCount} 条'
-                          : '全部历史搜索',
-                      style: Theme.of(context).textTheme.bodySmall,
-                    ),
+                    if (controller.quickSearchPage > 0 ||
+                        controller.hasNextQuickPage)
+                      ListPageButtons(
+                        page: controller.quickSearchPage,
+                        hasNext: controller.hasNextQuickPage,
+                        onChange: (delta) {
+                          unawaited(_clearPreview());
+                          if (_scrollController.hasClients) {
+                            _scrollController.jumpTo(0);
+                          }
+                          controller.changeQuickPage(delta);
+                        },
+                      )
+                    else
+                      Text(
+                        controller.quickSearch.trim().isEmpty
+                            ? '最近 ${controller.quickCount} 条'
+                            : '全部历史搜索',
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
                   ],
                 ),
               ),

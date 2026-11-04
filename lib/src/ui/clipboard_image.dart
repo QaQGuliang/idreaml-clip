@@ -1,4 +1,4 @@
-import 'dart:typed_data';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 
@@ -23,13 +23,16 @@ class ClipboardImage extends StatefulWidget {
 }
 
 class _ClipboardImageState extends State<ClipboardImage> {
-  Uint8List? _bytes;
+  ImageProvider? _provider;
 
   void _read() {
     try {
-      _bytes = widget.item.payload.imageBytes;
+      final path = widget.item.imagePath;
+      _provider = path == null
+          ? MemoryImage(widget.item.payload.imageBytes)
+          : FileImage(File(path));
     } on FormatException {
-      _bytes = null;
+      _provider = null;
     }
   }
 
@@ -42,7 +45,10 @@ class _ClipboardImageState extends State<ClipboardImage> {
   @override
   void didUpdateWidget(covariant ClipboardImage oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.item.contentHash != widget.item.contentHash) _read();
+    if (oldWidget.item.contentHash != widget.item.contentHash ||
+        oldWidget.item.imagePath != widget.item.imagePath) {
+      _read();
+    }
   }
 
   @override
@@ -56,13 +62,18 @@ class _ClipboardImageState extends State<ClipboardImage> {
         : const Center(
             child: Text('图片无法预览', style: TextStyle(color: AppColors.muted)),
           );
-    if (_bytes == null) return fallback;
-    ImageProvider provider = MemoryImage(_bytes!);
+    if (_provider == null) return fallback;
+    ImageProvider provider = _provider!;
     if (widget.thumbnail) {
       final size = widget.thumbnailSize;
       final scale = MediaQuery.devicePixelRatioOf(context);
       provider = size == null
-          ? ResizeImage(provider, width: 96)
+          ? ResizeImage(
+              provider,
+              width: 96,
+              height: 96,
+              policy: ResizeImagePolicy.fit,
+            )
           : ResizeImage(
               provider,
               width: (size.width * scale).ceil(),

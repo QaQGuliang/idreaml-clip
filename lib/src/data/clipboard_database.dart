@@ -25,7 +25,7 @@ class ClipboardDatabase {
     return value;
   }
 
-  Future<void> open({String? path}) async {
+  Future<void> open({String? path, bool verify = false}) async {
     sqfliteFfiInit();
     _factory ??= databaseFactoryFfi;
     if (path == null && storage == null) {
@@ -62,13 +62,22 @@ class ClipboardDatabase {
             '''),
           ),
         );
-        for (final db in [database, settings]) {
-          final check = await db.rawQuery('PRAGMA quick_check');
-          if (check.length != 1 || check.single.values.single != 'ok') {
-            throw const StorageException('数据库校验失败，原数据已保留。');
+        final separated = await database.query(
+          'sync_state',
+          columns: ['value'],
+          where: 'key = ?',
+          whereArgs: ['managed_storage_v1'],
+        );
+        if (verify || storage!.hasPendingCleanup || separated.isEmpty) {
+          // Verify both copies before relocation commits or deletes a source.
+          for (final db in [database, settings]) {
+            final check = await db.rawQuery('PRAGMA quick_check');
+            if (check.length != 1 || check.single.values.single != 'ok') {
+              throw const StorageException('数据库校验失败，原数据已保留。');
+            }
           }
         }
-        await _separateLegacyData();
+        if (separated.isEmpty) await _separateLegacyData();
       } catch (_) {
         await close();
         rethrow;
@@ -79,7 +88,7 @@ class ClipboardDatabase {
   Future<StorageMoveResult> moveTo(String path) {
     final current = storage;
     if (current == null) throw StateError('No managed storage');
-    return current.moveTo(path, close: close, open: () => open());
+    return current.moveTo(path, close: close, open: () => open(verify: true));
   }
 
   Future<void> _separateLegacyData() async {
@@ -96,12 +105,17 @@ class ClipboardDatabase {
     await database.delete('app_setting');
     // Flush each image before replacing its inline contents with a relative
     // reference. An interrupted upgrade is safe to resume on the next launch.
-    final rows = await database.query(
-      'clipboard_item',
-      where: "type LIKE 'image/%' AND content NOT LIKE ?",
-      whereArgs: ['${ImageStore.prefix}%'],
-    );
-    for (final row in rows) {
+    var lastRow = 0;
+    while (true) {
+      // Even a single old inline image can be tens of MB.
+      final rows = await database.rawQuery(
+        'SELECT rowid, type, content FROM clipboard_item WHERE rowid > ? '
+        "AND type LIKE 'image/%' AND content NOT LIKE ? ORDER BY rowid LIMIT 1",
+        [lastRow, '${ImageStore.prefix}%'],
+      );
+      if (rows.isEmpty) break;
+      final row = rows.single;
+      lastRow = row['rowid'] as int;
       final value = await images!.persist(
         ClipboardContent(
           type: row['type'] as String,
@@ -111,10 +125,16 @@ class ClipboardDatabase {
       await database.update(
         'clipboard_item',
         {'content': value},
-        where: 'id = ?',
-        whereArgs: [row['id']],
+        where: 'rowid = ?',
+        whereArgs: [lastRow],
       );
     }
+    // Only a fully completed migration may skip the scan on later launches.
+    await database.insert('sync_state', {
+      'key': 'managed_storage_v1',
+      'value': '1',
+      'updated_at': DateTime.now().millisecondsSinceEpoch,
+    });
   }
 
   Future<void> _createSchema(Database db, int version) async {

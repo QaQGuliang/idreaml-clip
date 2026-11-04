@@ -119,7 +119,7 @@ class SyncService extends ChangeNotifier {
             tombstones: imported.tombstones,
             devices: imported.devices,
           );
-          final items = await _repository.listForSync();
+          final items = await _repository.listForSync(loadImages: false);
           final exported = await _format.exportDevice(
             repository: repository,
             deviceId: _repository.deviceId,

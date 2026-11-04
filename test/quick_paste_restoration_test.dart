@@ -4,14 +4,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:idreaml_clip/src/services/restoring_quick_paste_target.dart';
 
 void main() {
-  test('recognizes an AWT focus owner without accepting arbitrary windows', () {
-    expect(isJavaPasteWindow('SunAwtFrame', 'SunAwtCanvas'), isTrue);
-    expect(isJavaPasteWindow('SunAwtFrame', 'SunAwtFrame'), isTrue);
-    expect(isJavaPasteWindow('SunAwtDialog', 'SunAwtWindow'), isTrue);
-    expect(isJavaPasteWindow('CabinetWClass', 'DirectUIHWND'), isFalse);
-    expect(isJavaPasteWindow('SunAwtFrame', 'Button'), isFalse);
-  });
-
   testWidgets('restores the input before sending exactly one paste', (
     tester,
   ) async {
