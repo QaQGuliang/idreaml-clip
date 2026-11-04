@@ -1461,14 +1461,29 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
                                   m.selected!.points.first,
                                 ),
                         ),
-                      button(
-                        Icons.push_pin_outlined,
-                        '贴图并计入历史',
-                        selected &&
-                                _editable &&
-                                (!_longImage || _longFinishArmed)
-                            ? () => _finish(action: _ScreenshotAction.pin)
-                            : null,
+                      Tooltip(
+                        message: '贴图并计入历史',
+                        child: FilledButton.icon(
+                          onPressed:
+                              selected &&
+                                  _editable &&
+                                  (!_longImage || _longFinishArmed)
+                              ? () => _finish(action: _ScreenshotAction.pin)
+                              : null,
+                          style: FilledButton.styleFrom(
+                            backgroundColor: const Color(0xFFFCD68B),
+                            foregroundColor: const Color(0xFF352506),
+                            minimumSize: const Size(0, 32),
+                            padding: const EdgeInsets.symmetric(horizontal: 10),
+                            textStyle: Theme.of(context).textTheme.labelLarge
+                                ?.copyWith(
+                                  fontSize: 13,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                          ),
+                          icon: const Icon(Icons.push_pin_rounded, size: 17),
+                          label: const Text('贴图'),
+                        ),
                       ),
                       button(
                         Icons.save_alt,

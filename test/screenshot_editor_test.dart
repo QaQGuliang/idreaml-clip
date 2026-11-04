@@ -167,9 +167,12 @@ void main() {
 
   testWidgets('贴图提交最终选区 PNG 和原屏幕位置', (tester) async {
     await mount(tester);
+    final pin = find.widgetWithText(FilledButton, '贴图');
+    expect(tester.widget<FilledButton>(pin).onPressed, isNull);
     await tester.tapAt(const Offset(100, 150));
     await tester.pump();
-    await tester.tap(find.byTooltip('贴图并计入历史'));
+    expect(find.byTooltip('贴图并计入历史'), findsOneWidget);
+    await tester.tap(pin);
     await settleImages(tester);
     final args =
         calls.singleWhere((c) => c.method == 'commit').arguments as Map;
