@@ -101,11 +101,26 @@ void ScreenshotHost::DestroyEditor() {
   editor_ready_ = false;
 }
 
+void ScreenshotHost::InvokePinAction(HWND window, const char* method, Value argument,
+                                     const wchar_t* error) {
+  const auto failed = [window, alive = alive_, error]() {
+    if (*alive && IsWindow(window)) MessageBoxW(window, error, L"理梦剪藏", MB_OK | MB_ICONWARNING);
+  };
+  main_channel_->InvokeMethod(method, std::make_unique<Value>(std::move(argument)),
+      std::make_unique<flutter::MethodResultFunctions<Value>>(
+          [](const Value*) {},
+          [failed](const std::string&, const std::string&, const Value*) { failed(); }, failed));
+}
+
 void ScreenshotHost::HandleMain(const flutter::MethodCall<Value>& call,
                                 std::unique_ptr<Result> result) {
   const auto& method = call.method_name();
   const auto* args = call.arguments() ? std::get_if<Map>(call.arguments()) : nullptr;
-  if (method == "warmUp") {
+  if (method == "setPinBorderDefault") {
+    const auto* value = call.arguments() ? std::get_if<std::string>(call.arguments()) : nullptr;
+    if (!value || !pins_.SetDefaultBorder(*value)) { result->Error("border", "未知的贴图边框"); return; }
+    result->Success();
+  } else if (method == "warmUp") {
     if (!EnsureEditor()) {
       DestroyEditor();
       result->Error("window", "无法预热截图编辑窗口"); return;
@@ -178,18 +193,12 @@ void ScreenshotHost::HandleMain(const flutter::MethodCall<Value>& call,
     }
     const POINT origin{screen_.left + static_cast<LONG>(x), screen_.top + static_cast<LONG>(y)};
     const auto copy = [this](HWND window, const std::vector<uint8_t>& image) {
-      const auto failed = [window, alive = alive_]() {
-        if (*alive && IsWindow(window)) {
-          MessageBoxW(window, L"无法复制贴图，请重试。", L"理梦剪藏", MB_OK | MB_ICONWARNING);
-        }
-      };
-      main_channel_->InvokeMethod("copyPinnedImage", std::make_unique<Value>(image),
-          std::make_unique<flutter::MethodResultFunctions<Value>>(
-              [](const Value*) {},
-              [failed](const std::string&, const std::string&, const Value*) { failed(); },
-              failed));
+      InvokePinAction(window, "copyPinnedImage", Value(image), L"无法复制贴图，请重试。");
     };
-    if (!pins_.Show(*png, origin, screen_, copy)) {
+    const auto save_border = [this](HWND window, const std::string& border) {
+      InvokePinAction(window, "savePinBorderDefault", Value(border), L"无法保存默认贴图边框，请重试。");
+    };
+    if (!pins_.Show(*png, origin, screen_, copy, save_border)) {
       result->Error("window", "无法显示贴图，请重试"); return;
     }
     // Keep the editor reachable if history storage fails after pinning a full screen.

@@ -37,6 +37,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.ensureVisible(picker);
+    await tester.pumpAndSettle();
   }
 
   Future<void> openCustom(WidgetTester tester) async {

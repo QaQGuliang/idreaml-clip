@@ -9,6 +9,7 @@ import 'package:idreaml_clip/src/app_controller.dart';
 import 'package:idreaml_clip/src/data/clipboard_database.dart';
 import 'package:idreaml_clip/src/data/clipboard_repository.dart';
 import 'package:idreaml_clip/src/models/clipboard_content.dart';
+import 'package:idreaml_clip/src/models/pinned_image_border.dart';
 import 'package:idreaml_clip/src/models/quick_shortcut.dart';
 import 'package:idreaml_clip/src/services/clipboard_service.dart';
 import 'package:idreaml_clip/src/services/credential_service.dart';
@@ -137,6 +138,8 @@ void main() {
   });
 
   test('按钮先确定屏幕再隐藏，快捷键路径不隐藏，重复启动无效', () async {
+    expect(calls, ['setPinBorderDefault']);
+    calls.clear();
     await service.start(
       buttonPoint: const Offset(20, 30),
       hidePanel: () async {
@@ -150,6 +153,31 @@ void main() {
     calls.clear();
     await service.start();
     expect(calls, ['prepare', 'open']);
+  });
+
+  test('设置页和贴图菜单共用默认边框，重新初始化后恢复', () async {
+    final applied = <String>[];
+    messenger.setMockMethodCallHandler(ScreenshotService.channel, (call) async {
+      if (call.method == 'setPinBorderDefault') {
+        applied.add(call.arguments as String);
+      }
+      return null;
+    });
+
+    await service.savePinBorderDefault(PinnedImageBorder.dark);
+    await fromEditor('savePinBorderDefault', 'amber');
+    expect(service.active, isFalse);
+    expect(applied, ['dark', 'amber']);
+    expect(controller.pinnedImageBorder, PinnedImageBorder.amber);
+    await service.dispose();
+    service = ScreenshotService(
+      controller,
+      supported: true,
+      canRegisterShortcut: (_) => true,
+    );
+    await service.initialize();
+    expect(applied, ['dark', 'amber', 'amber']);
+    expect(clipboard.writes, 0);
   });
 
   test('预热不启动会话，预热失败仍可截图，新样式在后续会话生效', () async {

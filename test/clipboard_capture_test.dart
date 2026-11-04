@@ -8,6 +8,7 @@ import 'package:idreaml_clip/src/data/clipboard_database.dart';
 import 'package:idreaml_clip/src/data/clipboard_repository.dart';
 import 'package:idreaml_clip/src/models/clipboard_content.dart';
 import 'package:idreaml_clip/src/models/clipboard_item.dart';
+import 'package:idreaml_clip/src/models/pinned_image_border.dart';
 import 'package:idreaml_clip/src/models/quick_shortcut.dart';
 import 'package:idreaml_clip/src/services/clipboard_service.dart';
 import 'package:idreaml_clip/src/services/credential_service.dart';
@@ -224,6 +225,27 @@ void main() {
     expect(next.showScreenshotColorPicker, isFalse);
     await next.saveShowScreenshotColorPicker(true);
     expect(await repository.getSetting('show_screenshot_color_picker'), 'true');
+  });
+
+  test('贴图默认无边框，保存后恢复设置，无效旧值回退到无边框', () async {
+    Future<PinnedImageBorder> borderAfterRestart() async {
+      final next = AppController(
+        repository,
+        SyncService(repository, _Credentials()),
+        clipboard: _Clipboard(),
+      );
+      addTearDown(next.dispose);
+      await next.initialize(startMonitor: false);
+      return next.pinnedImageBorder;
+    }
+
+    expect(controller.pinnedImageBorder, PinnedImageBorder.none);
+    await controller.savePinnedImageBorder(PinnedImageBorder.amber);
+    expect(controller.pinnedImageBorder, PinnedImageBorder.amber);
+    expect(await repository.getSetting('pinned_image_border'), 'amber');
+    expect(await borderAfterRestart(), PinnedImageBorder.amber);
+    await repository.setSetting('pinned_image_border', 'unknown');
+    expect(await borderAfterRestart(), PinnedImageBorder.none);
   });
 
   test('重新初始化应用会恢复 Win+V 开关和独立保存的自定义快捷键', () async {

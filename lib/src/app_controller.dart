@@ -7,6 +7,7 @@ import 'data/clipboard_repository.dart';
 import 'data/data_storage.dart';
 import 'models/clipboard_item.dart';
 import 'models/clipboard_content.dart';
+import 'models/pinned_image_border.dart';
 import 'models/sync_models.dart';
 import 'models/quick_shortcut.dart';
 import 'models/workspace_layout.dart';
@@ -50,6 +51,7 @@ class AppController extends ChangeNotifier {
   );
   QuickShortcut screenshotShortcut = defaultScreenshotShortcut;
   bool showScreenshotColorPicker = true;
+  PinnedImageBorder pinnedImageBorder = PinnedImageBorder.none;
   String? screenshotError;
   bool runAsAdministratorEnabled = false;
   bool isAdministrator = false;
@@ -144,6 +146,7 @@ class AppController extends ChangeNotifier {
       'quick_shortcut',
       'screenshot_shortcut',
       'show_screenshot_color_picker',
+      'pinned_image_border',
       'win_v_shortcut_enabled',
       'quick_count',
       'history_limit',
@@ -157,6 +160,9 @@ class AppController extends ChangeNotifier {
     );
     showScreenshotColorPicker =
         settings['show_screenshot_color_picker'] != 'false';
+    pinnedImageBorder =
+        PinnedImageBorder.tryParse(settings['pinned_image_border']) ??
+        PinnedImageBorder.none;
     winVShortcutEnabled = settings['win_v_shortcut_enabled'] == 'true';
     quickCount = int.tryParse(settings['quick_count'] ?? '') ?? 30;
     if (!_quickCounts.contains(quickCount)) quickCount = 30;
@@ -487,6 +493,12 @@ class AppController extends ChangeNotifier {
   Future<void> saveShowScreenshotColorPicker(bool enabled) async {
     await repository.setSetting('show_screenshot_color_picker', '$enabled');
     showScreenshotColorPicker = enabled;
+    if (!_disposed) notifyListeners();
+  }
+
+  Future<void> savePinnedImageBorder(PinnedImageBorder border) async {
+    await repository.setSetting('pinned_image_border', border.name);
+    pinnedImageBorder = border;
     if (!_disposed) notifyListeners();
   }
 

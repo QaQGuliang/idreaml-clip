@@ -4,6 +4,7 @@ import 'package:window_manager/window_manager.dart';
 import '../app_controller.dart';
 import '../models/clipboard_item.dart';
 import '../models/json_document.dart';
+import '../models/pinned_image_border.dart';
 import '../services/json_preview_formatter.dart';
 import '../models/sync_models.dart';
 import '../models/workspace_layout.dart';
@@ -1767,6 +1768,58 @@ class _SettingsPage extends StatelessWidget {
                     } catch (_) {
                       if (context.mounted) {
                         showMessage(context, '取色器设置保存失败，请重试');
+                      }
+                    }
+                  },
+                ),
+              ),
+              const Divider(height: 1),
+              _SettingRow(
+                title: '贴图默认边框',
+                subtitle: '应用到新贴图和已选择「跟随全局设置」的贴图',
+                trailing: DropdownButton<PinnedImageBorder>(
+                  value: controller.pinnedImageBorder,
+                  underline: const SizedBox.shrink(),
+                  borderRadius: BorderRadius.circular(10),
+                  items: [
+                    for (final border in PinnedImageBorder.values)
+                      DropdownMenuItem(
+                        value: border,
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Container(
+                              width: 16,
+                              height: 16,
+                              alignment: Alignment.center,
+                              decoration: BoxDecoration(
+                                color: border.color,
+                                border: Border.all(color: AppColors.line),
+                                borderRadius: BorderRadius.circular(3),
+                              ),
+                              child: border == PinnedImageBorder.none
+                                  ? const Icon(
+                                      Icons.block,
+                                      size: 12,
+                                      color: AppColors.muted,
+                                    )
+                                  : null,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(border.label),
+                          ],
+                        ),
+                      ),
+                  ],
+                  onChanged: (border) async {
+                    if (border == null) return;
+                    try {
+                      await desktopService.screenshots.savePinBorderDefault(
+                        border,
+                      );
+                    } catch (_) {
+                      if (context.mounted) {
+                        showMessage(context, '贴图边框更新失败，请重试');
                       }
                     }
                   },

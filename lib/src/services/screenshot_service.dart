@@ -8,7 +8,9 @@ import 'package:uuid/uuid.dart';
 
 import '../app_controller.dart';
 import '../models/clipboard_content.dart';
+import '../models/pinned_image_border.dart';
 import '../models/quick_shortcut.dart';
+import 'async_gate.dart';
 import 'clipboard_image_codec.dart';
 import 'shortcut_availability.dart' as availability;
 
@@ -24,6 +26,7 @@ class ScreenshotService {
   static const channel = MethodChannel('idreaml_clip/screenshot');
   final bool supported;
   final bool Function(QuickShortcut) _canRegisterShortcut;
+  final _borderWrites = AsyncGate();
   bool _initialized = false;
   bool active = false;
   bool _suspended = false;
@@ -45,8 +48,18 @@ class ScreenshotService {
     channel.setMethodCallHandler(_handle);
     _styles =
         await controller.repository.getSetting('screenshot_styles') ?? '{}';
+    await channel.invokeMethod<void>(
+      'setPinBorderDefault',
+      controller.pinnedImageBorder.name,
+    );
     await resumeShortcut();
   }
+
+  Future<void> savePinBorderDefault(PinnedImageBorder border) =>
+      _borderWrites.run(() async {
+        await controller.savePinnedImageBorder(border);
+        await channel.invokeMethod<void>('setPinBorderDefault', border.name);
+      });
 
   Future<void> warmUp() async {
     if (!supported || _disposed) return;
@@ -93,6 +106,14 @@ class ScreenshotService {
   }
 
   Future<Object?> _handle(MethodCall call) async {
+    if (call.method == 'savePinBorderDefault' && !_disposed) {
+      final border = PinnedImageBorder.tryParse(call.arguments as String?);
+      if (border == null) {
+        throw PlatformException(code: 'border', message: '未知的贴图边框样式');
+      }
+      await savePinBorderDefault(border);
+      return null;
+    }
     if (call.method == 'copyPinnedImage' && !_disposed) {
       final png = call.arguments as Uint8List;
       await controller.clipboard.write(

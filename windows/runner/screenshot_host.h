@@ -30,6 +30,7 @@ class ScreenshotHost {
                   std::unique_ptr<Result> result);
   void HandleEditor(const flutter::MethodCall<Value>& call,
                     std::unique_ptr<Result> result);
+  void InvokePinAction(HWND window, const char* method, Value argument, const wchar_t* error);
   bool Capture();
   bool EnsureEditor();
   void DestroyEditor();
