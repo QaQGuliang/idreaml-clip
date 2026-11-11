@@ -12,6 +12,8 @@
 #include <string>
 #include <vector>
 
+#include "resource.h"
+
 namespace {
 using Value = flutter::EncodableValue;
 using Map = flutter::EncodableMap;
@@ -291,6 +293,7 @@ bool ScreenshotHost::EnsureEditor() {
   }
   WNDCLASSW cls{};
   cls.hInstance = GetModuleHandle(nullptr);
+  cls.hIcon = LoadIcon(cls.hInstance, MAKEINTRESOURCE(IDI_APP_ICON));
   cls.lpfnWndProc = WindowProc;
   cls.lpszClassName = kClass;
   cls.hCursor = LoadCursor(nullptr, IDC_CROSS);

@@ -9,7 +9,7 @@
 <p align="center">
   <a href="https://qaqguliang.github.io/idreaml-clip/"><strong>完整图文介绍与使用指南 ↗</strong></a>
   &nbsp;·&nbsp;
-  <a href="https://github.com/QaQGuliang/idreaml-clip/releases/tag/v1.1.7">下载 Windows 版</a>
+  <a href="https://github.com/QaQGuliang/idreaml-clip/releases/tag/v1.1.8">下载 Windows 版</a>
   &nbsp;·&nbsp;
   <a href="docs/user-guide.md">详细使用说明</a>
 </p>
@@ -22,16 +22,18 @@
 
 ## 下载
 
-当前版本 **1.1.7+1**，支持 **Windows 10 / 11 x64**。本次仅发布 Windows 版本。
+当前版本 **1.1.8+1**，支持 **Windows 10 / 11 x64**。本次仅发布 Windows 版本。
+
+本版统一应用 Logo、托盘与系统图标，并同步更新网站、README 和使用指南中的品牌素材。
 
 | 安装方式 | 下载与使用 |
 | --- | --- |
-| 安装版 | [下载 EXE 安装包](https://github.com/QaQGuliang/idreaml-clip/releases/download/v1.1.7/Idreaml-Clip-1.1.7%2B1-windows-x64-setup.exe)，按向导完成安装 |
-| 便携版 | [下载 ZIP](https://github.com/QaQGuliang/idreaml-clip/releases/download/v1.1.7/Idreaml-Clip-1.1.7%2B1-windows-x64.zip)，完整解压后运行 `idreaml_clip.exe` |
+| 安装版 | [下载 EXE 安装包](https://github.com/QaQGuliang/idreaml-clip/releases/download/v1.1.8/Idreaml-Clip-1.1.8%2B1-windows-x64-setup.exe)，按向导完成安装 |
+| 便携版 | [下载 ZIP](https://github.com/QaQGuliang/idreaml-clip/releases/download/v1.1.8/Idreaml-Clip-1.1.8%2B1-windows-x64.zip)，完整解压后运行 `idreaml_clip.exe` |
 
 运行所需组件随包提供，无需额外安装 Flutter、Dart 或 Git。便携版请保留旁边的 DLL 和 `data` 目录；升级前从托盘退出旧版并保留原数据目录。当前安装器尚未进行发布者代码签名。
 
-[完整发布说明与 SHA-256 校验文件](https://github.com/QaQGuliang/idreaml-clip/releases/tag/v1.1.7) · [本版更新记录](assets/release-info.json)
+[完整发布说明与 SHA-256 校验文件](https://github.com/QaQGuliang/idreaml-clip/releases/tag/v1.1.8) · [本版更新记录](assets/release-info.json)
 
 ## 能做什么
 

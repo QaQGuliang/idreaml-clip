@@ -2,19 +2,21 @@
 
 [返回项目首页](../README.md) · [打开完整图文网站](https://qaqguliang.github.io/idreaml-clip/)
 
-本文保留详细功能说明和操作边界，当前使用步骤以 Windows 1.1.7+1 为准。
+本文保留详细功能说明和操作边界，当前使用步骤以 Windows 1.1.8+1 为准。
 
 Idreaml Clip 是一款面向桌面端的本地优先剪切板管理工具。它会自动保存你复制过的文本，Windows 版也支持截图和图片，让临时复制的内容不再因为下一次复制而丢失。
 
 无论是整理资料、编写文档、处理代码，还是在多个应用之间频繁搬运内容，Idreaml Clip 都能帮助你快速找回、搜索并再次使用历史剪切板内容。
 
-当前版本为 **1.1.7**。本版新增 Windows 桌面便签与待办，支持独立管理与同步、无边框毛玻璃列表，以及字体、字号和文字颜色自定义。完整改动见[本版更新说明](../assets/release-info.json)。
+当前版本为 **1.1.8+1**。本版统一应用 Logo、托盘与系统图标，并更新网站、README 和使用指南中的品牌素材。剪切板、截图、便签与待办的使用方式延续现有功能。完整改动见[本版更新说明](../assets/release-info.json)。
 
 在 [GitHub Releases](https://github.com/QaQGuliang/idreaml-clip/releases/latest) 下载 Windows x64 安装包或便携 ZIP；每个版本同时提供 SHA-256 校验文件。本次仅发布 Windows 版本。
 
 Windows 版支持 Windows 10/11 x64；Mac 测试包目标为 Apple Silicon（M 系列）与 macOS 13+，使用免费 ad-hoc 本地签名，不包含苹果公证。当前 Mac 功能范围是本地文本记录、搜索、收藏、JSON 预览和快捷面板；图片采集与写回、自动粘贴、同步令牌存储尚未适配。
 
 完整的应用介绍、安装步骤和界面截图见[图文网站](https://qaqguliang.github.io/idreaml-clip/)。网站源码位于 [website/](../website/)。本地讨论、开发设计与打包记录保存在不纳入版本控制的 `doc/` 中。打包入口见 [Windows 打包脚本](../scripts/package-windows.ps1)、[Windows 安装器脚本](../scripts/package-windows-installer.ps1)和 [macOS 打包脚本](../scripts/package-macos.sh)。
+
+在项目根目录运行 `python scripts/build-user-guide.py`，可从网站源码和图片生成离线单文件指南。生成前会核对网站与版本信息；图像和网站图标会嵌入 HTML，无需联网即可阅读。输出位于 `doc/使用指南/`，并同步无版本的 `配套资料/使用指南.html`；历史版本指南保持不变。
 
 ## 产品介绍
 

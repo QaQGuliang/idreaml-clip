@@ -11,7 +11,7 @@ class BrandMark extends StatelessWidget {
   Widget build(BuildContext context) => SizedBox.square(
     dimension: size,
     child: Image.asset(
-      'assets/brand/idreaml_logo_v2.png',
+      'assets/brand/idreaml_logo.png',
       fit: BoxFit.contain,
       filterQuality: FilterQuality.high,
       semanticLabel: 'Idreaml Logo',

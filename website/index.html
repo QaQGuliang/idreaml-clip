@@ -6,8 +6,8 @@
 <meta name="color-scheme" content="light">
 <link rel="icon" type="image/png" href="assets/logo.png">
 <link rel="canonical" href="https://qaqguliang.github.io/idreaml-clip/">
-<meta name="description" content="理梦剪藏 Idreaml Clip 1.1.7：Windows 剪切板历史、截图贴图、桌面便签与待办的图文介绍和使用指南。">
-<title>理梦剪藏 · 应用介绍与使用指南 · 1.1.7</title>
+<meta name="description" content="理梦剪藏 Idreaml Clip 1.1.8：Windows 剪切板历史、截图贴图、桌面便签与待办的图文介绍和使用指南。">
+<title>理梦剪藏 · 应用介绍与使用指南 · 1.1.8</title>
 <style>
 :root{--ink:#292535;--muted:#706b7d;--purple:#6c57e5;--deep:#5140ba;--soft:#f0edff;--paper:#fff;--canvas:#f7f6fa;--line:#e7e4ef;--green:#25836c;--radius:18px}
 *{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:100px}body{margin:0;font:15px/1.85 -apple-system,BlinkMacSystemFont,"Segoe UI","Microsoft YaHei UI","PingFang SC",sans-serif;color:var(--ink);background:var(--canvas)}a{color:var(--deep);text-decoration:none}a:hover{text-decoration:underline}button{font:inherit}button,a{-webkit-tap-highlight-color:transparent}button:focus-visible,a:focus-visible,summary:focus-visible{outline:3px solid #a99afa;outline-offset:4px}img{max-width:100%;height:auto;display:block}h1,h2,h3,p,figure{margin:0}h1,h2,h3{line-height:1.4;font-weight:700}h2{font-size:32px;letter-spacing:-.7px}h3{font-size:20px}p+p{margin-top:14px}strong{font-weight:650}ul,ol{padding-left:1.35em;margin:12px 0}li+li{margin-top:8px}code{background:#eeeaf5;color:#594d78;border-radius:5px;padding:2px 6px;font-family:Consolas,monospace;font-size:.9em;overflow-wrap:anywhere}kbd{display:inline-block;vertical-align:baseline;white-space:nowrap;font:12px/1.6 Consolas,"Microsoft YaHei UI",monospace;padding:2px 7px;border:1px solid #ded9ea;border-bottom-width:2px;border-radius:5px;background:#faf9fd;color:#544b69}
@@ -28,7 +28,7 @@ dialog{padding:0;border:0;border-radius:16px;width:min(1320px,94vw);max-width:no
 <header class="topbar"><div class="wrap"><a class="brand" href="#top"><img src="assets/logo.png" alt="理梦剪藏标志" width="32" height="32">Idreaml Clip<small>理梦剪藏</small></a><nav class="header-links" aria-label="顶部导航"><a class="desktop-only" href="#quickstart">开始使用</a><a href="#features">功能指南</a><a href="#download" class="download-small">下载 Windows 版 ↗</a></nav></div></header>
 <main id="top">
 <section class="hero"><div class="wrap">
-  <div class="eyebrow"><span class="pill">WINDOWS · 1.1.7</span><span>应用介绍与使用指南</span></div>
+  <div class="eyebrow"><span class="pill">WINDOWS · 1.1.8</span><span>应用介绍与使用指南</span></div>
   <div class="hero-copy"><div><h1>复制过的内容，<br>值得<em>再次找到。</em></h1></div><div class="hero-description"><p class="lead">用快捷剪切板找回文字和图片，用截图与贴图整理信息，再把灵感与计划放到桌面。让常用内容，都有一个顺手的位置。</p><div class="actions"><a class="button primary" href="#download">下载理梦剪藏 <span aria-hidden="true">↓</span></a><a class="button textual" href="#quickstart">三步开始使用 <span aria-hidden="true">→</span></a></div></div></div>
   <figure><div class="hero-image"><button class="image-button" type="button" data-zoom aria-label="放大查看理梦剪藏全部历史界面"><img src="assets/main-history.png" width="1120" height="760" alt="理梦剪藏全部历史界面：左侧导航、中间剪切板历史、右侧内容详情"></button></div><figcaption class="hero-caption"><span>全部历史 · 搜索、收藏和预览，在同一个窗口完成。</span><span>界面图使用示例内容，点击图片可放大。</span></figcaption></figure>
   <div class="value-row"><div><b><i class="value-dot"></i>本地优先</b><span>无需注册，未配置云同步也能使用。</span></div><div><b><i class="value-dot"></i>按需同步</b><span>通过自己的 Git 仓库连接多台设备。</span></div><div><b><i class="value-dot"></i>桌面常伴</b><span>支持 Windows 10 / 11，x64 架构。</span></div></div>
@@ -36,9 +36,9 @@ dialog{padding:0;border:0;border-radius:16px;width:min(1320px,94vw);max-width:no
 <div class="wrap">
 <nav class="toc" aria-label="指南目录"><span class="toc-label">阅读导航</span><a href="#download">下载安装</a><a href="#quickstart">三步上手</a><a href="#clipboard">快捷剪切板</a><a href="#capture">截图与贴图</a><a href="#desk">便签与待办</a><a href="#json">图片与 JSON</a><a href="#sync">云同步</a><a href="#shortcuts">快捷键</a><a href="#faq">常见问题</a></nav>
 
-<section class="section" id="download"><div class="section-head"><div class="section-number">01 / DOWNLOAD</div><h2>选一种安装方式，开始使用。</h2><p>本次发布为 Windows 1.1.7+1。运行所需组件已随包提供，无需另外安装 Flutter、Dart 或 Git。</p></div>
-  <div class="downloads"><article class="surface download-card"><span class="tag">推荐 · 日常使用</span><h3>Windows 安装版</h3><p>跟随安装向导选择目录与快捷方式。适合首次安装，也可用于覆盖升级已有安装版。</p><a class="button primary" href="https://github.com/QaQGuliang/idreaml-clip/releases/download/v1.1.7/Idreaml-Clip-1.1.7%2B1-windows-x64-setup.exe">下载安装包 <span aria-hidden="true">↓</span></a><div class="minor">EXE · 约 15.2 MB · Windows x64</div></article><article class="surface download-card"><span class="tag neutral">免安装 · 自行管理目录</span><h3>Windows 便携版</h3><p>将 ZIP 完整解压到固定目录，然后打开 idreaml_clip.exe。保留旁边的 DLL 和 data 目录。</p><a class="button" href="https://github.com/QaQGuliang/idreaml-clip/releases/download/v1.1.7/Idreaml-Clip-1.1.7%2B1-windows-x64.zip">下载便携 ZIP <span aria-hidden="true">↓</span></a><div class="minor">ZIP · 约 18.2 MB · Windows x64</div></article></div>
-  <p class="minor"><a href="https://github.com/QaQGuliang/idreaml-clip/releases/tag/v1.1.7" target="_blank" rel="noopener noreferrer">查看完整发布说明与 SHA-256 校验文件 ↗</a></p>
+<section class="section" id="download"><div class="section-head"><div class="section-number">01 / DOWNLOAD</div><h2>选一种安装方式，开始使用。</h2><p>本次发布为 Windows 1.1.8+1，统一应用 Logo、托盘与系统图标，以及网站和指南中的品牌素材。运行所需组件已随包提供，无需另外安装 Flutter、Dart 或 Git。</p></div>
+  <div class="downloads"><article class="surface download-card"><span class="tag">推荐 · 日常使用</span><h3>Windows 安装版</h3><p>跟随安装向导选择目录与快捷方式。适合首次安装，也可用于覆盖升级已有安装版。</p><a class="button primary" href="https://github.com/QaQGuliang/idreaml-clip/releases/download/v1.1.8/Idreaml-Clip-1.1.8%2B1-windows-x64-setup.exe">下载安装包 <span aria-hidden="true">↓</span></a><div class="minor">EXE · 约 16.2 MB · Windows x64</div></article><article class="surface download-card"><span class="tag neutral">免安装 · 自行管理目录</span><h3>Windows 便携版</h3><p>将 ZIP 完整解压到固定目录，然后打开 idreaml_clip.exe。保留旁边的 DLL 和 data 目录。</p><a class="button" href="https://github.com/QaQGuliang/idreaml-clip/releases/download/v1.1.8/Idreaml-Clip-1.1.8%2B1-windows-x64.zip">下载便携 ZIP <span aria-hidden="true">↓</span></a><div class="minor">ZIP · 约 18.8 MB · Windows x64</div></article></div>
+  <p class="minor"><a href="https://github.com/QaQGuliang/idreaml-clip/releases/tag/v1.1.8" target="_blank" rel="noopener noreferrer">查看完整发布说明与 SHA-256 校验文件 ↗</a></p>
   <div class="note"><strong>从旧版升级：</strong>先从托盘退出旧版，保留原数据目录，再安装或解压新版。应用会继续使用已配置的数据位置。当前安装器尚未进行发布者代码签名。</div>
 </section>
 
@@ -59,7 +59,7 @@ dialog{padding:0;border:0;border-radius:16px;width:min(1320px,94vw);max-width:no
   <div class="subsection surface"><h3>页面太长，就用滚动长截图。</h3><p class="text-block">框选一个连续滚动区域，点击“长截图”。手动向下滚动，或在设置中选用自动滚动；自动滚动到底后会停在预览。</p><div class="workflow" aria-label="长截图流程"><span>选择滚动区域</span><i aria-hidden="true">→</i><span>点击长截图</span><i aria-hidden="true">→</i><span>滚动与预览</span><i aria-hidden="true">→</i><span>完成，进入编辑</span><i aria-hidden="true">→</i><span>再次完成，复制入库</span></div><figure class="small-image"><button class="image-button" type="button" data-zoom aria-label="放大长图编辑工具栏"><img src="assets/long-editor.png" width="1040" height="90" alt="长图编辑窗口顶部：标注工具、缩放、适应宽度、贴图、保存和完成按钮" loading="lazy"></button><figcaption>长图编辑窗口支持跨屏拖动、缩放和多种箭头样式。</figcaption></figure><p class="minor">两个独立滚动的窗格请分别框选。遇到自动滚动无法响应的页面，可在预览中切换为手动滚动。</p></div>
 </section>
 
-<section class="section" id="desk"><div class="section-head"><div class="section-number">05 / NOTES & TODOS <span class="tag">1.1.7 新增</span></div><h2>把想法和计划，放到桌面。</h2><p>便签记下灵感与临时信息，待办承接接下来要做的事。两者独立保存，内容不进入剪切板历史。</p></div>
+<section class="section" id="desk"><div class="section-head"><div class="section-number">05 / NOTES & TODOS <span class="tag">桌面模块</span></div><h2>把想法和计划，放到桌面。</h2><p>便签记下灵感与临时信息，待办承接接下来要做的事。两者独立保存，内容不进入剪切板历史。</p></div>
   <div class="desk-intro"><p>单按 <kbd>F3</kbd>，记下一个想法。<br>快速双按 <kbd>F3</kbd>，添加一件待办。</p><small>也可使用快捷面板顶部的图标，或在管理页面新增。</small></div>
   <div class="image-pair"><figure class="figure-frame"><button class="image-button" type="button" data-zoom aria-label="放大便签管理界面"><img src="assets/desk-notes.png" width="1120" height="760" alt="便签管理界面：搜索、新建便签、条目内容和编辑操作" loading="lazy"></button><figcaption><strong>便签</strong> · 支持标题与多行正文，集中搜索、查看和编辑。</figcaption></figure><figure class="figure-frame"><button class="image-button" type="button" data-zoom aria-label="放大待办管理界面"><img src="assets/desk-todos.png" width="1120" height="760" alt="待办管理界面：待完成与已完成分类、事项内容及完成操作" loading="lazy"></button><figcaption><strong>待办</strong> · 勾选完成后从桌面收起，管理页仍可查看和恢复。</figcaption></figure></div>
   <div class="desk-how"><article><h3>① 先开启，再使用</h3><p>进入“设置 → 便签与待办”，分别开启两个模块。相应的导航入口、快捷按钮和桌面列表才会出现。</p></article><article><h3>② 选一块桌面区域</h3><p>分别选择显示器和展示区域。每个列表只出现在一台显示器上，区域位置和大小从设置中修改。</p></article><article><h3>③ 按自己的习惯管理</h3><p>在管理页搜索、编辑或删除。关闭功能只隐藏入口和列表，已有内容和配置继续保留。</p></article></div>
@@ -96,11 +96,11 @@ dialog{padding:0;border:0;border-radius:16px;width:min(1320px,94vw);max-width:no
   <details><summary>我习惯用 Win+V，可以更换吗？</summary><div>可以。在“设置 → 快捷键”开启“固定 Win+V 快捷键”，应用运行期间会用它呼出快捷面板，原自定义快捷键暂停。关闭该开关后恢复原组合；应用退出后释放拦截。</div></details>
   <details><summary>透明度调到 100%，为什么卡片还看得见？</summary><div>这是预期效果。背景透明度控制毛玻璃上的底色，100% 透明仍保留静态壁纸的模糊效果和少量染色，文字保持不透明。它不会模糊动态视频壁纸、桌面图标或其他应用窗口。</div></details>
   <details><summary>Git 同步会覆盖多台电脑各自的桌面布局吗？</summary><div>不会。便签与待办同步内容、单条文字样式以及完成和删除状态。列表位置、显示器、默认主题和草稿保留在各自电脑上。多设备并发修改会保留双方版本，由你在管理页选择。</div></details>
-  <details><summary>这次也有 macOS 和 Linux 安装包吗？</summary><div>1.1.7+1 本次仅发布 Windows x64 版本，便签与待办首期也在 Windows 上实现和验证。其他平台以后再适配；本页的操作步骤以当前 Windows 版为准。</div></details>
+  <details><summary>这次也有 macOS 和 Linux 安装包吗？</summary><div>1.1.8+1 本次仅发布 Windows x64 版本，便签与待办首期也在 Windows 上实现和验证。其他平台以后再适配；本页的操作步骤以当前 Windows 版为准。</div></details>
   </div>
-  <div class="release-box"><div><h3>准备好，让常用内容更顺手。</h3><p>获取 Windows 1.1.7+1，或在 GitHub 查看本版改动与后续更新。</p></div><a class="button primary" href="https://github.com/QaQGuliang/idreaml-clip/releases/tag/v1.1.7" target="_blank" rel="noopener noreferrer">前往版本下载页 ↗</a></div>
+  <div class="release-box"><div><h3>准备好，让常用内容更顺手。</h3><p>获取 Windows 1.1.8+1，或在 GitHub 查看本版改动与后续更新。</p></div><a class="button primary" href="https://github.com/QaQGuliang/idreaml-clip/releases/tag/v1.1.8" target="_blank" rel="noopener noreferrer">前往版本下载页 ↗</a></div>
 </section>
-<footer class="footer"><div><strong>Idreaml Clip · 理梦剪藏</strong><br>应用介绍与使用指南 · 1.1.7+1 · 2026.11.12</div><div><a href="#top">回到顶部 ↑</a><a href="https://github.com/QaQGuliang/idreaml-clip" target="_blank" rel="noopener noreferrer">GitHub 仓库 ↗</a></div></footer>
+<footer class="footer"><div><strong>Idreaml Clip · 理梦剪藏</strong><br>应用介绍与使用指南 · 1.1.8+1 · 2026.11.12</div><div><a href="#top">回到顶部 ↑</a><a href="https://github.com/QaQGuliang/idreaml-clip" target="_blank" rel="noopener noreferrer">GitHub 仓库 ↗</a></div></footer>
 </div>
 </main>
 <dialog id="image-dialog" aria-labelledby="image-title"><div class="dialog-head"><span id="image-title">界面预览</span><button type="button" id="close-dialog" aria-label="关闭图片预览">关闭 ×</button></div><div class="dialog-body"><img id="expanded-image" alt=""></div></dialog>
