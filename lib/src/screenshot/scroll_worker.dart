@@ -88,6 +88,9 @@ class ScrollWorker {
   static void _run((SendPort, int, int) arguments) {
     final (replies, width, height) = arguments;
     final stitcher = ScrollStitcher(width, height);
+    final previewClock = Stopwatch()..start();
+    var previewHeight = 0;
+    var previousTail = false;
     final commands = ReceivePort();
     replies.send(commands.sendPort);
     commands.listen((dynamic raw) {
@@ -100,9 +103,22 @@ class ScrollWorker {
               .asUint8List();
           final result = stitcher.add(pixels);
           reply['kind'] = result.kind.name;
-          if (result.kind == ScrollMatchKind.first ||
-              result.kind == ScrollMatchKind.appended) {
-            final thumbnail = stitcher.thumbnail();
+          final atLimit =
+              result.kind == ScrollMatchKind.limit ||
+              stitcher.height >= stitcher.maxHeight ||
+              (stitcher.height + 1) * width > stitcher.maxPixels;
+          reply['atLimit'] = atLimit;
+          final tail =
+              result.kind == ScrollMatchKind.reverse ||
+              result.kind == ScrollMatchKind.unmatched;
+          if (previewHeight == 0 ||
+              previousTail != tail ||
+              (previewHeight != stitcher.height &&
+                  (previewClock.elapsedMilliseconds >= 150 || atLimit))) {
+            final thumbnail = stitcher.thumbnail(tailOnly: tail);
+            previousTail = tail;
+            previewHeight = stitcher.height;
+            previewClock.reset();
             reply['thumbnail'] = TransferableTypedData.fromList([
               thumbnail.pixels,
             ]);

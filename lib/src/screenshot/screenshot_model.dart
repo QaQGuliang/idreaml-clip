@@ -4,6 +4,11 @@ import 'dart:math' as math;
 import 'package:flutter/foundation.dart';
 import 'package:flutter/painting.dart';
 
+import '../models/arrow_style.dart';
+import 'screenshot_arrow.dart';
+
+export '../models/arrow_style.dart';
+
 enum ScreenshotTool {
   select,
   rectangle,
@@ -32,6 +37,23 @@ extension ScreenshotToolLabel on ScreenshotTool {
     '实心遮盖',
     '自动编号',
   ][index];
+
+  bool get usesWidth => switch (this) {
+    ScreenshotTool.rectangle ||
+    ScreenshotTool.ellipse ||
+    ScreenshotTool.line ||
+    ScreenshotTool.arrow ||
+    ScreenshotTool.pen ||
+    ScreenshotTool.highlighter ||
+    ScreenshotTool.mosaic => true,
+    _ => false,
+  };
+
+  bool get usesFontSize =>
+      this == ScreenshotTool.text || this == ScreenshotTool.number;
+
+  bool get usesColor =>
+      this != ScreenshotTool.select && this != ScreenshotTool.mosaic;
 }
 
 @immutable
@@ -40,25 +62,34 @@ class ToolStyle {
     this.color = const Color(0xFFEF4444),
     this.width = 3,
     this.fontSize = 24,
+    this.arrowStyle = ArrowStyle.single,
   });
   final Color color;
   final double width;
   final double fontSize;
-  ToolStyle copyWith({Color? color, double? width, double? fontSize}) =>
-      ToolStyle(
-        color: color ?? this.color,
-        width: width ?? this.width,
-        fontSize: fontSize ?? this.fontSize,
-      );
+  final ArrowStyle arrowStyle;
+  ToolStyle copyWith({
+    Color? color,
+    double? width,
+    double? fontSize,
+    ArrowStyle? arrowStyle,
+  }) => ToolStyle(
+    color: color ?? this.color,
+    width: width ?? this.width,
+    fontSize: fontSize ?? this.fontSize,
+    arrowStyle: arrowStyle ?? this.arrowStyle,
+  );
   Map<String, dynamic> toJson() => {
     'color': color.toARGB32(),
     'width': width,
     'fontSize': fontSize,
+    if (arrowStyle != ArrowStyle.single) 'arrowStyle': arrowStyle.name,
   };
   static ToolStyle fromJson(Map<String, dynamic> data) => ToolStyle(
     color: Color((data['color'] as num?)?.toInt() ?? 0xFFEF4444),
     width: ((data['width'] as num?)?.toDouble() ?? 3).clamp(1, 40),
     fontSize: ((data['fontSize'] as num?)?.toDouble() ?? 24).clamp(12, 96),
+    arrowStyle: ArrowStyle.tryParse(data['arrowStyle']) ?? ArrowStyle.single,
   );
 }
 
@@ -78,7 +109,11 @@ class ScreenshotAnnotation {
   final ToolStyle style;
   final String text;
   final int number;
+  ArrowGeometry get arrowGeometry =>
+      ArrowGeometry(points.first, points.last, style.width, style.arrowStyle);
+
   Rect get bounds {
+    if (tool == ScreenshotTool.arrow) return arrowGeometry.bounds;
     if (tool == ScreenshotTool.text) {
       final painter = textPainter;
       return points.first &
@@ -128,23 +163,18 @@ class ScreenshotAnnotation {
   ScreenshotAnnotation move(Offset delta) =>
       copyWith(points: points.map((p) => p + delta).toList());
   bool hit(Offset point, double tolerance) {
+    if (tool == ScreenshotTool.arrow) {
+      return arrowGeometry.hit(point, tolerance);
+    }
     if (!bounds.inflate(math.max(tolerance, style.width)).contains(point)) {
       return false;
     }
     if (tool == ScreenshotTool.line ||
-        tool == ScreenshotTool.arrow ||
         tool == ScreenshotTool.pen ||
         tool == ScreenshotTool.highlighter) {
       for (var i = 1; i < points.length; i++) {
-        final a = points[i - 1], b = points[i], d = b - a;
-        final length = d.distanceSquared;
-        final t = length == 0
-            ? 0.0
-            : (((point - a).dx * d.dx + (point - a).dy * d.dy) / length).clamp(
-                0.0,
-                1.0,
-              );
-        if ((point - (a + d * t)).distance <= tolerance + style.width) {
+        if (distanceToSegment(point, points[i - 1], points[i]) <=
+            tolerance + style.width) {
           return true;
         }
       }
@@ -162,7 +192,11 @@ class ScreenshotSnapshot {
 }
 
 class ScreenshotModel extends ChangeNotifier {
-  ScreenshotModel(this.size, {String styles = '{}'}) {
+  ScreenshotModel(
+    this.size, {
+    String styles = '{}',
+    ArrowStyle? initialArrowStyle,
+  }) : _sessionArrowStyle = initialArrowStyle {
     try {
       final decoded = jsonDecode(styles) as Map<String, dynamic>;
       for (final tool in ScreenshotTool.values) {
@@ -176,6 +210,14 @@ class ScreenshotModel extends ChangeNotifier {
       /* Corrupt style preferences never block capture. */
     }
   }
+  ScreenshotModel.forLongImage(this.size, ScreenshotModel previous)
+    : _sessionArrowStyle = previous._sessionArrowStyle {
+    toolStyles.addAll(previous.toolStyles);
+  }
+
+  // A fixed startup preference belongs to this capture. Keep the user's
+  // last explicit choice available if they switch back to “use last”.
+  ArrowStyle? _sessionArrowStyle;
   final Size size;
   Rect? selection;
   List<ScreenshotAnnotation> annotations = [];
@@ -199,17 +241,23 @@ class ScreenshotModel extends ChangeNotifier {
     return null;
   }
 
-  ToolStyle get style =>
-      toolStyles[tool] ??
-      switch (tool) {
-        ScreenshotTool.highlighter => const ToolStyle(
-          color: Color(0xFFFFDE33),
-          width: 18,
-        ),
-        ScreenshotTool.mosaic => const ToolStyle(width: 12),
-        ScreenshotTool.cover => const ToolStyle(color: Color(0xFF111827)),
-        _ => const ToolStyle(),
-      };
+  ToolStyle get style {
+    final saved =
+        toolStyles[tool] ??
+        switch (tool) {
+          ScreenshotTool.highlighter => const ToolStyle(
+            color: Color(0xFFFFDE33),
+            width: 18,
+          ),
+          ScreenshotTool.mosaic => const ToolStyle(width: 12),
+          ScreenshotTool.cover => const ToolStyle(color: Color(0xFF111827)),
+          _ => const ToolStyle(),
+        };
+    return tool == ScreenshotTool.arrow && _sessionArrowStyle != null
+        ? saved.copyWith(arrowStyle: _sessionArrowStyle)
+        : saved;
+  }
+
   ScreenshotSnapshot get snapshot =>
       ScreenshotSnapshot(selection, List.of(annotations));
   String encodeStyles() => jsonEncode(
@@ -219,11 +267,14 @@ class ScreenshotModel extends ChangeNotifier {
       Offset(point.dx.clamp(0, size.width), point.dy.clamp(0, size.height));
   Rect clampSelection(Rect rect) {
     final clipped = rect.intersect(screen);
+    // Logical coordinates at fractional DPI can straddle an integer pixel
+    // by floating-point roundoff. Keep genuinely fractional edges outward.
+    const epsilon = 1e-8;
     return Rect.fromLTRB(
-      clipped.left.floorToDouble(),
-      clipped.top.floorToDouble(),
-      clipped.right.ceilToDouble(),
-      clipped.bottom.ceilToDouble(),
+      (clipped.left + epsilon).floorToDouble(),
+      (clipped.top + epsilon).floorToDouble(),
+      (clipped.right - epsilon).ceilToDouble(),
+      (clipped.bottom - epsilon).ceilToDouble(),
     );
   }
 
@@ -241,14 +292,55 @@ class ScreenshotModel extends ChangeNotifier {
   void setStyle(ToolStyle value) {
     final object = selected;
     final target = object?.tool ?? tool;
-    toolStyles[target] = value;
+    var preference = value;
+    if (target == ScreenshotTool.arrow) {
+      if (value.arrowStyle != (object?.style ?? style).arrowStyle) {
+        _sessionArrowStyle = null;
+      } else {
+        // Changing the color/width of an arrow is not a new choice of shape.
+        preference = value.copyWith(
+          arrowStyle: toolStyles[target]?.arrowStyle ?? ArrowStyle.single,
+        );
+      }
+    }
+    toolStyles[target] = preference;
     if (object != null) {
-      begin();
+      final separateEdit = !hasGesture;
+      if (separateEdit) begin();
       replace(object.copyWith(style: value));
-      end();
+      if (separateEdit) end();
     } else {
       changed();
     }
+  }
+
+  /// Returns whether this tool handles a size shortcut, including at its limits.
+  bool adjustSize(int direction) {
+    final object = selected;
+    final target = object?.tool ?? tool;
+    final numbered = target == ScreenshotTool.number;
+    if (direction == 0 || (!target.usesWidth && !numbered)) return false;
+    final current = object?.style ?? style;
+    final minimum = numbered
+        ? 12.0
+        : (target == ScreenshotTool.mosaic ? 2.0 : 1.0);
+    final maximum = numbered ? 96.0 : 40.0;
+    final size = (numbered ? current.fontSize : current.width).clamp(
+      minimum,
+      maximum,
+    );
+    final next = (size + direction.sign * (numbered ? 2 : 1)).clamp(
+      minimum,
+      maximum,
+    );
+    if (next != size) {
+      setStyle(
+        numbered
+            ? current.copyWith(fontSize: next)
+            : current.copyWith(width: next),
+      );
+    }
+    return true;
   }
 
   void begin() {
@@ -303,9 +395,9 @@ class ScreenshotModel extends ChangeNotifier {
     changed();
   }
 
-  void selectAll() {
+  void selectAll([Rect? bounds]) {
     begin();
-    setSelection(screen);
+    setSelection(bounds ?? screen);
     end();
   }
 

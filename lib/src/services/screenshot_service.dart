@@ -95,17 +95,28 @@ class ScreenshotService {
       if (hidePanel != null) await hidePanel();
       await channel.invokeMethod<void>('open', {
         'styles': _styles,
+        if (controller.defaultArrowStyle != null)
+          'defaultArrowStyle': controller.defaultArrowStyle!.name,
         'showColorPicker': controller.showScreenshotColorPicker,
+        'autoScroll': controller.autoScrollCapture,
+        'screenshotShortcut': controller.screenshotShortcut.label(),
       });
       controller.setScreenshotError(null);
-    } on Object {
+    } catch (error) {
       active = false;
       _session = null;
-      controller.setScreenshotError('截图启动失败，请重试；若快捷键被占用，可在设置中修改');
+      controller.setScreenshotError(
+        error is PlatformException && error.message?.isNotEmpty == true
+            ? error.message!
+            : '截图启动失败，请重试',
+      );
     }
   }
 
   Future<Object?> _handle(MethodCall call) async {
+    if (call.method == 'getScreenshotShortcut' && !_disposed) {
+      return controller.screenshotShortcut.label();
+    }
     if (call.method == 'savePinBorderDefault' && !_disposed) {
       final border = PinnedImageBorder.tryParse(call.arguments as String?);
       if (border == null) {

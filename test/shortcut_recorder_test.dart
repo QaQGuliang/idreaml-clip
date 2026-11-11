@@ -44,6 +44,8 @@ void main() {
       IdreamlClipApp(controller: controller, desktopService: desktop),
     );
     await tester.pumpAndSettle();
+    await tester.tap(find.text('快捷键'));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('custom-shortcut-button')));
     await tester.pumpAndSettle();
   }

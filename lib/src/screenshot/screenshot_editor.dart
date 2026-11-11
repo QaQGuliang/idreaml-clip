@@ -6,12 +6,19 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
+import '../ui/shortcut_help.dart';
+import 'arrow_style_picker.dart';
 import 'screenshot_color_picker.dart';
 import 'screenshot_model.dart';
 import 'screenshot_renderer.dart';
 import 'scroll_capture_controller.dart';
 
+part 'long_editor_toolbar.dart';
+
 const _channel = MethodChannel('idreaml_clip/screenshot');
+const _screenGapWarning = '选区包含显示器之间的空隙，请收窄选区后再截长图';
+const _overlayToolColor = Color(0xFFF5F5FA);
+const _overlayDisabledToolColor = Color(0xFFA9ABB8);
 
 enum _ScreenshotAction { copy, saveAs, pin }
 
@@ -78,6 +85,14 @@ class _ScreenshotSessionHostState extends State<_ScreenshotSessionHost> {
       if (args['session'] == _generation && _snapshot != null) {
         _editorKey?.currentState?._handleLocalShortcut(args['key'] as String);
       }
+    } else if (call.method == 'requestClose' && call.arguments == _generation) {
+      final editor = _editorKey?.currentState;
+      if (editor != null && editor._longImage) unawaited(editor._close());
+    } else if (call.method == 'longEditorWindowState') {
+      final args = call.arguments as Map;
+      if (args['session'] == _generation) {
+        _editorKey?.currentState?._setMaximized(args['maximized'] == true);
+      }
     } else if (call.method == 'reset') {
       final session = call.arguments as int;
       if (mounted && session >= _generation) {
@@ -111,11 +126,17 @@ class ScreenshotEditor extends StatefulWidget {
   State<ScreenshotEditor> createState() => _ScreenshotEditorState();
 }
 
-class _ScreenshotEditorState extends State<ScreenshotEditor> {
+class _ScreenshotEditorState extends State<ScreenshotEditor>
+    with WidgetsBindingObserver {
   ui.Image? _background, _composite;
   ScreenshotModel? _model;
   List<Rect> _windows = [];
+  List<Rect> _monitors = [];
+  Offset? _selectionAnchor;
   final _focus = FocusNode();
+  ScreenshotTool? _toolBeforeControl;
+  bool _viewFocused = true;
+  bool _controlArmed = false;
   final _textFocus = FocusNode();
   final _text = TextEditingController();
   final _canvasKey = GlobalKey();
@@ -127,7 +148,9 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
   Offset _pointer = Offset.zero;
   Uint8List? _frozenPixels;
   bool _showColorPicker = true;
+  bool get _autoScroll => widget.snapshot['autoScroll'] == true;
   bool _currentRoute = true, _localShortcutsEnabled = true;
+  bool _helpOpen = false;
   Offset? _down;
   Rect? _originalRect;
   ScreenshotAnnotation? _originalObject;
@@ -136,14 +159,16 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
   String _drag = '';
   double _scale = 1;
   bool _busy = false, _locked = false, _rendering = false, _renderAgain = false;
+  bool _closing = false;
   _ScreenshotAction _pendingAction = _ScreenshotAction.copy;
   Offset _captureOrigin = Offset.zero;
   String? _error;
   Timer? _renderTimer;
-  List<ScreenshotAnnotation>? _renderedObjects;
+  List<ScreenshotAnnotation> _renderedObjects = const [];
   ScrollCaptureController? _scrollCapture;
   bool _longImage = false, _longFinishArmed = true;
   double _longZoom = 1;
+  bool _maximized = false;
   final _longVertical = ScrollController();
   final _longHorizontal = ScrollController();
   Timer? _finishArmTimer;
@@ -151,13 +176,113 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
     for (final rect in _windows) {
       if (rect.contains(_pointer)) return rect;
     }
-    return _model?.screen;
+    return _monitorAt(_pointer) ?? _model?.screen;
+  }
+
+  Rect? _monitorAt(Offset point) {
+    for (final monitor in _monitors) {
+      if (monitor.contains(point)) return monitor;
+    }
+    return null;
+  }
+
+  // Keep controls on a real screen, including when the selection spans screens.
+  // Moving the pointer to the toolbar must not relocate it mid-click.
+  Rect get _toolsMonitor {
+    final selection = _model!.selection;
+    if (selection == null) return _monitorAt(_pointer) ?? _monitors.first;
+    final last = _monitorAt(_selectionAnchor ?? _pointer);
+    if (last != null && last.overlaps(selection)) return last;
+    var best = _monitors.first;
+    double bestArea = 0;
+    for (final monitor in _monitors) {
+      final area = monitor.intersect(selection);
+      if (!area.isEmpty && area.width * area.height > bestArea) {
+        bestArea = area.width * area.height;
+        best = monitor;
+      }
+    }
+    return best;
   }
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    HardwareKeyboard.instance.addHandler(_observeControlKey);
+    _focus.addListener(_editorFocusChanged);
     unawaited(_load());
+  }
+
+  bool _observeControlKey(KeyEvent event) {
+    if (event.logicalKey == LogicalKeyboardKey.controlLeft ||
+        event.logicalKey == LogicalKeyboardKey.controlRight) {
+      if (!HardwareKeyboard.instance.isControlPressed) {
+        _controlArmed = false;
+      } else if (event is KeyDownEvent &&
+          !event.synthesized &&
+          _viewFocused &&
+          _focus.hasFocus) {
+        _controlArmed = true;
+      }
+      _syncControlSelection();
+    }
+    return false;
+  }
+
+  void _editorFocusChanged() {
+    _syncControlSelection();
+  }
+
+  @override
+  void didChangeViewFocus(ui.ViewFocusEvent event) {
+    if (event.viewId != View.of(context).viewId) return;
+    _viewFocused = event.state == ui.ViewFocusState.focused;
+    if (!_viewFocused) {
+      // A Ctrl release in another app may arrive only with the next key event.
+      _controlArmed = false;
+      _cancelPointerGesture();
+    }
+    _syncControlSelection();
+  }
+
+  void _syncControlSelection() {
+    final m = _model;
+    if (!mounted || m == null || _down != null) return;
+    final previous = _toolBeforeControl;
+    final selecting =
+        _editable &&
+        _scrollCapture == null &&
+        _textOrigin == null &&
+        _viewFocused &&
+        (previous != null || (_currentRoute && _focus.hasFocus)) &&
+        m.selection != null &&
+        _controlArmed &&
+        HardwareKeyboard.instance.isControlPressed;
+    if (selecting && previous == null && m.tool != ScreenshotTool.select) {
+      _toolBeforeControl = m.tool;
+      // Preserve the current annotation so Ctrl can immediately resize it.
+      m.tool = ScreenshotTool.select;
+      m.changed();
+    } else if (!selecting && previous != null) {
+      _toolBeforeControl = null;
+      m.chooseTool(previous);
+    }
+  }
+
+  void _chooseTool(ScreenshotTool tool) {
+    _toolBeforeControl = null;
+    _model!.chooseTool(tool);
+    _focus.requestFocus();
+    _syncControlSelection();
+  }
+
+  void _cancelPointerGesture() {
+    _model?.cancelGesture();
+    _down = null;
+    _drag = '';
+    _drawingId = null;
+    _originalObject = null;
   }
 
   @override
@@ -168,6 +293,7 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
   }
 
   void _updateLocalShortcuts() {
+    _syncControlSelection();
     final enabled = _textOrigin == null && _currentRoute;
     if (enabled == _localShortcutsEnabled) return;
     _localShortcutsEnabled = enabled;
@@ -205,8 +331,9 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
       _model = ScreenshotModel(
         Size(background.width.toDouble(), background.height.toDouble()),
         styles: data['styles'] as String? ?? '{}',
+        initialArrowStyle: ArrowStyle.tryParse(data['defaultArrowStyle']),
       )..addListener(_changed);
-      _windows = (data['windows'] as List).map((raw) {
+      Rect snapshotRect(dynamic raw) {
         final r = (raw as List).cast<num>();
         return Rect.fromLTRB(
           r[0].toDouble(),
@@ -214,7 +341,11 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
           r[2].toDouble(),
           r[3].toDouble(),
         );
-      }).toList();
+      }
+
+      _windows = (data['windows'] as List).map(snapshotRect).toList();
+      _monitors = (data['monitors'] as List?)?.map(snapshotRect).toList() ?? [];
+      if (_monitors.isEmpty) _monitors = [_model!.screen];
       setState(() {});
       WidgetsBinding.instance.addPostFrameCallback((_) async {
         if (!mounted) return;
@@ -231,7 +362,12 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
 
   void _changed() {
     if (!mounted) return;
-    if (_model!.selection != _model!.screen) _toolbarOffset = null;
+    final selection = _model!.selection;
+    if (!_monitors.contains(selection)) _toolbarOffset = null;
+    if (_error == _screenGapWarning &&
+        (selection == null || !_hasMonitorGap(selection))) {
+      _error = null;
+    }
     setState(() {});
     if (!listEquals(_renderedObjects, _model!.annotations)) {
       _renderTimer ??= Timer(const Duration(milliseconds: 24), () {
@@ -252,6 +388,15 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
       do {
         _renderAgain = false;
         final objects = List<ScreenshotAnnotation>.of(_model!.annotations);
+        if (objects.isEmpty) {
+          final old = _composite;
+          setState(() {
+            _composite = null;
+            _renderedObjects = const [];
+          });
+          old?.dispose();
+          return;
+        }
         final image = await renderScreenshot(_background!, objects);
         if (!mounted || _background != renderingBackground) {
           image.dispose();
@@ -324,25 +469,34 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
     final toolbar =
         _toolbarKey.currentContext!.findRenderObject()! as RenderBox;
     setState(() {
-      _toolbarOffset = toolbar.localToGlobal(Offset.zero, ancestor: canvas);
+      _toolbarOffset =
+          toolbar.localToGlobal(Offset.zero, ancestor: canvas) -
+          _scaledRect(_toolsMonitor).topLeft;
       _draggingToolbar = true;
     });
   }
 
   void _moveToolbar(DragUpdateDetails details) {
-    final canvas = _canvasKey.currentContext!.findRenderObject()! as RenderBox;
     final toolbar =
         _toolbarKey.currentContext!.findRenderObject()! as RenderBox;
     setState(() {
       _toolbarOffset = _keepToolbarOnScreen(
         _toolbarOffset! + details.delta,
-        canvas.size,
+        _scaledRect(_toolsMonitor).size,
         toolbar.size,
       );
     });
   }
 
   void _endToolbarDrag() => setState(() => _draggingToolbar = false);
+
+  bool _hasMonitorGap(Rect selection) =>
+      _monitors.length > 1 &&
+      !Path.combine(
+        PathOperation.difference,
+        Path()..addRect(selection),
+        monitorCoverage(_monitors),
+      ).getBounds().isEmpty;
 
   Future<void> _startLongScreenshot() async {
     final m = _model;
@@ -358,6 +512,10 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
       return;
     }
     final selection = m.selection!;
+    if (_hasMonitorGap(selection)) {
+      setState(() => _error = _screenGapWarning);
+      return;
+    }
     if (selection.width < 16 || selection.height < 32) {
       setState(() => _error = '请框选更大的滚动内容区域');
       return;
@@ -367,7 +525,12 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
       channel: _channel,
       session: widget.snapshot['session'] as int,
       selection: selection,
-      panel: placeScrollControls(selection, m.size, _scale),
+      autoScroll: _autoScroll,
+      panel: placeScrollControls(
+        selection.shift(-_toolsMonitor.topLeft),
+        _toolsMonitor.size,
+        _scale,
+      ).shift(_toolsMonitor.topLeft),
       onEdit: (pixels, width, height, limited) =>
           _openLongEditor(capture, pixels, width, height, limited),
     )..addListener(_scrollChanged);
@@ -405,7 +568,10 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
       background.dispose();
       return;
     }
-    final styles = _model!.encodeStyles();
+    final nextModel = ScreenshotModel.forLongImage(
+      Size(width.toDouble(), height.toDouble()),
+      _model!,
+    );
     _renderTimer?.cancel();
     _renderTimer = null;
     _model!.removeListener(_changed);
@@ -414,16 +580,12 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
     _background?.dispose();
     _composite?.dispose();
     _composite = null;
-    _renderedObjects = null;
+    _renderedObjects = const [];
     _background = background;
     _frozenPixels = null;
-    _model =
-        ScreenshotModel(
-            Size(width.toDouble(), height.toDouble()),
-            styles: styles,
-          )
-          ..selection = Rect.fromLTWH(0, 0, width.toDouble(), height.toDouble())
-          ..addListener(_changed);
+    _model = nextModel
+      ..selection = nextModel.screen
+      ..addListener(_changed);
     capture.removeListener(_scrollChanged);
     setState(() {
       _scrollCapture = null;
@@ -442,7 +604,10 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
     });
     WidgetsBinding.instance.addPostFrameCallback((_) async {
       if (!mounted) return;
-      await _channel.invokeMethod<void>('ready', widget.snapshot['session']);
+      await _channel.invokeMethod<void>(
+        'longEditorReady',
+        widget.snapshot['session'],
+      );
       if (mounted) _focus.requestFocus();
     });
     WidgetsBinding.instance.scheduleWarmUpFrame();
@@ -453,9 +618,11 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
     if (!_editable || _model == null) return;
     _commitText();
     _focus.requestFocus();
+    _syncControlSelection();
     final m = _model!;
     final point = _point(local);
     _pointer = point;
+    _selectionAnchor = point;
     _down = point;
     _handle = -1;
     _originalObject = null;
@@ -540,11 +707,19 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
     if (!_editable || m == null || _down == null || _drag.isEmpty) return;
     final point = _point(local);
     _pointer = point;
+    _selectionAnchor = point;
     switch (_drag) {
       case 'newSelection':
         m.setSelection(Rect.fromPoints(_down!, point));
       case 'selection':
-        m.setSelection(moveWithin(_originalRect!, point - _down!, m.screen));
+        final delta = point - _down!;
+        m.setSelection(
+          moveWithin(
+            _originalRect!,
+            Offset(delta.dx.roundToDouble(), delta.dy.roundToDouble()),
+            m.screen,
+          ),
+        );
       case 'object':
         m.replace(_originalObject!.move(point - _down!));
       case 'resize':
@@ -598,6 +773,7 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
     _down = null;
     _drag = '';
     _drawingId = null;
+    _syncControlSelection();
   }
 
   void _editText(ScreenshotAnnotation? object, Offset origin) {
@@ -645,7 +821,8 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
   }
 
   Future<void> _close() async {
-    if (_busy) return;
+    if (_busy || _closing) return;
+    _closing = true;
     if (_locked) {
       final leave = await showDialog<bool>(
         context: context,
@@ -664,13 +841,30 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
           ],
         ),
       );
-      if (leave != true) return;
+      if (!mounted || leave != true) {
+        _closing = false;
+        return;
+      }
     }
-    await _saveStylesAndClose();
+    // Stop automatic wheel events as soon as Cancel is clicked, even if the
+    // main window takes time to persist styles or close the native overlay.
+    final capture = _scrollCapture;
+    if (capture != null) {
+      _scrollCapture = null;
+      capture.removeListener(_scrollChanged);
+      capture.dispose();
+    }
+    _busy = true;
+    try {
+      await _saveStylesAndClose();
+    } finally {
+      _busy = false;
+    }
   }
 
   Future<void> _saveStylesAndClose() async {
     final session = widget.snapshot['session'];
+    _closing = true;
     try {
       if (_model != null) {
         await _channel.invokeMethod<void>('styles', _model!.encodeStyles());
@@ -678,7 +872,12 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
     } on Object {
       /* Style persistence must not prevent cancellation. */
     }
-    await _channel.invokeMethod<void>('close', session);
+    try {
+      await _channel.invokeMethod<void>('close', session);
+    } on Object {
+      _closing = false;
+      rethrow;
+    }
   }
 
   Future<void> _finish({
@@ -698,7 +897,11 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
       _error = null;
     });
     try {
-      final png = await exportScreenshot(_background!, m.snapshot);
+      final png = await exportScreenshot(
+        _background!,
+        m.snapshot,
+        monitors: _longImage ? const [] : _monitors,
+      );
       if (!_locked) _pendingAction = action;
       final origin = _longImage ? _captureOrigin : m.selection!.topLeft;
       final response = await _channel.invokeMapMethod<String, dynamic>(
@@ -715,12 +918,7 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
       );
       if (!mounted) return;
       if (response?['success'] == true) {
-        try {
-          await _channel.invokeMethod<void>('styles', m.encodeStyles());
-        } on Object {
-          /* Optional preference. */
-        }
-        await _channel.invokeMethod<void>('close', widget.snapshot['session']);
+        await _saveStylesAndClose();
         return;
       }
       setState(() {
@@ -760,9 +958,8 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
   void _escapeCanvas() {
     final m = _model;
     if (m != null && m.hasGesture && _scrollCapture == null) {
-      m.cancelGesture();
-      _down = null;
-      _drag = '';
+      _cancelPointerGesture();
+      _syncControlSelection();
     } else if (m?.selectedId != null && _scrollCapture == null) {
       m!.selectedId = null;
       m.changed();
@@ -772,6 +969,7 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
   }
 
   KeyEventResult _key(FocusNode node, KeyEvent event) {
+    if (!_currentRoute) return KeyEventResult.ignored;
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
       return KeyEventResult.ignored;
     }
@@ -818,12 +1016,38 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
       if (!_longImage || event is KeyDownEvent) unawaited(_finish());
     } else if (!_editable) {
       return KeyEventResult.handled;
-    } else if (HardwareKeyboard.instance.isControlPressed &&
-        key == LogicalKeyboardKey.keyZ) {
-      HardwareKeyboard.instance.isShiftPressed ? m.redo() : m.undo();
-    } else if (HardwareKeyboard.instance.isControlPressed &&
-        key == LogicalKeyboardKey.keyY) {
-      m.redo();
+    } else if (_focus.hasPrimaryFocus &&
+        !keyboard.isControlPressed &&
+        !keyboard.isAltPressed &&
+        !keyboard.isShiftPressed &&
+        !keyboard.isMetaPressed &&
+        m.selection != null &&
+        const [
+          LogicalKeyboardKey.digit1,
+          LogicalKeyboardKey.digit2,
+          LogicalKeyboardKey.numpad1,
+          LogicalKeyboardKey.numpad2,
+        ].contains(key)) {
+      final smaller =
+          key == LogicalKeyboardKey.digit1 || key == LogicalKeyboardKey.numpad1;
+      if (!m.adjustSize(smaller ? -1 : 1)) return KeyEventResult.ignored;
+      final original = _originalObject;
+      final selected = m.selected;
+      if (original != null && selected?.id == original.id) {
+        // Moving or resizing continues from the original coordinates, with
+        // the new style applied to every subsequent pointer update.
+        _originalObject = original.copyWith(style: selected!.style);
+      }
+    } else if (keyboard.isControlPressed &&
+        (key == LogicalKeyboardKey.keyZ || key == LogicalKeyboardKey.keyY)) {
+      if (m.hasGesture) {
+        _cancelPointerGesture();
+        _syncControlSelection();
+      } else if (key == LogicalKeyboardKey.keyY || keyboard.isShiftPressed) {
+        m.redo();
+      } else {
+        m.undo();
+      }
     } else if (key == LogicalKeyboardKey.delete ||
         key == LogicalKeyboardKey.backspace) {
       m.deleteSelected();
@@ -849,6 +1073,8 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
       onKeyEvent: _key,
       child: LayoutBuilder(
         builder: (context, constraints) {
+          // A minimized native editor can briefly report an empty client area.
+          if (constraints.biggest.isEmpty) return const SizedBox.shrink();
           final m = _model;
           if (m == null) {
             return Center(
@@ -875,7 +1101,11 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
                   selected.right * _scale,
                   selected.bottom * _scale,
                 );
-          final fullScreen = selected == m.screen;
+          final viewport = Offset.zero & constraints.biggest;
+          final toolsArea = _scaledRect(_toolsMonitor).intersect(viewport);
+          final pickerArea = _scaledRect(_monitorAt(_pointer) ?? _toolsMonitor)
+              .intersect(viewport);
+          final fullScreen = selected == _toolsMonitor;
           final textObject = _textId == null
               ? null
               : m.annotations.firstWhere((a) => a.id == _textId);
@@ -907,9 +1137,8 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
                       onPointerMove: (e) => _move(e.localPosition),
                       onPointerUp: (_) => _end(),
                       onPointerCancel: (_) {
-                        m.cancelGesture();
-                        _down = null;
-                        _drag = '';
+                        _cancelPointerGesture();
+                        _syncControlSelection();
                       },
                       child: CustomPaint(
                         painter: _EditorPainter(
@@ -963,10 +1192,13 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
                     ),
                   ),
                 ),
-              Positioned.fill(
+              Positioned.fromRect(
+                rect: toolsArea,
                 child: CustomMultiChildLayout(
                   delegate: _ScreenshotToolbarLayout(
-                    selection: rect,
+                    selection: rect
+                        ?.intersect(toolsArea)
+                        .shift(-toolsArea.topLeft),
                     fullScreen: fullScreen,
                     draggedOffset: fullScreen ? _toolbarOffset : null,
                   ),
@@ -1004,33 +1236,36 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
                 ),
               ),
               if (selected == null)
-                const Positioned(
-                  bottom: 24,
-                  left: 24,
-                  child: IgnorePointer(
+                Positioned(
+                  bottom: constraints.maxHeight - toolsArea.bottom + 24,
+                  left: toolsArea.left + 24,
+                  child: const IgnorePointer(
                     child: Text('拖动框选 · 单击选择窗口 · F2 取色器 · Esc 取消'),
                   ),
                 ),
               if (_showColorPicker)
-                Positioned.fill(
+                Positioned.fromRect(
+                  rect: pickerArea,
                   child: ScreenshotColorPicker(
                     image: _background!,
                     pixel: _samplePixel,
                     rgb: _sampleRgb,
-                    anchor: _pointer * _scale,
+                    anchor: _pointer * _scale - pickerArea.topLeft,
                   ),
                 ),
               if (_error != null)
                 Positioned(
-                  bottom: 16,
-                  left: 24,
-                  right: 24,
-                  child: Material(
-                    color: const Color(0xFF512B32),
-                    borderRadius: BorderRadius.circular(8),
-                    child: Padding(
-                      padding: const EdgeInsets.all(12),
-                      child: Text(_error!),
+                  bottom: constraints.maxHeight - toolsArea.bottom + 16,
+                  left: toolsArea.left + 24,
+                  right: constraints.maxWidth - toolsArea.right + 24,
+                  child: IgnorePointer(
+                    child: Material(
+                      color: const Color(0xFF512B32),
+                      borderRadius: BorderRadius.circular(8),
+                      child: Padding(
+                        padding: const EdgeInsets.all(12),
+                        child: Text(_error!),
+                      ),
                     ),
                   ),
                 ),
@@ -1121,6 +1356,11 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
                 Row(
                   mainAxisAlignment: MainAxisAlignment.end,
                   children: [
+                    if (capture.canTakeOver)
+                      TextButton(
+                        onPressed: capture.takeOver,
+                        child: const Text('手动接管'),
+                      ),
                     if (capture.finishing || capture.starting)
                       const Padding(
                         padding: EdgeInsets.only(right: 12),
@@ -1153,6 +1393,15 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
     ],
   );
 
+  void _setMaximized(bool value) {
+    if (_longImage && _maximized != value) setState(() => _maximized = value);
+  }
+
+  void _setLongZoom(double value) {
+    _commitText();
+    setState(() => _longZoom = value.clamp(.25, 4.0));
+  }
+
   Widget _longEditor(ScreenshotModel m) => LayoutBuilder(
     builder: (context, constraints) {
       _scale =
@@ -1162,56 +1411,7 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
       return Column(
         key: const ValueKey('long-screenshot-editor'),
         children: [
-          Padding(
-            padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    '长图编辑 · ${m.size.width.toInt()} × ${m.size.height.toInt()} px',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-                IconButton(
-                  tooltip: '缩小长图',
-                  onPressed: () {
-                    _commitText();
-                    setState(
-                      () => _longZoom = (_longZoom / 1.25).clamp(.25, 4.0),
-                    );
-                  },
-                  icon: const Icon(Icons.remove, size: 18),
-                ),
-                Text(
-                  '${(_scale * 100).round()}%',
-                  style: const TextStyle(fontSize: 12),
-                ),
-                IconButton(
-                  tooltip: '放大长图',
-                  onPressed: () {
-                    _commitText();
-                    setState(
-                      () => _longZoom = (_longZoom * 1.25).clamp(.25, 4.0),
-                    );
-                  },
-                  icon: const Icon(Icons.add, size: 18),
-                ),
-                TextButton(
-                  onPressed: () {
-                    _commitText();
-                    setState(() => _longZoom = 1);
-                  },
-                  child: const Text('适应宽度'),
-                ),
-              ],
-            ),
-          ),
-          ConstrainedBox(
-            constraints: BoxConstraints(maxHeight: constraints.maxHeight * .4),
-            child: _toolbar(m, m.selection != null, false),
-          ),
-          const SizedBox(height: 8),
+          _longToolbar(m, constraints.maxWidth),
           Expanded(
             child: LayoutBuilder(
               builder: (context, viewport) => Scrollbar(
@@ -1294,9 +1494,8 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
                 onPointerMove: (event) => _move(event.localPosition),
                 onPointerUp: (_) => _end(),
                 onPointerCancel: (_) {
-                  m.cancelGesture();
-                  _down = null;
-                  _drag = '';
+                  _cancelPointerGesture();
+                  _syncControlSelection();
                 },
                 child: CustomPaint(
                   painter: _EditorPainter(
@@ -1341,22 +1540,331 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
     );
   }
 
-  Widget _toolbar(ScreenshotModel m, bool selected, bool fullScreen) {
+  Widget _arrowStylePicker(ScreenshotModel m) {
     final style = m.selected?.style ?? m.style;
+    return ArrowStylePicker(
+      value: style.arrowStyle,
+      monitor: _longImage ? null : _scaledRect(_toolsMonitor),
+      onChanged: !_editable
+          ? null
+          : (arrow) {
+              m.setStyle(style.copyWith(arrowStyle: arrow));
+              _focus.requestFocus();
+            },
+    );
+  }
+
+  Future<String> _helpScreenshotShortcut() async {
+    try {
+      final current = await _channel.invokeMethod<String>(
+        'getScreenshotShortcut',
+      );
+      if (current != null && current.isNotEmpty) return current;
+    } on Object {
+      // Keep help available if the main engine is closing or unavailable.
+    }
+    return widget.snapshot['screenshotShortcut'] as String? ?? '请在设置中查看';
+  }
+
+  Future<void> _showScreenshotHelp() async {
+    if (_busy || _helpOpen) return;
+    _helpOpen = true;
+    final shortcut = _helpScreenshotShortcut();
+    try {
+      await showDialog<void>(
+        context: context,
+        useSafeArea: false,
+        builder: (dialogContext) => Theme(
+          data: _longImage ? _longToolbarTheme : Theme.of(context),
+          child: LayoutBuilder(
+            builder: (context, constraints) {
+              final viewport = Offset.zero & constraints.biggest;
+              final area = _longImage
+                  ? viewport
+                  : _scaledRect(_toolsMonitor).intersect(viewport);
+              // A capture view can span several monitors. Keep the whole help
+              // dialog on the monitor containing the editing toolbar.
+              return Stack(
+                children: [
+                  Positioned.fromRect(
+                    rect: area,
+                    child: Dialog(
+                      insetPadding: const EdgeInsets.all(16),
+                      clipBehavior: Clip.antiAlias,
+                      child: ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 640),
+                        child: Column(
+                          mainAxisSize: MainAxisSize.min,
+                          crossAxisAlignment: CrossAxisAlignment.stretch,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(24, 16, 12, 8),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      '截图使用说明与快捷键',
+                                      style: Theme.of(context)
+                                          .textTheme
+                                          .titleLarge,
+                                    ),
+                                  ),
+                                  IconButton(
+                                    tooltip: '关闭帮助',
+                                    onPressed: () =>
+                                        Navigator.pop(dialogContext),
+                                    icon: const Icon(Icons.close),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            const Divider(height: 1),
+                            Flexible(
+                              child: SingleChildScrollView(
+                                padding: const EdgeInsets.all(24),
+                                child: FutureBuilder<String>(
+                                  future: shortcut,
+                                  initialData:
+                                      widget.snapshot['screenshotShortcut']
+                                          as String? ??
+                                      '请在设置中查看',
+                                  builder: (_, snapshot) =>
+                                      ScreenshotHelpContent(
+                                        screenshotShortcut: snapshot.data!,
+                                      ),
+                                ),
+                              ),
+                            ),
+                            const Divider(height: 1),
+                            Padding(
+                              padding: const EdgeInsets.fromLTRB(24, 8, 24, 12),
+                              child: Align(
+                                alignment: Alignment.centerRight,
+                                child: TextButton(
+                                  onPressed: () => Navigator.pop(dialogContext),
+                                  child: const Text('知道了'),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              );
+            },
+          ),
+        ),
+      );
+    } finally {
+      _helpOpen = false;
+      if (mounted) {
+        (_textOrigin == null ? _focus : _textFocus).requestFocus();
+      }
+    }
+  }
+
+  Widget _styleControls(ScreenshotModel m) => Builder(
+    builder: (context) {
+      final style = m.selected?.style ?? m.style;
+      final tool = m.selected?.tool ?? m.tool;
+      final mosaic = tool == ScreenshotTool.mosaic;
+      final width = mosaic ? math.max(2.0, style.width) : style.width;
+      final colors = Theme.of(context).colorScheme;
+      return Wrap(
+        alignment: WrapAlignment.center,
+        crossAxisAlignment: WrapCrossAlignment.center,
+        spacing: 5,
+        children: [
+          if (tool.usesColor) ...[
+            for (final color in const [
+              Color(0xFFEF4444),
+              Color(0xFFF59E0B),
+              Color(0xFFFDE047),
+              Color(0xFF22C55E),
+              Color(0xFF3B82F6),
+              Color(0xFF8B5CF6),
+              Colors.white,
+              Color(0xFF111827),
+            ])
+              InkWell(
+                onTap: () {
+                  m.setStyle(style.copyWith(color: color));
+                  if (_textOrigin == null) _focus.requestFocus();
+                },
+                child: Container(
+                  width: 19,
+                  height: 19,
+                  decoration: BoxDecoration(
+                    color: color,
+                    shape: BoxShape.circle,
+                    border: Border.all(
+                      color: style.color == color
+                          ? colors.onSurface
+                          : colors.outlineVariant,
+                      width: style.color == color ? 2 : 1,
+                    ),
+                  ),
+                ),
+              ),
+            const SizedBox(width: 5),
+          ],
+          if (tool.usesWidth) ...[
+            Tooltip(
+              message: mosaic ? '1 缩小块，2 放大块' : '1 变细，2 加粗',
+              child: Text(
+                mosaic ? '块大小' : '粗细',
+                style: const TextStyle(fontSize: 11),
+              ),
+            ),
+            DropdownButton<double>(
+              key: const ValueKey('screenshot-stroke-width'),
+              value: width,
+              underline: const SizedBox.shrink(),
+              isDense: true,
+              items:
+                  ({
+                        if (!mosaic) 1.0,
+                        2.0,
+                        3.0,
+                        5.0,
+                        8.0,
+                        12.0,
+                        18.0,
+                        24.0,
+                        40.0,
+                        width,
+                      }.toList()..sort())
+                      .map(
+                        (v) => DropdownMenuItem(
+                          value: v,
+                          child: Text(
+                            '${v.toInt()}',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      )
+                      .toList(),
+              onChanged: (v) {
+                if (v != null) {
+                  m.setStyle(style.copyWith(width: v));
+                  _focus.requestFocus();
+                }
+              },
+            ),
+          ],
+          if (tool.usesFontSize) ...[
+            Tooltip(
+              message: tool == ScreenshotTool.number ? '1 缩小编号，2 放大编号' : '文字字号',
+              child: const Text('字号', style: TextStyle(fontSize: 11)),
+            ),
+            DropdownButton<double>(
+              key: const ValueKey('screenshot-font-size'),
+              value: style.fontSize,
+              underline: const SizedBox.shrink(),
+              isDense: true,
+              items:
+                  ({
+                        12.0,
+                        16.0,
+                        20.0,
+                        24.0,
+                        32.0,
+                        40.0,
+                        56.0,
+                        72.0,
+                        96.0,
+                        style.fontSize,
+                      }.toList()..sort())
+                      .map(
+                        (v) => DropdownMenuItem(
+                          value: v,
+                          child: Text(
+                            '${v.toInt()}',
+                            style: const TextStyle(fontSize: 12),
+                          ),
+                        ),
+                      )
+                      .toList(),
+              onChanged: (v) {
+                if (v != null) {
+                  m.setStyle(style.copyWith(fontSize: v));
+                  if (_textOrigin == null) _focus.requestFocus();
+                }
+              },
+            ),
+          ],
+        ],
+      );
+    },
+  );
+
+  Widget _pinButton({required bool enabled, required bool light}) => Tooltip(
+    message: '贴图并计入历史',
+    child: TextButton.icon(
+      onPressed: enabled ? () => _finish(action: _ScreenshotAction.pin) : null,
+      style: TextButton.styleFrom(
+        foregroundColor: light ? const Color(0xFF272932) : _overlayToolColor,
+        disabledForegroundColor: light
+            ? const Color(0xFF666977)
+            : _overlayDisabledToolColor,
+        minimumSize: const Size(32, 32),
+        padding: const EdgeInsets.symmetric(horizontal: 6),
+        textStyle: Theme.of(context).textTheme.labelLarge
+            ?.copyWith(fontSize: 13, fontWeight: FontWeight.w600),
+      ),
+      icon: const Icon(Icons.push_pin_rounded, size: 19),
+      label: const FittedBox(
+        fit: BoxFit.scaleDown,
+        child: Text('贴图', maxLines: 1),
+      ),
+    ),
+  );
+
+  Widget _helpGlyph({required bool light}) => SizedBox.square(
+    dimension: light ? 18 : 19,
+    child: FittedBox(
+      child: Text(
+        '?',
+        textScaler: TextScaler.noScaling,
+        style: TextStyle(
+          fontFamily: 'Microsoft YaHei',
+          fontSize: 24,
+          height: 1,
+          fontWeight: FontWeight.w700,
+          // This is a text glyph: give it the toolbar's foreground explicitly
+          // instead of relying on the surrounding text or icon theme.
+          color: _busy
+              ? light
+                    ? const Color(0xFF979AA3)
+                    : _overlayDisabledToolColor
+              : light
+              ? const Color(0xFF30333D)
+              : _overlayToolColor,
+        ),
+      ),
+    ),
+  );
+
+  Widget _toolbar(ScreenshotModel m, bool selected, bool fullScreen) {
     Widget button(
       IconData icon,
       String tooltip,
       VoidCallback? action, {
       bool active = false,
+      Widget? glyph,
     }) => IconButton(
       tooltip: tooltip,
       onPressed: _busy ? null : action,
       style: IconButton.styleFrom(
+        foregroundColor: _overlayToolColor,
+        disabledForegroundColor: _overlayDisabledToolColor,
         backgroundColor: active ? const Color(0xFF6D28D9) : null,
         minimumSize: const Size(32, 32),
         padding: const EdgeInsets.all(6),
       ),
-      icon: Icon(icon, size: 19),
+      icon: glyph ?? Icon(icon, size: 19),
     );
     return Material(
       key: _toolbarKey,
@@ -1399,98 +1907,47 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
                     alignment: WrapAlignment.center,
                     crossAxisAlignment: WrapCrossAlignment.center,
                     children: [
+                      button(
+                        Icons.help_outline,
+                        '截图帮助',
+                        _showScreenshotHelp,
+                        glyph: _helpGlyph(light: false),
+                      ),
                       if (selected)
-                        for (final tool in ScreenshotTool.values)
+                        for (final command in _annotationCommands(m)) ...[
                           button(
-                            _toolIcon(tool),
-                            tool.label,
-                            !_editable
-                                ? null
-                                : () {
-                                    _commitText();
-                                    m.chooseTool(tool);
-                                    _focus.requestFocus();
-                                  },
-                            active: m.tool == tool,
+                            command.icon,
+                            command.label,
+                            command.run,
+                            active: command.active,
                           ),
+                          if (command.tool == ScreenshotTool.arrow &&
+                              (m.selected?.tool ?? m.tool) ==
+                                  ScreenshotTool.arrow)
+                            _arrowStylePicker(m),
+                        ],
                       button(
                         Icons.fullscreen,
-                        _longImage ? '选择整张长图' : '当前屏幕全屏',
+                        '当前屏幕全屏',
                         !_editable
                             ? null
                             : () {
                                 _commitText();
-                                m.selectAll();
+                                m.selectAll(_toolsMonitor);
                               },
                       ),
-                      if (!_longImage)
-                        button(
-                          Icons.swipe_down_alt,
-                          '长截图',
-                          selected && _editable ? _startLongScreenshot : null,
-                        ),
                       button(
-                        Icons.undo,
-                        '撤销（Ctrl + Z）',
-                        _editable && m.canUndo
-                            ? () {
-                                _commitText();
-                                m.undo();
-                              }
-                            : null,
+                        Icons.swipe_down_alt,
+                        '长截图',
+                        selected && _editable ? _startLongScreenshot : null,
                       ),
-                      button(
-                        Icons.redo,
-                        '重做（Ctrl + Y）',
-                        _editable && m.canRedo ? m.redo : null,
-                      ),
-                      if (m.selected != null)
-                        button(
-                          Icons.delete_outline,
-                          '删除标注',
-                          _editable ? m.deleteSelected : null,
-                        ),
-                      if (m.selected?.tool == ScreenshotTool.text)
-                        button(
-                          Icons.edit,
-                          '修改文字',
-                          !_editable
-                              ? null
-                              : () => _editText(
-                                  m.selected,
-                                  m.selected!.points.first,
-                                ),
-                        ),
-                      Tooltip(
-                        message: '贴图并计入历史',
-                        child: FilledButton.icon(
-                          onPressed:
-                              selected &&
-                                  _editable &&
-                                  (!_longImage || _longFinishArmed)
-                              ? () => _finish(action: _ScreenshotAction.pin)
-                              : null,
-                          style: FilledButton.styleFrom(
-                            backgroundColor: const Color(0xFFFCD68B),
-                            foregroundColor: const Color(0xFF352506),
-                            minimumSize: const Size(0, 32),
-                            padding: const EdgeInsets.symmetric(horizontal: 10),
-                            textStyle: Theme.of(context).textTheme.labelLarge
-                                ?.copyWith(
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.w600,
-                                ),
-                          ),
-                          icon: const Icon(Icons.push_pin_rounded, size: 17),
-                          label: const Text('贴图'),
-                        ),
-                      ),
+                      for (final command in _historyCommands(m))
+                        button(command.icon, command.label, command.run),
+                      _pinButton(enabled: selected && _editable, light: false),
                       button(
                         Icons.save_alt,
                         '另存为并完成',
-                        selected &&
-                                !_locked &&
-                                (!_longImage || _longFinishArmed)
+                        selected && !_locked
                             ? () => _finish(action: _ScreenshotAction.saveAs)
                             : null,
                       ),
@@ -1498,9 +1955,7 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
                       button(
                         Icons.check,
                         _locked ? '重试完成' : '完成（Enter）',
-                        selected && (!_longImage || _longFinishArmed)
-                            ? _finish
-                            : null,
+                        selected ? _finish : null,
                         active: true,
                       ),
                     ],
@@ -1509,113 +1964,7 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
                       m.selected != null)
                     IgnorePointer(
                       ignoring: !_editable,
-                      child: Wrap(
-                        alignment: WrapAlignment.center,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        spacing: 5,
-                        children: [
-                          for (final color in const [
-                            Color(0xFFEF4444),
-                            Color(0xFFF59E0B),
-                            Color(0xFFFDE047),
-                            Color(0xFF22C55E),
-                            Color(0xFF3B82F6),
-                            Color(0xFF8B5CF6),
-                            Colors.white,
-                            Color(0xFF111827),
-                          ])
-                            InkWell(
-                              onTap: () =>
-                                  m.setStyle(style.copyWith(color: color)),
-                              child: Container(
-                                width: 19,
-                                height: 19,
-                                decoration: BoxDecoration(
-                                  color: color,
-                                  shape: BoxShape.circle,
-                                  border: Border.all(
-                                    color: style.color == color
-                                        ? Colors.white
-                                        : Colors.transparent,
-                                    width: 2,
-                                  ),
-                                ),
-                              ),
-                            ),
-                          const SizedBox(width: 5),
-                          Text(
-                            (m.selected?.tool ?? m.tool) ==
-                                    ScreenshotTool.mosaic
-                                ? '颗粒'
-                                : '粗细',
-                            style: const TextStyle(fontSize: 11),
-                          ),
-                          DropdownButton<double>(
-                            value: style.width,
-                            underline: const SizedBox.shrink(),
-                            isDense: true,
-                            items:
-                                ({
-                                      1.0,
-                                      2.0,
-                                      3.0,
-                                      5.0,
-                                      8.0,
-                                      12.0,
-                                      18.0,
-                                      24.0,
-                                      style.width,
-                                    }.toList()..sort())
-                                    .map(
-                                      (v) => DropdownMenuItem(
-                                        value: v,
-                                        child: Text(
-                                          '${v.toInt()}',
-                                          style: const TextStyle(fontSize: 12),
-                                        ),
-                                      ),
-                                    )
-                                    .toList(),
-                            onChanged: (v) {
-                              if (v != null) {
-                                m.setStyle(style.copyWith(width: v));
-                              }
-                            },
-                          ),
-                          const Text('字号', style: TextStyle(fontSize: 11)),
-                          DropdownButton<double>(
-                            value: style.fontSize,
-                            underline: const SizedBox.shrink(),
-                            isDense: true,
-                            items:
-                                ({
-                                      16.0,
-                                      20.0,
-                                      24.0,
-                                      32.0,
-                                      40.0,
-                                      56.0,
-                                      72.0,
-                                      style.fontSize,
-                                    }.toList()..sort())
-                                    .map(
-                                      (v) => DropdownMenuItem(
-                                        value: v,
-                                        child: Text(
-                                          '${v.toInt()}',
-                                          style: const TextStyle(fontSize: 12),
-                                        ),
-                                      ),
-                                    )
-                                    .toList(),
-                            onChanged: (v) {
-                              if (v != null) {
-                                m.setStyle(style.copyWith(fontSize: v));
-                              }
-                            },
-                          ),
-                        ],
-                      ),
+                      child: _styleControls(m),
                     ),
                 ],
               ),
@@ -1636,6 +1985,9 @@ class _ScreenshotEditorState extends State<ScreenshotEditor> {
   @override
   void dispose() {
     _finishArmTimer?.cancel();
+    WidgetsBinding.instance.removeObserver(this);
+    HardwareKeyboard.instance.removeHandler(_observeControlKey);
+    _focus.removeListener(_editorFocusChanged);
     _scrollCapture?.removeListener(_scrollChanged);
     _scrollCapture?.dispose();
     _longVertical.dispose();

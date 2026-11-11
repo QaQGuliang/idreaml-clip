@@ -37,6 +37,8 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    await tester.tap(find.text('快捷面板与历史'));
+    await tester.pumpAndSettle();
     await tester.ensureVisible(picker);
     await tester.pumpAndSettle();
   }

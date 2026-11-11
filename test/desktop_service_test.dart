@@ -422,6 +422,8 @@ void main() {
     await tester.pumpWidget(
       IdreamlClipApp(controller: controller, desktopService: desktop),
     );
+    await tester.tap(find.text('启动与权限'));
+    await tester.pumpAndSettle();
     final toggle = find.byKey(const ValueKey('run-as-administrator-switch'));
     await tester.ensureVisible(toggle);
     await tester.pumpAndSettle();
@@ -707,7 +709,7 @@ void main() {
     expect(hotkeyCalls.where((c) => c.method == 'register'), isEmpty);
   });
 
-  Future<void> mountSettings(WidgetTester tester) async {
+  Future<void> mountSettings(WidgetTester tester, String category) async {
     tester.view.devicePixelRatio = 1;
     tester.view.physicalSize = const Size(900, 620);
     addTearDown(tester.view.resetPhysicalSize);
@@ -717,11 +719,13 @@ void main() {
       IdreamlClipApp(controller: controller, desktopService: desktop),
     );
     await tester.pumpAndSettle();
+    await tester.tap(find.text(category));
+    await tester.pumpAndSettle();
   }
 
   testWidgets('设置开关切换期间锁定操作，开启置灰，关闭后恢复编辑', (tester) async {
     await finish(tester, desktop.initialize());
-    await mountSettings(tester);
+    await mountSettings(tester, '快捷键');
     final toggle = find.byKey(const ValueKey('win-v-shortcut-switch'));
     final custom = find.byKey(const ValueKey('custom-shortcut-button'));
     expect(tester.widget<OutlinedButton>(custom).onPressed, isNotNull);
@@ -745,7 +749,7 @@ void main() {
 
   testWidgets('自启保存期间锁定开关，完成后显示实际状态', (tester) async {
     await finish(tester, desktop.initialize());
-    await mountSettings(tester);
+    await mountSettings(tester, '启动与权限');
     final toggle = find.byKey(const ValueKey('launch-at-startup-switch'));
     await Scrollable.ensureVisible(tester.element(toggle), alignment: 0.5);
     await tester.pumpAndSettle();
@@ -764,7 +768,7 @@ void main() {
 
   testWidgets('自启保存失败显示原因，开关恢复校验得到的实际状态', (tester) async {
     await finish(tester, desktop.initialize());
-    await mountSettings(tester);
+    await mountSettings(tester, '启动与权限');
     final toggle = find.byKey(const ValueKey('launch-at-startup-switch'));
     await Scrollable.ensureVisible(tester.element(toggle), alignment: 0.5);
     await tester.pumpAndSettle();
@@ -791,7 +795,7 @@ void main() {
   testWidgets('其他平台设置页不展示 Win+V 开关', (tester) async {
     winV.isSupported = false;
     controller.winVShortcutEnabled = true;
-    await mountSettings(tester);
+    await mountSettings(tester, '快捷键');
     expect(find.byKey(const ValueKey('win-v-shortcut-switch')), findsNothing);
     expect(
       tester

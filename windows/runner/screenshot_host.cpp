@@ -2,6 +2,7 @@
 
 #include <commdlg.h>
 #include <dwmapi.h>
+#include <flutter_windows.h>
 #include <flutter/method_result_functions.h>
 #include <flutter/standard_method_codec.h>
 
@@ -128,23 +129,17 @@ void ScreenshotHost::HandleMain(const flutter::MethodCall<Value>& call,
     result->Success();
   } else if (method == "prepare") {
     if (active_) { result->Error("busy", "已有截图正在进行"); return; }
-    POINT point{};
-    GetCursorPos(&point);
-    if (args) {
-      auto x = Field(*args, "x");
-      auto y = Field(*args, "y");
-      if (x && y) {
-        point = {static_cast<LONG>(std::get<double>(*x)),
-                 static_cast<LONG>(std::get<double>(*y))};
-        ClientToScreen(main_view_, &point);
+    // The panel can disappear between prepare and open. Keep the invocation
+    // point in signed physical desktop coordinates until the snapshot exists.
+    if (!GetCursorPos(&initial_cursor_) && args) {
+      const auto* x = Field(*args, "x");
+      const auto* y = Field(*args, "y");
+      if (x && y && std::holds_alternative<double>(*x) && std::holds_alternative<double>(*y)) {
+        initial_cursor_ = {static_cast<LONG>(std::get<double>(*x)),
+                           static_cast<LONG>(std::get<double>(*y))};
+        ClientToScreen(main_view_, &initial_cursor_);
       }
     }
-    MONITORINFO monitor{};
-    monitor.cbSize = sizeof(monitor);
-    if (!GetMonitorInfo(MonitorFromPoint(point, MONITOR_DEFAULTTONEAREST), &monitor)) {
-      result->Error("monitor", "无法读取目标显示器"); return;
-    }
-    screen_ = monitor.rcMonitor;
     ++session_;
     pinned_ = false;
     wait_for_compositor_ = args && Field(*args, "x");
@@ -155,11 +150,14 @@ void ScreenshotHost::HandleMain(const flutter::MethodCall<Value>& call,
     if (!prepared_ || active_) { result->Error("state", "截图状态无效"); return; }
     prepared_ = false;
     snapshot_.clear();
-    if (!Capture()) { result->Error("capture", "无法捕获当前屏幕或屏幕尺寸过大"); return; }
+    if (!Capture()) { result->Error("capture", "无法捕获桌面，或桌面总尺寸超过截图上限"); return; }
     snapshot_[Value("session")] = Value(session_);
     if (args) {
       if (auto styles = Field(*args, "styles")) snapshot_[Value("styles")] = *styles;
+      if (auto arrow = Field(*args, "defaultArrowStyle")) snapshot_[Value("defaultArrowStyle")] = *arrow;
       if (auto picker = Field(*args, "showColorPicker")) snapshot_[Value("showColorPicker")] = *picker;
+      if (auto scroll = Field(*args, "autoScroll")) snapshot_[Value("autoScroll")] = *scroll;
+      if (auto shortcut = Field(*args, "screenshotShortcut")) snapshot_[Value("screenshotShortcut")] = *shortcut;
     }
     if (!EnsureEditor()) {
       DestroyEditor();
@@ -177,8 +175,9 @@ void ScreenshotHost::HandleMain(const flutter::MethodCall<Value>& call,
     consumed_keys_.clear();
     SetTimer(window_, 1, 15000, nullptr);
     if (editor_ready_) {
-      editor_channel_->InvokeMethod("start", std::make_unique<Value>(std::move(snapshot_)));
-      snapshot_.clear();
+      auto payload = std::make_unique<Value>();
+      payload->emplace<Map>().swap(snapshot_);
+      editor_channel_->InvokeMethod("start", std::move(payload));
     }
     result->Success();
   } else if (method == "pinImage") {
@@ -198,12 +197,16 @@ void ScreenshotHost::HandleMain(const flutter::MethodCall<Value>& call,
     const auto save_border = [this](HWND window, const std::string& border) {
       InvokePinAction(window, "savePinBorderDefault", Value(border), L"无法保存默认贴图边框，请重试。");
     };
-    if (!pins_.Show(*png, origin, screen_, copy, save_border)) {
+    MONITORINFO pin_monitor{};
+    pin_monitor.cbSize = sizeof(pin_monitor);
+    if (!GetMonitorInfo(MonitorFromPoint(origin, MONITOR_DEFAULTTONEAREST), &pin_monitor) ||
+        !pins_.Show(*png, origin, pin_monitor.rcWork, copy, save_border)) {
       result->Error("window", "无法显示贴图，请重试"); return;
     }
     // Keep the editor reachable if history storage fails after pinning a full screen.
     // Closing the session hides it and reveals the pinned window underneath.
-    SetWindowPos(window_, HWND_TOPMOST, 0, 0, 0, 0, SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
+    SetWindowPos(window_, long_editor_ ? HWND_TOP : HWND_TOPMOST, 0, 0, 0, 0,
+                 SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     pinned_ = true;
     result->Success();
   } else if (method == "chooseSavePath") {
@@ -239,54 +242,41 @@ void ScreenshotHost::HandleMain(const flutter::MethodCall<Value>& call,
 }
 
 bool ScreenshotHost::Capture() {
-  MONITORINFO current{};
-  current.cbSize = sizeof(current);
-  if (!GetMonitorInfo(MonitorFromRect(&screen_, MONITOR_DEFAULTTONULL), &current) ||
-      !EqualRect(&screen_, &current.rcMonitor)) return false;
+  const auto monitors = DesktopMonitors();
+  screen_ = DesktopBounds(monitors);
   const int width = screen_.right - screen_.left;
   const int height = screen_.bottom - screen_.top;
-  if (width <= 0 || height <= 0 || static_cast<int64_t>(width) * height > 40000000) return false;
+  if (width <= 0 || height <= 0 || width > 16384 || height > 16384 ||
+      static_cast<int64_t>(width) * height > 40000000) return false;
   // Wait for the compositor to reflect the button-path panel hide.
   if (wait_for_compositor_) DwmFlush();
-  HDC desktop = GetDC(nullptr);
-  if (!desktop) return false;
-  HDC memory = CreateCompatibleDC(desktop);
-  BITMAPINFO info{};
-  info.bmiHeader.biSize = sizeof(BITMAPINFOHEADER);
-  info.bmiHeader.biWidth = width;
-  info.bmiHeader.biHeight = -height;
-  info.bmiHeader.biPlanes = 1;
-  info.bmiHeader.biBitCount = 32;
-  info.bmiHeader.biCompression = BI_RGB;
-  void* pixels = nullptr;
-  HBITMAP bitmap = CreateDIBSection(desktop, &info, DIB_RGB_COLORS, &pixels, nullptr, 0);
-  bool success = false;
-  if (memory && bitmap && pixels) {
-    auto previous = SelectObject(memory, bitmap);
-    success = BitBlt(memory, 0, 0, width, height, desktop,
-                     screen_.left, screen_.top, SRCCOPY | CAPTUREBLT) != FALSE;
-    if (success) {
-      auto* bytes = static_cast<uint8_t*>(pixels);
-      std::vector<uint8_t> image(bytes, bytes + static_cast<size_t>(width) * height * 4);
-      for (size_t i = 3; i < image.size(); i += 4) image[i] = 255;
-      snapshot_[Value("pixels")] = Value(std::move(image));
-      snapshot_[Value("width")] = Value(width);
-      snapshot_[Value("height")] = Value(height);
-      POINT cursor{};
-      if (GetCursorPos(&cursor) && PtInRect(&screen_, cursor)) {
-        snapshot_[Value("initialCursorX")] = Value(static_cast<int32_t>(cursor.x - screen_.left));
-        snapshot_[Value("initialCursorY")] = Value(static_cast<int32_t>(cursor.y - screen_.top));
-      }
-      WindowCandidates candidates{screen_, {}};
-      EnumWindows(CollectWindows, reinterpret_cast<LPARAM>(&candidates));
-      snapshot_[Value("windows")] = Value(std::move(candidates.windows));
+  std::vector<uint8_t> image;
+  if (!ReadDesktopPixels(screen_, &image)) return false;
+  for (const auto& gap : DesktopGaps(screen_, monitors)) {
+    for (LONG y = gap.top; y < gap.bottom; ++y) {
+      const auto offset = (static_cast<size_t>(y - screen_.top) * width +
+                            (gap.left - screen_.left)) * 4;
+      std::fill_n(image.begin() + offset, (gap.right - gap.left) * 4, uint8_t{0});
     }
-    SelectObject(memory, previous);
   }
-  if (bitmap) DeleteObject(bitmap);
-  if (memory) DeleteDC(memory);
-  ReleaseDC(nullptr, desktop);
-  return success;
+  snapshot_[Value("pixels")].emplace<std::vector<uint8_t>>(std::move(image));
+  snapshot_[Value("width")] = Value(width);
+  snapshot_[Value("height")] = Value(height);
+  snapshot_[Value("originX")] = Value(static_cast<int32_t>(screen_.left));
+  snapshot_[Value("originY")] = Value(static_cast<int32_t>(screen_.top));
+  snapshot_[Value("initialCursorX")] = Value(static_cast<int32_t>(initial_cursor_.x - screen_.left));
+  snapshot_[Value("initialCursorY")] = Value(static_cast<int32_t>(initial_cursor_.y - screen_.top));
+  List displays;
+  for (const auto& r : monitors) {
+    displays.emplace_back(List{
+        Value(static_cast<int32_t>(r.left - screen_.left)), Value(static_cast<int32_t>(r.top - screen_.top)),
+        Value(static_cast<int32_t>(r.right - screen_.left)), Value(static_cast<int32_t>(r.bottom - screen_.top))});
+  }
+  snapshot_[Value("monitors")] = Value(std::move(displays));
+  WindowCandidates candidates{screen_, {}};
+  EnumWindows(CollectWindows, reinterpret_cast<LPARAM>(&candidates));
+  snapshot_[Value("windows")] = Value(std::move(candidates.windows));
+  return true;
 }
 
 bool ScreenshotHost::EnsureEditor() {
@@ -326,6 +316,40 @@ bool ScreenshotHost::EnsureEditor() {
   MoveWindow(child, 0, 0, bounds.right - bounds.left,
              bounds.bottom - bounds.top, TRUE);
   return true;
+}
+
+void ScreenshotHost::ShowLongEditor(const RECT& selection) {
+  const auto monitor = MonitorFromRect(&selection, MONITOR_DEFAULTTONEAREST);
+  MONITORINFO info{sizeof(info)};
+  RECT work = selection;
+  if (GetMonitorInfo(monitor, &info)) work = info.rcWork;
+  const UINT dpi = FlutterDesktopGetDpiForMonitor(monitor);
+  // A narrow capture can still use the full set of editing tools.
+  const LONG ideal_width = std::clamp<LONG>(selection.right - selection.left + MulDiv(40, dpi, 96),
+                                            MulDiv(1000, dpi, 96), MulDiv(1320, dpi, 96));
+  const LONG width = std::min<LONG>(ideal_width, (work.right - work.left) * 9 / 10);
+  const LONG height = std::min<LONG>(MulDiv(800, dpi, 96), (work.bottom - work.top) * 9 / 10);
+  // The host is hidden while changing the taskbar style so Explorer updates its entry.
+  long_editor_ = true;
+  // Flutter draws the shared title/toolbar. Windows owns the resize border,
+  // system menu, taskbar and maximize/restore geometry.
+  SetWindowLongPtr(window_, GWL_STYLE, WS_THICKFRAME | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX);
+  SetWindowLongPtr(window_, GWL_EXSTYLE, WS_EX_APPWINDOW);
+  SetWindowTextW(window_, L"理梦剪藏 · 长图编辑");
+  SetWindowPos(window_, HWND_NOTOPMOST, work.left + (work.right - work.left - width) / 2,
+               work.top + (work.bottom - work.top - height) / 2, width, height,
+               SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+}
+
+void ScreenshotHost::RestoreOverlayStyle() {
+  // Close() has hidden the window; discard maximized/minimized state as well.
+  long_editor_ = false;
+  maximized_ = false;
+  SetWindowLongPtr(window_, GWL_STYLE, WS_POPUP);
+  SetWindowLongPtr(window_, GWL_EXSTYLE, WS_EX_TOOLWINDOW);
+  SetWindowTextW(window_, L"理梦剪藏 · 截图");
+  SetWindowPos(window_, HWND_TOPMOST, 0, 0, 0, 0,
+               SWP_FRAMECHANGED | SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
 }
 
 // Run before TranslateMessage so an intercepted C cannot generate a WM_CHAR.
@@ -374,6 +398,31 @@ void ScreenshotHost::HandleEditor(const flutter::MethodCall<Value>& call,
     result->Success();
     return;
   }
+  if (name == "longEditorWindow") {
+    int64_t session = 0;
+    if (!active_ || !long_editor_ || !Integer(args, "session", &session) || session != session_) {
+      result->Success(); return;
+    }
+    const auto* value = Field(*args, "action");
+    const auto* action = value ? std::get_if<std::string>(value) : nullptr;
+    if (action && *action == "minimize") {
+      ShowWindow(window_, SW_MINIMIZE);
+    } else if (action && *action == "toggleMaximize") {
+      ShowWindow(window_, IsZoomed(window_) ? SW_RESTORE : SW_MAXIMIZE);
+    } else if (action && *action == "drag") {
+      POINT point{};
+      // The gesture starts on the Flutter child, which may hold mouse capture.
+      // Ignore delayed gestures after the user has already released the button.
+      const int primary = GetSystemMetrics(SM_SWAPBUTTON) ? VK_RBUTTON : VK_LBUTTON;
+      if ((GetAsyncKeyState(primary) & 0x8000) && GetCursorPos(&point)) {
+        ReleaseCapture();
+        SendMessage(window_, WM_NCLBUTTONDOWN, HTCAPTION, MAKELPARAM(point.x, point.y));
+      }
+    } else {
+      result->Error("window", "未知的长图窗口操作"); return;
+    }
+    result->Success(); return;
+  }
   if (name == "copyColor") {
     int64_t session = 0;
     if (!active_ || scroll_ || !Integer(args, "token", &session) || session != session_) {
@@ -386,7 +435,7 @@ void ScreenshotHost::HandleEditor(const flutter::MethodCall<Value>& call,
       result->Error("color", "颜色值无效"); return;
     }
   }
-  if (name == "beginScroll" || name == "scrollFrame") {
+  if (name == "beginScroll" || name == "scrollFrame" || name == "scrollStep") {
     auto integer = [&](const char* key, int64_t* out) {
       return Integer(args, key, out);
     };
@@ -414,29 +463,51 @@ void ScreenshotHost::HandleEditor(const flutter::MethodCall<Value>& call,
       scroll_ = std::make_unique<ScrollCapture>(window_);
       std::string error;
       if (!scroll_->Begin(screen_, rect, panel, &error)) {
+        const char* code = scroll_->obscured() ? "obscured" : "capture";
         scroll_.reset();
         ShowWindow(window_, SW_SHOW);
         SetForegroundWindow(window_);
-        result->Error("capture", error); return;
+        result->Error(code, error); return;
       }
     }
     if (!scroll_) { result->Error("state", "长截图未开始"); return; }
-    std::vector<uint8_t> pixels;
     std::string error;
-    if (!scroll_->Frame(&pixels, &error)) {
-      result->Error("capture", error); return;
+    if (name == "scrollStep") {
+      if (!scroll_->ScrollStep(&error)) {
+        result->Error(scroll_->obscured() ? "obscured" : "scroll", error); return;
+      }
+      result->Success();
+      return;
     }
-    result->Success(Value(Map{
-        {Value("pixels"), Value(std::move(pixels))},
-        {Value("width"), Value(scroll_->width())},
-        {Value("height"), Value(scroll_->height())},
-        {Value("session"), Value(session_)}}));
+    // Write directly into the codec payload. A map initializer_list copies its
+    // elements, including the entire BGRA buffer on every captured frame.
+    Value frame;
+    auto& fields = frame.emplace<Map>();
+    auto& pixels = fields[Value("pixels")].emplace<std::vector<uint8_t>>();
+    if (!scroll_->Frame(&pixels, &error)) {
+      const char* code = scroll_->obscured() ? "obscured" : "capture";
+      if (name == "beginScroll") {
+        scroll_.reset();
+        ShowWindow(window_, SW_SHOW);
+        SetForegroundWindow(window_);
+      }
+      result->Error(code, error); return;
+    }
+    fields.emplace(Value("width"), Value(scroll_->width()));
+    fields.emplace(Value("height"), Value(scroll_->height()));
+    fields.emplace(Value("session"), Value(session_));
+    result->Success(frame);
   } else if (name == "load") {
     editor_ready_ = true;
-    if (active_) result->Success(Value(std::move(snapshot_)));
-    else result->Success();
-    snapshot_.clear();
-  } else if (name == "ready") {
+    if (active_) {
+      Value payload;
+      payload.emplace<Map>().swap(snapshot_);
+      result->Success(payload);
+    } else {
+      snapshot_.clear();
+      result->Success();
+    }
+  } else if (name == "ready" || name == "longEditorReady") {
     const auto* id = call.arguments() ? std::get_if<int64_t>(call.arguments()) : nullptr;
     const auto* small_id = call.arguments() ? std::get_if<int32_t>(call.arguments()) : nullptr;
     if (!active_ || ((!id || *id != session_) && (!small_id || *small_id != session_))) {
@@ -444,17 +515,21 @@ void ScreenshotHost::HandleEditor(const flutter::MethodCall<Value>& call,
     }
     KillTimer(window_, 1);
     local_shortcuts_ = true;
-    if (scroll_) {
-      scroll_.reset();
-      MONITORINFO monitor{};
-      monitor.cbSize = sizeof(monitor);
-      if (GetMonitorInfo(MonitorFromRect(&screen_, MONITOR_DEFAULTTONEAREST), &monitor))
-        screen_ = monitor.rcMonitor;
+    if (long_editor_ || (name == "longEditorReady" && !scroll_)) {
+      result->Success(); return;
     }
     positioning_ = true;
-    SetWindowPos(window_, HWND_TOPMOST, screen_.left, screen_.top,
-                 screen_.right - screen_.left, screen_.bottom - screen_.top,
-                 SWP_SHOWWINDOW);
+    if (name == "longEditorReady") {
+      const RECT selection = scroll_->selection();
+      ShowWindow(window_, SW_HIDE);
+      scroll_.reset();  // Remove the capture region before showing the editor.
+      ShowLongEditor(selection);
+    } else {
+      scroll_.reset();
+      SetWindowPos(window_, HWND_TOPMOST, screen_.left, screen_.top,
+                   screen_.right - screen_.left, screen_.bottom - screen_.top,
+                   SWP_SHOWWINDOW);
+    }
     positioning_ = false;
     // Hiding the quick panel or opening from a background hotkey can leave
     // another application's input queue in the foreground. A topmost popup
@@ -478,7 +553,8 @@ void ScreenshotHost::HandleEditor(const flutter::MethodCall<Value>& call,
     if (active_ && ((id && *id == session_) || (small_id && *small_id == session_))) {
       PostMessage(owner_, kCloseMessage, 0, 0);
     }
-  } else if (name == "commit" || name == "styles" || name == "copyColor") {
+  } else if (name == "commit" || name == "styles" || name == "copyColor" ||
+             name == "getScreenshotShortcut") {
     ++pending_calls_;
     auto alive = alive_;
     auto response = std::shared_ptr<Result>(std::move(result));
@@ -521,6 +597,7 @@ void ScreenshotHost::Close() {
   if (window_) {
     KillTimer(window_, 1);
     ShowWindow(window_, SW_HIDE);
+    if (long_editor_) RestoreOverlayStyle();
   }
   active_ = false;
   // Release session images and editing state; retain only the warm engine.
@@ -551,8 +628,12 @@ LRESULT CALLBACK ScreenshotHost::WindowProc(HWND window, UINT message,
       self->scroll_->Invalidate();
       return 0;
     }
-    if (message == WM_CLOSE || message == WM_DISPLAYCHANGE ||
-        (message == WM_DPICHANGED && !self->positioning_) || (message == WM_TIMER && wparam == 1)) {
+    if (message == WM_CLOSE && self->long_editor_ && self->active_) {
+      self->editor_channel_->InvokeMethod("requestClose", std::make_unique<Value>(self->session_));
+      return 0;
+    }
+    if (message == WM_CLOSE || (!self->long_editor_ && (message == WM_DISPLAYCHANGE ||
+        (message == WM_DPICHANGED && !self->positioning_))) || (message == WM_TIMER && wparam == 1)) {
       if (self->active_) PostMessage(self->owner_, kCloseMessage, 0, 0);
       return 0;
     }
@@ -561,6 +642,32 @@ LRESULT CALLBACK ScreenshotHost::WindowProc(HWND window, UINT message,
       if (handled) return *handled;
     }
     switch (message) {
+      case WM_DPICHANGED:
+        if (self->long_editor_ && !self->positioning_) {
+          const auto& rect = *reinterpret_cast<const RECT*>(lparam);
+          SetWindowPos(window, nullptr, rect.left, rect.top, rect.right - rect.left,
+                       rect.bottom - rect.top, SWP_NOZORDER | SWP_NOACTIVATE);
+          return 0;
+        }
+        break;
+      case WM_GETMINMAXINFO:
+        if (self->long_editor_) {
+          const auto monitor = MonitorFromWindow(window, MONITOR_DEFAULTTONEAREST);
+          const auto dpi = FlutterDesktopGetDpiForMonitor(monitor);
+          auto* limits = reinterpret_cast<MINMAXINFO*>(lparam);
+          limits->ptMinTrackSize = {MulDiv(420, dpi, 96), MulDiv(360, dpi, 96)};
+          // Windows otherwise maximizes a captionless frame over the taskbar.
+          MONITORINFO info{sizeof(info)};
+          WINDOWINFO frame{sizeof(frame)};
+          if (GetMonitorInfo(monitor, &info) && GetWindowInfo(window, &frame)) {
+            RECT bounds = info.rcWork;
+            InflateRect(&bounds, frame.cxWindowBorders, frame.cyWindowBorders);
+            limits->ptMaxPosition = {bounds.left - info.rcMonitor.left, bounds.top - info.rcMonitor.top};
+            limits->ptMaxSize = {bounds.right - bounds.left, bounds.bottom - bounds.top};
+          }
+          return 0;
+        }
+        break;
       case WM_ACTIVATE:
         if (LOWORD(wparam) == WA_INACTIVE) return 0;
         [[fallthrough]];
@@ -570,6 +677,15 @@ LRESULT CALLBACK ScreenshotHost::WindowProc(HWND window, UINT message,
         }
         return 0;
       case WM_SIZE:
+        if (self->long_editor_ && self->editor_channel_ &&
+            (wparam == SIZE_RESTORED || wparam == SIZE_MAXIMIZED)) {
+          const bool maximized = wparam == SIZE_MAXIMIZED;
+          if (self->maximized_ != maximized) {
+            self->maximized_ = maximized;
+            self->editor_channel_->InvokeMethod("longEditorWindowState", std::make_unique<Value>(Map{
+                {Value("session"), Value(self->session_)}, {Value("maximized"), Value(maximized)}}));
+          }
+        }
         if (self->editor_) {
           RECT bounds{};
           GetClientRect(window, &bounds);

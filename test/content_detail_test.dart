@@ -215,6 +215,8 @@ void main() {
   testWidgets('设置可进入快捷键编辑、修改和恢复默认，取消不更改配置', (tester) async {
     await controller.setPage(AppPage.settings);
     await mount(tester);
+    await tester.tap(find.text('快捷键'));
+    await tester.pumpAndSettle();
     await tester.tap(find.byKey(const ValueKey('custom-shortcut-button')));
     await tester.pumpAndSettle();
     expect(find.byType(ShortcutDialog), findsOneWidget);

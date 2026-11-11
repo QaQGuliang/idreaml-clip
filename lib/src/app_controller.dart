@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 
 import 'data/clipboard_repository.dart';
 import 'data/data_storage.dart';
+import 'models/arrow_style.dart';
 import 'models/clipboard_item.dart';
 import 'models/clipboard_content.dart';
 import 'models/pinned_image_border.dart';
@@ -51,6 +52,8 @@ class AppController extends ChangeNotifier {
   );
   QuickShortcut screenshotShortcut = defaultScreenshotShortcut;
   bool showScreenshotColorPicker = true;
+  bool autoScrollCapture = false;
+  ArrowStyle? defaultArrowStyle;
   PinnedImageBorder pinnedImageBorder = PinnedImageBorder.none;
   String? screenshotError;
   bool runAsAdministratorEnabled = false;
@@ -146,6 +149,8 @@ class AppController extends ChangeNotifier {
       'quick_shortcut',
       'screenshot_shortcut',
       'show_screenshot_color_picker',
+      'auto_scroll_capture',
+      'default_arrow_style',
       'pinned_image_border',
       'win_v_shortcut_enabled',
       'quick_count',
@@ -160,6 +165,8 @@ class AppController extends ChangeNotifier {
     );
     showScreenshotColorPicker =
         settings['show_screenshot_color_picker'] != 'false';
+    autoScrollCapture = settings['auto_scroll_capture'] == 'true';
+    defaultArrowStyle = ArrowStyle.tryParse(settings['default_arrow_style']);
     pinnedImageBorder =
         PinnedImageBorder.tryParse(settings['pinned_image_border']) ??
         PinnedImageBorder.none;
@@ -493,6 +500,18 @@ class AppController extends ChangeNotifier {
   Future<void> saveShowScreenshotColorPicker(bool enabled) async {
     await repository.setSetting('show_screenshot_color_picker', '$enabled');
     showScreenshotColorPicker = enabled;
+    if (!_disposed) notifyListeners();
+  }
+
+  Future<void> saveAutoScrollCapture(bool enabled) async {
+    await repository.setSetting('auto_scroll_capture', '$enabled');
+    autoScrollCapture = enabled;
+    if (!_disposed) notifyListeners();
+  }
+
+  Future<void> saveDefaultArrowStyle(ArrowStyle? style) async {
+    await repository.setSetting('default_arrow_style', style?.name ?? 'last');
+    defaultArrowStyle = style;
     if (!_disposed) notifyListeners();
   }
 

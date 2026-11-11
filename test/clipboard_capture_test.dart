@@ -6,6 +6,7 @@ import 'package:image/image.dart' as img;
 import 'package:idreaml_clip/src/app_controller.dart';
 import 'package:idreaml_clip/src/data/clipboard_database.dart';
 import 'package:idreaml_clip/src/data/clipboard_repository.dart';
+import 'package:idreaml_clip/src/models/arrow_style.dart';
 import 'package:idreaml_clip/src/models/clipboard_content.dart';
 import 'package:idreaml_clip/src/models/clipboard_item.dart';
 import 'package:idreaml_clip/src/models/pinned_image_border.dart';
@@ -225,6 +226,42 @@ void main() {
     expect(next.showScreenshotColorPicker, isFalse);
     await next.saveShowScreenshotColorPicker(true);
     expect(await repository.getSetting('show_screenshot_color_picker'), 'true');
+  });
+
+  test('默认箭头可固定或沿用上次选择，旧配置和未知值沿用上次选择', () async {
+    Future<ArrowStyle?> readAfterRestart() async {
+      final next = AppController(
+        repository,
+        SyncService(repository, _Credentials()),
+        clipboard: _Clipboard(),
+      );
+      addTearDown(next.dispose);
+      await next.initialize(startMonitor: false);
+      return next.defaultArrowStyle;
+    }
+
+    expect(controller.defaultArrowStyle, isNull);
+    await controller.saveDefaultArrowStyle(ArrowStyle.outlined);
+    expect(await readAfterRestart(), ArrowStyle.outlined);
+    await controller.saveDefaultArrowStyle(null);
+    expect(await readAfterRestart(), isNull);
+    await repository.setSetting('default_arrow_style', 'unknown');
+    expect(await readAfterRestart(), isNull);
+  });
+
+  test('长截图默认手动，重启后沿用选定的自动滚动', () async {
+    expect(controller.autoScrollCapture, isFalse);
+    await controller.saveAutoScrollCapture(true);
+    final next = AppController(
+      repository,
+      SyncService(repository, _Credentials()),
+      clipboard: _Clipboard(),
+    );
+    addTearDown(next.dispose);
+    await next.initialize(startMonitor: false);
+    expect(next.autoScrollCapture, isTrue);
+    await next.saveAutoScrollCapture(false);
+    expect(await repository.getSetting('auto_scroll_capture'), 'false');
   });
 
   test('贴图默认无边框，保存后恢复设置，无效旧值回退到无边框', () async {

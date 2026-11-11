@@ -2,17 +2,20 @@ import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../app_controller.dart';
+import '../models/arrow_style.dart';
 import '../models/clipboard_item.dart';
 import '../models/json_document.dart';
 import '../models/pinned_image_border.dart';
 import '../services/json_preview_formatter.dart';
 import '../models/sync_models.dart';
 import '../models/workspace_layout.dart';
+import '../screenshot/arrow_style_picker.dart';
 import '../services/desktop_service.dart';
 import 'app_theme.dart';
 import 'common.dart';
 import 'clipboard_image.dart';
 import 'shortcut_dialog.dart';
+import 'shortcut_help.dart';
 import 'resize_divider.dart';
 import 'history_limit_picker.dart';
 import 'json_split_preview.dart';
@@ -34,6 +37,7 @@ class MainShell extends StatefulWidget {
 }
 
 class _MainShellState extends State<MainShell> {
+  _SettingsSection? _settingsSection;
   double _sidebarDragStartWidth = 226;
   late final _searchController = TextEditingController(
     text: widget.controller.historySearch,
@@ -42,6 +46,7 @@ class _MainShellState extends State<MainShell> {
   @override
   void didUpdateWidget(covariant MainShell oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.controller.page != AppPage.settings) _settingsSection = null;
     final search = widget.controller.historySearch;
     if (_searchController.text != search) {
       _searchController.value = TextEditingValue(
@@ -84,6 +89,7 @@ class _MainShellState extends State<MainShell> {
                         compact:
                             sidebarWidth < WorkspaceLayout.compactSidebarWidth,
                         onPage: (page) {
+                          _settingsSection = null;
                           _searchController.clear();
                           controller.historySearch = '';
                           controller.setPage(page);
@@ -100,6 +106,9 @@ class _MainShellState extends State<MainShell> {
                             controller: controller,
                             searchController: _searchController,
                             desktopService: widget.desktopService,
+                            settingsSection: _settingsSection,
+                            onSettingsBack: () =>
+                                setState(() => _settingsSection = null),
                           ),
                           if (controller.clipboardError != null)
                             Padding(
@@ -120,6 +129,9 @@ class _MainShellState extends State<MainShell> {
                               child: _CurrentPage(
                                 controller: controller,
                                 desktopService: widget.desktopService,
+                                settingsSection: _settingsSection,
+                                onSettingsSection: (value) =>
+                                    setState(() => _settingsSection = value),
                               ),
                             ),
                           ),
@@ -462,10 +474,14 @@ class _TopBar extends StatelessWidget {
     required this.controller,
     required this.searchController,
     required this.desktopService,
+    required this.settingsSection,
+    required this.onSettingsBack,
   });
   final AppController controller;
   final TextEditingController searchController;
   final DesktopService desktopService;
+  final _SettingsSection? settingsSection;
+  final VoidCallback onSettingsBack;
 
   static const titles = {
     AppPage.history: ('全部历史', '长期保存的本地剪切板记录'),
@@ -473,12 +489,15 @@ class _TopBar extends StatelessWidget {
     AppPage.sync: ('云同步', '使用你自己的 Git 仓库'),
     AppPage.devices: ('设备', '管理参与同步的设备'),
     AppPage.privacy: ('隐私', '本地优先，内容由你掌控'),
-    AppPage.settings: ('设置', '快捷面板与桌面行为'),
+    AppPage.settings: ('设置', '按类别管理使用偏好'),
   };
 
   @override
   Widget build(BuildContext context) {
-    final title = titles[controller.page]!;
+    final section = settingsSection;
+    final title = section == null
+        ? titles[controller.page]!
+        : (section.title, section.description(desktopService));
     final showSearch =
         controller.page == AppPage.history ||
         controller.page == AppPage.favorites;
@@ -486,10 +505,19 @@ class _TopBar extends StatelessWidget {
       height: 84,
       child: Row(
         children: [
+          if (section != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 14),
+              child: IconButton(
+                tooltip: '返回设置首页',
+                icon: const Icon(Icons.arrow_back_rounded),
+                onPressed: onSettingsBack,
+              ),
+            ),
           Expanded(
             child: DragToMoveArea(
               child: Padding(
-                padding: const EdgeInsets.only(left: 22),
+                padding: EdgeInsets.only(left: section == null ? 22 : 6),
                 child: Align(
                   alignment: Alignment.centerLeft,
                   child: Column(
@@ -503,6 +531,8 @@ class _TopBar extends StatelessWidget {
                       const SizedBox(height: 3),
                       Text(
                         title.$2,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
                         style: Theme.of(context).textTheme.bodySmall,
                       ),
                     ],
@@ -553,9 +583,16 @@ class _TopBar extends StatelessWidget {
 }
 
 class _CurrentPage extends StatelessWidget {
-  const _CurrentPage({required this.controller, required this.desktopService});
+  const _CurrentPage({
+    required this.controller,
+    required this.desktopService,
+    required this.settingsSection,
+    required this.onSettingsSection,
+  });
   final AppController controller;
   final DesktopService desktopService;
+  final _SettingsSection? settingsSection;
+  final ValueChanged<_SettingsSection> onSettingsSection;
 
   @override
   Widget build(BuildContext context) {
@@ -573,6 +610,8 @@ class _CurrentPage extends StatelessWidget {
         return _SettingsPage(
           controller: controller,
           desktopService: desktopService,
+          section: settingsSection,
+          onSection: onSettingsSection,
         );
     }
   }
@@ -1647,295 +1686,434 @@ class _PrivacyPage extends StatelessWidget {
   );
 }
 
+enum _SettingsSection {
+  shortcuts('快捷键', Icons.keyboard_alt_outlined),
+  history('快捷面板与历史', Icons.history_rounded),
+  screenshot('截图与贴图', Icons.screenshot_monitor_outlined),
+  startup('启动与权限', Icons.power_settings_new_rounded),
+  release('版本信息', Icons.info_outline_rounded);
+
+  const _SettingsSection(this.title, this.icon);
+  final String title;
+  final IconData icon;
+
+  String description(DesktopService desktop) => switch (this) {
+    shortcuts => [
+      '快捷剪切板',
+      if (desktop.supportsWinV) 'Win + V',
+      if (desktop.screenshots.supported) '截图快捷键',
+    ].join('、'),
+    history => '显示数量、搜索范围、历史保存与数据存储',
+    screenshot => '取色器、长截图、箭头样式与贴图边框',
+    startup => desktop.administrator.supported ? '开机自动启动、管理员权限' : '开机自动启动',
+    release => '查看当前版本及更新记录',
+  };
+}
+
 class _SettingsPage extends StatelessWidget {
-  const _SettingsPage({required this.controller, required this.desktopService});
+  const _SettingsPage({
+    required this.controller,
+    required this.desktopService,
+    required this.section,
+    required this.onSection,
+  });
   final AppController controller;
   final DesktopService desktopService;
+  final _SettingsSection? section;
+  final ValueChanged<_SettingsSection> onSection;
 
   @override
-  Widget build(BuildContext context) => ListView(
-    children: [
-      AppCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const _SectionTitle(title: '快捷剪切板', subtitle: '日常高频使用入口'),
-            const SizedBox(height: 8),
-            if (desktopService.supportsWinV) ...[
-              _SettingRow(
-                title: '固定 Win + V 快捷键',
-                subtitle:
-                    controller.shortcutError ??
-                    (desktopService.usesWinV
-                        ? '已接管 Win + V，自定义快捷键已停用'
-                        : '开启后使用 Win + V，关闭后恢复原自定义快捷键'),
-                trailing: Switch(
-                  key: const ValueKey('win-v-shortcut-switch'),
-                  value: desktopService.usesWinV,
-                  onChanged: controller.shortcutModeChanging
-                      ? null
-                      : (value) async {
-                          final error = await desktopService
-                              .setWinVShortcutEnabled(value);
-                          if (context.mounted && error != null) {
-                            showMessage(context, error);
-                          }
-                        },
-                ),
-              ),
-              const Divider(height: 1),
-            ],
-            _SettingRow(
-              title: '全局快捷键',
-              enabled:
-                  !desktopService.usesWinV && !controller.shortcutModeChanging,
-              subtitle: desktopService.usesWinV
-                  ? '当前仅使用 Win + V，原组合已保留，关闭上方开关后恢复'
-                  : controller.shortcutError ?? '在任何应用上方呼出快捷剪切板，点击右侧修改',
-              trailing: OutlinedButton.icon(
-                key: const ValueKey('custom-shortcut-button'),
-                onPressed:
-                    desktopService.usesWinV || controller.shortcutModeChanging
-                    ? null
-                    : () async {
-                        final error = await desktopService
-                            .beginShortcutRecording();
-                        if (error != null) {
-                          if (context.mounted) showMessage(context, error);
-                          return;
-                        }
-                        try {
-                          if (!context.mounted) return;
-                          final saved = await showDialog<bool>(
-                            context: context,
-                            barrierDismissible: false,
-                            builder: (_) =>
-                                ShortcutDialog(desktopService: desktopService),
-                          );
-                          if (saved == true && context.mounted) {
-                            showMessage(context, '快捷键已更新');
-                          }
-                        } finally {
-                          await desktopService.endShortcutRecording();
-                        }
-                      },
-                label: Text(controller.quickShortcut.label()),
-                icon: const Icon(Icons.keyboard_outlined, size: 18),
-              ),
-            ),
-            const Divider(height: 1),
-            if (desktopService.screenshots.supported) ...[
-              _SettingRow(
-                title: '截图快捷键',
-                subtitle: controller.screenshotError ?? '默认 F1，独立于快捷剪切板快捷键',
-                trailing: OutlinedButton.icon(
-                  key: const ValueKey('screenshot-shortcut-button'),
-                  onPressed: () async {
-                    final error = await desktopService.beginShortcutRecording(
-                      screenshot: true,
-                    );
-                    if (error != null) {
-                      if (context.mounted) showMessage(context, error);
-                      return;
-                    }
-                    try {
-                      if (!context.mounted) return;
-                      await showDialog<bool>(
-                        context: context,
-                        barrierDismissible: false,
-                        builder: (_) => ShortcutDialog(
-                          desktopService: desktopService,
-                          screenshot: true,
-                        ),
-                      );
-                    } finally {
-                      await desktopService.endShortcutRecording();
-                    }
-                  },
-                  icon: const Icon(Icons.screenshot_monitor_outlined, size: 18),
-                  label: Text(controller.screenshotShortcut.label()),
-                ),
-              ),
-              const Divider(height: 1),
-              _SettingRow(
-                title: '开始截图时显示取色器',
-                subtitle: '截图中按 F2 临时显示或隐藏，按 C 复制当前 HEX 色值并退出',
-                trailing: Switch(
-                  value: controller.showScreenshotColorPicker,
-                  onChanged: (enabled) async {
-                    try {
-                      await controller.saveShowScreenshotColorPicker(enabled);
-                    } catch (_) {
-                      if (context.mounted) {
-                        showMessage(context, '取色器设置保存失败，请重试');
-                      }
-                    }
-                  },
-                ),
-              ),
-              const Divider(height: 1),
-              _SettingRow(
-                title: '贴图默认边框',
-                subtitle: '应用到新贴图和已选择「跟随全局设置」的贴图',
-                trailing: DropdownButton<PinnedImageBorder>(
-                  value: controller.pinnedImageBorder,
-                  underline: const SizedBox.shrink(),
-                  borderRadius: BorderRadius.circular(10),
-                  items: [
-                    for (final border in PinnedImageBorder.values)
-                      DropdownMenuItem(
-                        value: border,
-                        child: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            Container(
-                              width: 16,
-                              height: 16,
-                              alignment: Alignment.center,
-                              decoration: BoxDecoration(
-                                color: border.color,
-                                border: Border.all(color: AppColors.line),
-                                borderRadius: BorderRadius.circular(3),
-                              ),
-                              child: border == PinnedImageBorder.none
-                                  ? const Icon(
-                                      Icons.block,
-                                      size: 12,
-                                      color: AppColors.muted,
-                                    )
-                                  : null,
-                            ),
-                            const SizedBox(width: 8),
-                            Text(border.label),
-                          ],
-                        ),
-                      ),
+  Widget build(BuildContext context) {
+    final current = section;
+    if (current == null) {
+      final sections = [
+        _SettingsSection.shortcuts,
+        _SettingsSection.history,
+        if (desktopService.screenshots.supported) _SettingsSection.screenshot,
+        _SettingsSection.startup,
+      ];
+      return ListView(
+        key: const PageStorageKey('settings-index'),
+        children: [
+          AppCard(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+            child: Material(
+              type: MaterialType.transparency,
+              child: Column(
+                children: [
+                  for (final (index, group) in sections.indexed) ...[
+                    if (index > 0) const Divider(height: 1, indent: 60),
+                    ListTile(
+                      onTap: () => onSection(group),
+                      leading: Icon(group.icon, color: AppColors.primary),
+                      title: Text(group.title),
+                      subtitle: Text(group.description(desktopService)),
+                      trailing: const Icon(Icons.chevron_right_rounded),
+                    ),
                   ],
-                  onChanged: (border) async {
-                    if (border == null) return;
-                    try {
-                      await desktopService.screenshots.savePinBorderDefault(
-                        border,
-                      );
-                    } catch (_) {
-                      if (context.mounted) {
-                        showMessage(context, '贴图边框更新失败，请重试');
-                      }
+                ],
+              ),
+            ),
+          ),
+          Align(
+            alignment: Alignment.centerLeft,
+            child: TextButton.icon(
+              onPressed: () => onSection(_SettingsSection.release),
+              icon: Icon(_SettingsSection.release.icon, size: 16),
+              label: Text(_SettingsSection.release.title),
+            ),
+          ),
+        ],
+      );
+    }
+    final rows = _rows(context, current);
+    return ListView(
+      key: PageStorageKey(current),
+      children: [
+        if (current == _SettingsSection.release) const ReleaseInfoCard(),
+        if (rows.isNotEmpty)
+          AppCard(
+            child: Column(
+              children: [
+                for (final (index, row) in rows.indexed) ...[
+                  if (index > 0) const Divider(height: 1),
+                  row,
+                ],
+              ],
+            ),
+          ),
+        if (current == _SettingsSection.history &&
+            controller.storagePath != null) ...[
+          const SizedBox(height: 14),
+          StorageDirectoryCard(controller: controller),
+        ],
+      ],
+    );
+  }
+
+  List<Widget> _rows(
+    BuildContext context,
+    _SettingsSection group,
+  ) => switch (group) {
+    _SettingsSection.shortcuts => [
+      if (desktopService.supportsWinV)
+        _SettingRow(
+          title: '固定 Win + V 快捷键',
+          subtitle:
+              controller.shortcutError ??
+              (desktopService.usesWinV
+                  ? '已接管 Win + V，自定义快捷键已停用'
+                  : '开启后使用 Win + V，关闭后恢复原自定义快捷键'),
+          trailing: Switch(
+            key: const ValueKey('win-v-shortcut-switch'),
+            value: desktopService.usesWinV,
+            onChanged: controller.shortcutModeChanging
+                ? null
+                : (value) async {
+                    final error = await desktopService.setWinVShortcutEnabled(
+                      value,
+                    );
+                    if (context.mounted && error != null) {
+                      showMessage(context, error);
                     }
                   },
-                ),
-              ),
-              const Divider(height: 1),
-            ],
-            _SettingRow(
-              title: '快捷面板显示数量',
-              subtitle: '无搜索词时只查询最近记录',
-              trailing: DropdownButton<int>(
-                value: controller.quickCount,
-                underline: const SizedBox.shrink(),
-                borderRadius: BorderRadius.circular(10),
-                items: const [20, 30, 40, 50]
-                    .map(
-                      (value) => DropdownMenuItem(
-                        value: value,
-                        child: Text('$value 条'),
-                      ),
-                    )
-                    .toList(),
-                onChanged: (value) {
-                  if (value != null) controller.setQuickCount(value);
+          ),
+        ),
+      _SettingRow(
+        title: '全局快捷键',
+        enabled: !desktopService.usesWinV && !controller.shortcutModeChanging,
+        subtitle: desktopService.usesWinV
+            ? '当前仅使用 Win + V，原组合已保留，关闭上方开关后恢复'
+            : controller.shortcutError ?? '在任何应用上方呼出快捷剪切板，点击右侧修改',
+        trailing: OutlinedButton.icon(
+          key: const ValueKey('custom-shortcut-button'),
+          onPressed: desktopService.usesWinV || controller.shortcutModeChanging
+              ? null
+              : () async {
+                  final error = await desktopService.beginShortcutRecording();
+                  if (error != null) {
+                    if (context.mounted) showMessage(context, error);
+                    return;
+                  }
+                  try {
+                    if (!context.mounted) return;
+                    final saved = await showDialog<bool>(
+                      context: context,
+                      barrierDismissible: false,
+                      builder: (_) =>
+                          ShortcutDialog(desktopService: desktopService),
+                    );
+                    if (saved == true && context.mounted) {
+                      showMessage(context, '快捷键已更新');
+                    }
+                  } finally {
+                    await desktopService.endShortcutRecording();
+                  }
                 },
-              ),
-            ),
-            const Divider(height: 1),
-            const _SettingRow(
-              title: '搜索范围',
-              subtitle: '输入关键词后自动切换到全部历史搜索',
-              trailing: StatusPill(
-                label: '智能搜索',
-                color: AppColors.primary,
-                icon: Icons.auto_awesome_outlined,
-              ),
-            ),
-            const Divider(height: 1),
-            _SettingRow(
-              title: '历史保存数量',
-              subtitle: '超出限制时自动清理最旧的非收藏记录',
-              trailing: HistoryLimitPicker(controller: controller),
-            ),
-          ],
+          label: Text(controller.quickShortcut.label()),
+          icon: const Icon(Icons.keyboard_outlined, size: 18),
         ),
       ),
-      const SizedBox(height: 14),
-      AppCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const _SectionTitle(title: '应用行为', subtitle: '桌面端体验'),
-            const SizedBox(height: 8),
-            _SettingRow(
-              title: '开机自动启动',
-              subtitle: controller.launchAtStartupChanging
-                  ? '正在保存并校验开机启动设置…'
-                  : controller.launchAtStartupMessage ??
-                        '登录系统后自动启动 Idreaml Clip',
-              trailing: Switch(
-                key: const ValueKey('launch-at-startup-switch'),
-                value: controller.launchAtStartupEnabled,
-                onChanged:
-                    controller.launchAtStartupChanging ||
-                        controller.administratorChanging
-                    ? null
-                    : (value) async {
-                        try {
-                          await desktopService.setLaunchAtStartup(value);
-                        } catch (_) {
-                          if (context.mounted) {
-                            showMessage(
-                              context,
-                              controller.launchAtStartupMessage ?? '无法修改开机启动设置',
-                            );
-                          }
-                        }
-                      },
-              ),
+      if (desktopService.screenshots.supported)
+        _SettingRow(
+          title: '截图快捷键',
+          subtitle: controller.screenshotError ?? '默认 F1，独立于快捷剪切板快捷键',
+          trailing: OutlinedButton.icon(
+            key: const ValueKey('screenshot-shortcut-button'),
+            onPressed: () async {
+              final error = await desktopService.beginShortcutRecording(
+                screenshot: true,
+              );
+              if (error != null) {
+                if (context.mounted) showMessage(context, error);
+                return;
+              }
+              try {
+                if (!context.mounted) return;
+                await showDialog<bool>(
+                  context: context,
+                  barrierDismissible: false,
+                  builder: (_) => ShortcutDialog(
+                    desktopService: desktopService,
+                    screenshot: true,
+                  ),
+                );
+              } finally {
+                await desktopService.endShortcutRecording();
+              }
+            },
+            icon: const Icon(Icons.screenshot_monitor_outlined, size: 18),
+            label: Text(controller.screenshotShortcut.label()),
+          ),
+        ),
+      _SettingRow(
+        title: '全部快捷键说明',
+        subtitle: '按使用场景查看操作说明，自定义快捷键随设置同步更新',
+        trailing: OutlinedButton.icon(
+          key: const ValueKey('all-shortcut-help-button'),
+          onPressed: () => showDialog<void>(
+            context: context,
+            builder: (_) => AllShortcutHelpDialog(
+              controller: controller,
+              supportsWinV: desktopService.supportsWinV,
+              supportsScreenshots: desktopService.screenshots.supported,
             ),
-            if (desktopService.administrator.supported) ...[
-              const Divider(height: 1),
-              _SettingRow(
-                title: '以管理员身份启动',
-                subtitle: controller.administratorChanging
-                    ? '正在等待 Windows 授权并准备重启…'
-                    : '${controller.isAdministrator ? '当前：管理员。' : '当前：普通权限。'}'
-                          '${controller.administratorMessage ?? '开启后立即请求授权并重启，以后每次启动默认请求管理员权限。'}',
-                trailing: Switch(
-                  key: const ValueKey('run-as-administrator-switch'),
-                  value: controller.runAsAdministratorEnabled,
-                  onChanged:
-                      controller.administratorChanging ||
-                          controller.storageChanging
-                      ? null
-                      : (value) async {
-                          final message = await desktopService
-                              .setRunAsAdministratorEnabled(value);
-                          if (context.mounted && message != null) {
-                            showMessage(context, message);
-                          }
-                        },
+          ),
+          icon: const Icon(Icons.help_outline_rounded, size: 18),
+          label: const Text('查看说明'),
+        ),
+      ),
+    ],
+    _SettingsSection.screenshot => [
+      _SettingRow(
+        title: '开始截图时显示取色器',
+        subtitle: '截图中按 F2 临时显示或隐藏，按 C 复制当前 HEX 色值并退出',
+        trailing: Switch(
+          value: controller.showScreenshotColorPicker,
+          onChanged: (enabled) async {
+            try {
+              await controller.saveShowScreenshotColorPicker(enabled);
+            } catch (_) {
+              if (context.mounted) {
+                showMessage(context, '取色器设置保存失败，请重试');
+              }
+            }
+          },
+        ),
+      ),
+      _SettingRow(
+        title: '长截图滚动方式',
+        subtitle: '自动滚动停止后可以查看预览，点击完成才进入编辑',
+        trailing: DropdownButton<bool>(
+          key: const ValueKey('scroll-capture-mode'),
+          value: controller.autoScrollCapture,
+          underline: const SizedBox.shrink(),
+          items: const [
+            DropdownMenuItem(value: false, child: Text('手动滚动')),
+            DropdownMenuItem(value: true, child: Text('自动滚动')),
+          ],
+          onChanged: (value) async {
+            if (value == null || value == controller.autoScrollCapture) {
+              return;
+            }
+            try {
+              await controller.saveAutoScrollCapture(value);
+            } catch (_) {
+              if (context.mounted) {
+                showMessage(context, '长截图滚动方式保存失败，请重试');
+              }
+            }
+          },
+        ),
+      ),
+      _SettingRow(
+        title: '默认箭头样式',
+        subtitle: '开始截图时采用的样式，编辑时也可以临时切换',
+        trailing: DropdownButton<String>(
+          value: controller.defaultArrowStyle?.name ?? 'last',
+          underline: const SizedBox.shrink(),
+          borderRadius: BorderRadius.circular(10),
+          items: [
+            const DropdownMenuItem(value: 'last', child: Text('沿用上次选择')),
+            for (final style in ArrowStyle.values)
+              DropdownMenuItem(
+                value: style.name,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    ArrowStylePreview(style: style),
+                    const SizedBox(width: 8),
+                    Text(style.label),
+                  ],
                 ),
               ),
-            ],
           ],
+          onChanged: (name) async {
+            if (name == null) return;
+            try {
+              await controller.saveDefaultArrowStyle(ArrowStyle.tryParse(name));
+            } catch (_) {
+              if (context.mounted) showMessage(context, '默认箭头样式保存失败，请重试');
+            }
+          },
         ),
       ),
-      const SizedBox(height: 14),
-      if (controller.storagePath != null) ...[
-        StorageDirectoryCard(controller: controller),
-        const SizedBox(height: 14),
-      ],
-      const ReleaseInfoCard(),
+      _SettingRow(
+        title: '贴图默认边框',
+        subtitle: '应用到新贴图和已选择「跟随全局设置」的贴图',
+        trailing: DropdownButton<PinnedImageBorder>(
+          value: controller.pinnedImageBorder,
+          underline: const SizedBox.shrink(),
+          borderRadius: BorderRadius.circular(10),
+          items: [
+            for (final border in PinnedImageBorder.values)
+              DropdownMenuItem(
+                value: border,
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Container(
+                      width: 16,
+                      height: 16,
+                      alignment: Alignment.center,
+                      decoration: BoxDecoration(
+                        color: border.color,
+                        border: Border.all(color: AppColors.line),
+                        borderRadius: BorderRadius.circular(3),
+                      ),
+                      child: border == PinnedImageBorder.none
+                          ? const Icon(
+                              Icons.block,
+                              size: 12,
+                              color: AppColors.muted,
+                            )
+                          : null,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(border.label),
+                  ],
+                ),
+              ),
+          ],
+          onChanged: (border) async {
+            if (border == null) return;
+            try {
+              await desktopService.screenshots.savePinBorderDefault(border);
+            } catch (_) {
+              if (context.mounted) {
+                showMessage(context, '贴图边框更新失败，请重试');
+              }
+            }
+          },
+        ),
+      ),
     ],
-  );
+    _SettingsSection.history => [
+      _SettingRow(
+        title: '快捷面板显示数量',
+        subtitle: '无搜索词时只查询最近记录',
+        trailing: DropdownButton<int>(
+          value: controller.quickCount,
+          underline: const SizedBox.shrink(),
+          borderRadius: BorderRadius.circular(10),
+          items: const [20, 30, 40, 50]
+              .map(
+                (value) =>
+                    DropdownMenuItem(value: value, child: Text('$value 条')),
+              )
+              .toList(),
+          onChanged: (value) {
+            if (value != null) controller.setQuickCount(value);
+          },
+        ),
+      ),
+      const _SettingRow(
+        title: '搜索范围',
+        subtitle: '输入关键词后自动切换到全部历史搜索',
+        trailing: StatusPill(
+          label: '智能搜索',
+          color: AppColors.primary,
+          icon: Icons.auto_awesome_outlined,
+        ),
+      ),
+      _SettingRow(
+        title: '历史保存数量',
+        subtitle: '超出限制时自动清理最旧的非收藏记录',
+        trailing: HistoryLimitPicker(controller: controller),
+      ),
+    ],
+    _SettingsSection.startup => [
+      _SettingRow(
+        title: '开机自动启动',
+        subtitle: controller.launchAtStartupChanging
+            ? '正在保存并校验开机启动设置…'
+            : controller.launchAtStartupMessage ?? '登录系统后自动启动 Idreaml Clip',
+        trailing: Switch(
+          key: const ValueKey('launch-at-startup-switch'),
+          value: controller.launchAtStartupEnabled,
+          onChanged:
+              controller.launchAtStartupChanging ||
+                  controller.administratorChanging
+              ? null
+              : (value) async {
+                  try {
+                    await desktopService.setLaunchAtStartup(value);
+                  } catch (_) {
+                    if (context.mounted) {
+                      showMessage(
+                        context,
+                        controller.launchAtStartupMessage ?? '无法修改开机启动设置',
+                      );
+                    }
+                  }
+                },
+        ),
+      ),
+      if (desktopService.administrator.supported)
+        _SettingRow(
+          title: '以管理员身份启动',
+          subtitle: controller.administratorChanging
+              ? '正在等待 Windows 授权并准备重启…'
+              : '${controller.isAdministrator ? '当前：管理员。' : '当前：普通权限。'}'
+                    '${controller.administratorMessage ?? '开启后立即请求授权并重启，以后每次启动默认请求管理员权限。'}',
+          trailing: Switch(
+            key: const ValueKey('run-as-administrator-switch'),
+            value: controller.runAsAdministratorEnabled,
+            onChanged:
+                controller.administratorChanging || controller.storageChanging
+                ? null
+                : (value) async {
+                    final message = await desktopService
+                        .setRunAsAdministratorEnabled(value);
+                    if (context.mounted && message != null) {
+                      showMessage(context, message);
+                    }
+                  },
+          ),
+        ),
+    ],
+    _SettingsSection.release => [],
+  };
 }
 
 class _SectionTitle extends StatelessWidget {

@@ -30,23 +30,7 @@ void paintAnnotation(Canvas canvas, ScreenshotAnnotation object) {
     case ScreenshotTool.line:
       canvas.drawLine(points.first, points.last, paint);
     case ScreenshotTool.arrow:
-      canvas.drawLine(points.first, points.last, paint);
-      final angle = math.atan2(
-        points.last.dy - points.first.dy,
-        points.last.dx - points.first.dx,
-      );
-      final length = math.max(10.0, style.width * 4);
-      final path = Path()
-        ..moveTo(
-          points.last.dx - length * math.cos(angle - .5),
-          points.last.dy - length * math.sin(angle - .5),
-        )
-        ..lineTo(points.last.dx, points.last.dy)
-        ..lineTo(
-          points.last.dx - length * math.cos(angle + .5),
-          points.last.dy - length * math.sin(angle + .5),
-        );
-      canvas.drawPath(path, paint);
+      object.arrowGeometry.paint(canvas, paint);
     case ScreenshotTool.pen:
     case ScreenshotTool.highlighter:
       if (object.tool == ScreenshotTool.highlighter) {
@@ -159,21 +143,32 @@ Future<ui.Image> renderScreenshot(
   }
 }
 
+Path monitorCoverage(List<Rect> monitors) {
+  final path = Path();
+  for (final monitor in monitors) {
+    path.addRect(monitor);
+  }
+  return path;
+}
+
 Future<Uint8List> exportScreenshot(
   ui.Image background,
-  ScreenshotSnapshot snapshot,
-) async {
+  ScreenshotSnapshot snapshot, {
+  List<Rect> monitors = const [],
+}) async {
   final rect = snapshot.selection;
   if (rect == null || rect.isEmpty) throw const FormatException('请先选择截图区域');
-  final composed = await renderScreenshot(background, snapshot.annotations);
+  final composed = snapshot.annotations.isEmpty
+      ? background
+      : await renderScreenshot(background, snapshot.annotations);
   try {
     final recorder = ui.PictureRecorder();
-    Canvas(recorder).drawImageRect(
-      composed,
-      rect,
-      Rect.fromLTWH(0, 0, rect.width, rect.height),
-      Paint(),
-    );
+    final canvas = Canvas(recorder)..translate(-rect.left, -rect.top);
+    // Keep unscreened corners transparent even when an annotation crosses them.
+    if (monitors.length > 1) {
+      canvas.clipPath(monitorCoverage(monitors), doAntiAlias: false);
+    }
+    canvas.drawImage(composed, Offset.zero, Paint());
     final picture = recorder.endRecording();
     final cropped = await picture.toImage(
       rect.width.toInt(),
@@ -188,6 +183,6 @@ Future<Uint8List> exportScreenshot(
       cropped.dispose();
     }
   } finally {
-    composed.dispose();
+    if (!identical(composed, background)) composed.dispose();
   }
 }

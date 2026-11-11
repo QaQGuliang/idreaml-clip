@@ -8,6 +8,7 @@ import 'package:image/image.dart' as img;
 import 'package:idreaml_clip/src/app_controller.dart';
 import 'package:idreaml_clip/src/data/clipboard_database.dart';
 import 'package:idreaml_clip/src/data/clipboard_repository.dart';
+import 'package:idreaml_clip/src/models/arrow_style.dart';
 import 'package:idreaml_clip/src/models/clipboard_content.dart';
 import 'package:idreaml_clip/src/models/pinned_image_border.dart';
 import 'package:idreaml_clip/src/models/quick_shortcut.dart';
@@ -155,6 +156,46 @@ void main() {
     expect(calls, ['prepare', 'open']);
   });
 
+  test('帮助快捷键读取当前配置，截图快照也携带最新组合', () async {
+    Map? opened;
+    messenger.setMockMethodCallHandler(ScreenshotService.channel, (call) async {
+      if (call.method == 'open') opened = call.arguments as Map;
+      return null;
+    });
+    await service.start();
+    expect(
+      opened?['screenshotShortcut'],
+      controller.screenshotShortcut.label(),
+    );
+    expect(
+      await fromEditor('getScreenshotShortcut'),
+      controller.screenshotShortcut.label(),
+    );
+    const shortcut = QuickShortcut(key: PhysicalKeyboardKey.f9, control: true);
+    expect(await service.updateShortcut(shortcut), isNull);
+    expect(await fromEditor('getScreenshotShortcut'), shortcut.label());
+    await fromEditor('closed');
+    await service.start();
+    expect(opened?['screenshotShortcut'], shortcut.label());
+  });
+
+  test('原生截图启动失败时显示具体原因，并允许开始下一次截图', () async {
+    var tooLarge = true;
+    messenger.setMockMethodCallHandler(ScreenshotService.channel, (call) async {
+      if (call.method == 'open' && tooLarge) {
+        throw PlatformException(code: 'capture', message: '桌面总尺寸超过截图上限');
+      }
+      return null;
+    });
+    await service.start();
+    expect(service.active, isFalse);
+    expect(controller.screenshotError, '桌面总尺寸超过截图上限');
+    tooLarge = false;
+    await service.start();
+    expect(service.active, isTrue);
+    expect(controller.screenshotError, isNull);
+  });
+
   test('设置页和贴图菜单共用默认边框，重新初始化后恢复', () async {
     final applied = <String>[];
     messenger.setMockMethodCallHandler(ScreenshotService.channel, (call) async {
@@ -193,14 +234,20 @@ void main() {
     await service.start();
     expect(service.active, isTrue);
     expect(opened?['styles'], '{}');
+    expect(opened?.containsKey('defaultArrowStyle'), isFalse);
     expect(opened?['showColorPicker'], true);
+    expect(opened?['autoScroll'], false);
     const styles = '{"rectangle":{"color":4278190080}}';
     await fromEditor('styles', styles);
     await fromEditor('closed');
     await controller.saveShowScreenshotColorPicker(false);
+    await controller.saveAutoScrollCapture(true);
+    await controller.saveDefaultArrowStyle(ArrowStyle.dashed);
     await service.start();
     expect(opened?['styles'], styles);
+    expect(opened?['defaultArrowStyle'], 'dashed');
     expect(opened?['showColorPicker'], false);
+    expect(opened?['autoScroll'], true);
     expect(await repository.getSetting('screenshot_styles'), styles);
   });
 

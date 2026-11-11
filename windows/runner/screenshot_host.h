@@ -33,11 +33,14 @@ class ScreenshotHost {
   void InvokePinAction(HWND window, const char* method, Value argument, const wchar_t* error);
   bool Capture();
   bool EnsureEditor();
+  void ShowLongEditor(const RECT& selection);
+  void RestoreOverlayStyle();
   void DestroyEditor();
   static LRESULT CALLBACK WindowProc(HWND window, UINT message,
                                      WPARAM wparam, LPARAM lparam);
   HWND owner_;
   HWND main_view_;
+  POINT initial_cursor_{};
   HWND window_ = nullptr;
   HWND previous_foreground_ = nullptr;
   RECT screen_{};
@@ -48,6 +51,8 @@ class ScreenshotHost {
   bool pinned_ = false;
   bool editor_ready_ = false;
   bool positioning_ = false;
+  bool long_editor_ = false;
+  bool maximized_ = false;
   bool wait_for_compositor_ = false;
   int64_t session_ = 0;
   bool closing_ = false;
