@@ -1,5 +1,6 @@
+<!-- 图片固定到品牌更新提交；更换素材时同步更新提交号，避免复用旧缓存地址。 -->
 <p align="center">
-  <img src="website/assets/logo.png" width="76" height="76" alt="理梦剪藏 Logo">
+  <img src="https://raw.githubusercontent.com/QaQGuliang/idreaml-clip/31f929f0c81a233ec187f0fda15744fcecef7238/website/assets/logo.png" width="76" height="76" alt="理梦剪藏 Logo">
 </p>
 
 <h1 align="center">Idreaml Clip · 理梦剪藏</h1>
@@ -16,7 +17,7 @@
 
 理梦剪藏是一款本地优先的桌面工具，提供剪切板历史、快捷粘贴、截图与贴图，以及独立的桌面便签和待办。无需注册账号，未配置云同步也能使用。
 
-[![全部历史：搜索、收藏与内容预览](website/assets/main-history.png)](https://qaqguliang.github.io/idreaml-clip/)
+[![全部历史：搜索、收藏与内容预览](https://raw.githubusercontent.com/QaQGuliang/idreaml-clip/31f929f0c81a233ec187f0fda15744fcecef7238/website/assets/main-history.png)](https://qaqguliang.github.io/idreaml-clip/)
 
 > **[打开完整图文网站 →](https://qaqguliang.github.io/idreaml-clip/)** 通过界面截图、操作步骤和快捷键说明，了解每项功能。
 
@@ -49,9 +50,9 @@
 <details>
 <summary>查看快捷剪切板与 JSON 预览</summary>
 
-<p align="center"><img src="website/assets/quick-panel.png" width="347" alt="快捷剪切板：搜索、收藏与便签待办快捷入口"></p>
+<p align="center"><img src="https://raw.githubusercontent.com/QaQGuliang/idreaml-clip/31f929f0c81a233ec187f0fda15744fcecef7238/website/assets/quick-panel.png" width="347" alt="快捷剪切板：搜索、收藏与便签待办快捷入口"></p>
 
-![JSON 详情：左侧原文，右侧格式化与层级折叠](website/assets/json-preview.png)
+![JSON 详情：左侧原文，右侧格式化与层级折叠](https://raw.githubusercontent.com/QaQGuliang/idreaml-clip/31f929f0c81a233ec187f0fda15744fcecef7238/website/assets/json-preview.png)
 
 </details>
 
@@ -83,7 +84,7 @@
 
 | 便签 | 待办 |
 | --- | --- |
-| ![便签管理界面](website/assets/desk-notes.png) | ![待办管理界面](website/assets/desk-todos.png) |
+| ![便签管理界面](https://raw.githubusercontent.com/QaQGuliang/idreaml-clip/31f929f0c81a233ec187f0fda15744fcecef7238/website/assets/desk-notes.png) | ![待办管理界面](https://raw.githubusercontent.com/QaQGuliang/idreaml-clip/31f929f0c81a233ec187f0fda15744fcecef7238/website/assets/desk-todos.png) |
 | 记录标题与多行正文，集中搜索、编辑和删除 | 勾选完成后从桌面隐藏，在管理页查看和恢复 |
 
 两个模块分别支持默认字体、10–32 字号和文字颜色；管理页新增或编辑可设置单条样式，也可恢复“跟随列表”。快速新增支持选色，离开快速新增窗口会保留本机草稿。
