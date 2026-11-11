@@ -11,42 +11,44 @@ class StorageDirectoryCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => AppCard(
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const Text('数据存储目录', style: TextStyle(fontWeight: FontWeight.w800)),
-        const SizedBox(height: 8),
-        const Text('统一保存文字记录、图片、软件设置和同步数据。'),
-        const SizedBox(height: 8),
-        SelectableText(controller.storagePath ?? ''),
-        const SizedBox(height: 10),
-        const Text('默认位于安装目录下的 data/idreaml_clip。更改后会迁移全部数据，并删除旧目录及其内容。'),
-        if (controller.storageMessage != null) ...[
+    child: SingleChildScrollView(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          const Text('数据存储目录', style: TextStyle(fontWeight: FontWeight.w800)),
           const SizedBox(height: 8),
-          Text(controller.storageMessage!),
+          const Text('统一保存文字记录、图片、软件设置和同步数据。'),
+          const SizedBox(height: 8),
+          SelectableText(controller.storagePath ?? ''),
+          const SizedBox(height: 10),
+          const Text('默认位于安装目录下的 data/idreaml_clip。更改后会迁移全部数据，并删除旧目录及其内容。'),
+          if (controller.storageMessage != null) ...[
+            const SizedBox(height: 8),
+            Text(controller.storageMessage!),
+          ],
+          const SizedBox(height: 12),
+          OutlinedButton.icon(
+            key: const ValueKey('change-storage-directory'),
+            onPressed:
+                controller.storageChanging || controller.administratorChanging
+                ? null
+                : () => showDialog<void>(
+                    context: context,
+                    barrierDismissible: false,
+                    builder: (_) =>
+                        _StorageDirectoryDialog(controller: controller),
+                  ),
+            icon: const Icon(Icons.drive_file_move_outlined, size: 18),
+            label: Text(controller.storageChanging ? '正在迁移…' : '更改目录'),
+          ),
+          const Divider(height: 28),
+          const Text('目录内容说明', style: TextStyle(fontWeight: FontWeight.w700)),
+          const SizedBox(height: 10),
+          const _StorageContents(),
+          const SizedBox(height: 4),
+          const Text('数据库的日志、临时文件由应用自动维护。备份或迁移时请保留整个数据目录。'),
         ],
-        const SizedBox(height: 12),
-        OutlinedButton.icon(
-          key: const ValueKey('change-storage-directory'),
-          onPressed:
-              controller.storageChanging || controller.administratorChanging
-              ? null
-              : () => showDialog<void>(
-                  context: context,
-                  barrierDismissible: false,
-                  builder: (_) =>
-                      _StorageDirectoryDialog(controller: controller),
-                ),
-          icon: const Icon(Icons.drive_file_move_outlined, size: 18),
-          label: Text(controller.storageChanging ? '正在迁移…' : '更改目录'),
-        ),
-        const Divider(height: 28),
-        const Text('目录内容说明', style: TextStyle(fontWeight: FontWeight.w700)),
-        const SizedBox(height: 10),
-        const _StorageContents(),
-        const SizedBox(height: 4),
-        const Text('数据库的日志、临时文件由应用自动维护。备份或迁移时请保留整个数据目录。'),
-      ],
+      ),
     ),
   );
 }
@@ -56,6 +58,7 @@ class _StorageContents extends StatelessWidget {
 
   static const entries = [
     ('database/clipboard.db', '文字记录、收藏、图片索引、设备信息和截图回执'),
+    ('database/desktop.db', '便签、待办及其本机设置和草稿'),
     ('images/', '剪切板图片和截图的原始文件'),
     ('config/settings.db', '软件设置、快捷键、窗口布局和同步配置'),
     ('credentials/', '加密保存的同步访问令牌'),

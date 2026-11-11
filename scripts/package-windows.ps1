@@ -3,6 +3,8 @@ param(
     [string]$Flutter = 'flutter',
     [string]$OutputDirectory,
     [string]$RuntimeDirectory = "$env:WINDIR/System32",
+    # Reuse previously resolved, validated dependencies and plugin links.
+    [switch]$NoPub,
     # Optional fallback: reuse an already validated native runner and plugins,
     # while compiling the current Dart code and assets in release mode.
     [string]$PrebuiltNativeDirectory
@@ -71,7 +73,9 @@ try {
         if ($env:PROCESSOR_ARCHITECTURE -ne 'AMD64' -or $env:PROCESSOR_ARCHITEW6432 -eq 'ARM64') {
             throw 'Full native packaging requires an x86-64 Windows build host.'
         }
-        Invoke-Flutter -Arguments @('build', 'windows', '--release')
+        $buildArguments = @('build', 'windows', '--release')
+        if ($NoPub) { $buildArguments += '--no-pub' }
+        Invoke-Flutter -Arguments $buildArguments
         $nativeRoot = Join-Path $projectRoot 'build/windows/x64/runner/Release'
     }
 

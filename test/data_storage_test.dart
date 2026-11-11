@@ -11,6 +11,8 @@ import 'package:idreaml_clip/src/data/clipboard_repository.dart';
 import 'package:idreaml_clip/src/data/data_storage.dart';
 import 'package:idreaml_clip/src/data/image_store.dart';
 import 'package:idreaml_clip/src/data/storage_access.dart';
+import 'package:idreaml_clip/src/desk/desk_models.dart';
+import 'package:idreaml_clip/src/desk/desk_repository.dart';
 import 'package:idreaml_clip/src/models/clipboard_content.dart';
 import 'package:idreaml_clip/src/models/sync_models.dart';
 import 'package:idreaml_clip/src/services/credential_service.dart';
@@ -152,6 +154,12 @@ void main() {
 
   test('统一目录分类存储，迁移所有内容并删除旧目录，重启保留配置和历史', () async {
     expect(storage.root.path, p.join(install.path, 'data', 'idreaml_clip'));
+    final desk = DeskRepository(
+      deviceId: repository.deviceId,
+      storage: storage,
+    );
+    await desk.save(DeskKind.note, body: '跟随数据目录迁移的独立便签');
+    await desk.savePreference('draft.todo', '迁移中的待办草稿');
     final item = (await repository.captureText('文字与收藏'))!;
     await repository.toggleFavorite(item.id);
     await repository.captureScreenshot('receipt', picture);
@@ -179,6 +187,9 @@ void main() {
     final result = await repository.moveStorage(destination);
     expect(result.warning, isNull);
     expect(old.existsSync(), isFalse);
+    expect((await desk.load()).single.body, '跟随数据目录迁移的独立便签');
+    expect(await desk.preference('draft.todo'), '迁移中的待办草稿');
+    await desk.save(DeskKind.todo, body: '迁移后继续保存');
     expect(await runtime.readAsString(), 'runtime');
     expect(await repository.getSetting('quick_count'), '50');
     expect((await repository.list(favoritesOnly: true)).single.id, item.id);

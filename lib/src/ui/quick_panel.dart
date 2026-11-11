@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../app_controller.dart';
+import '../desk/desk_models.dart';
 import '../models/clipboard_item.dart';
 import '../services/desktop_service.dart';
 import '../services/clipboard_image_codec.dart';
@@ -521,6 +522,27 @@ class _QuickHeader extends StatelessWidget {
             style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
           ),
         ),
+        for (final kind in DeskKind.values)
+          if (service.controller.desktopNotes?.enabled(kind) == true)
+            IconButton(
+              key: ValueKey('quick-add-${kind.name}'),
+              tooltip: kind == DeskKind.note ? '新建便签（F3）' : '新建待办（双按 F3）',
+              constraints: const BoxConstraints.tightFor(width: 32, height: 32),
+              padding: EdgeInsets.zero,
+              style: IconButton.styleFrom(
+                tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              ),
+              icon: Icon(
+                kind == DeskKind.note
+                    ? Icons.sticky_note_2_outlined
+                    : Icons.checklist_outlined,
+                size: 18,
+              ),
+              onPressed: () async {
+                await service.hide();
+                await service.controller.desktopNotes?.compose(kind);
+              },
+            ),
         if (service.screenshots.supported)
           Builder(
             builder: (buttonContext) => IconButton(

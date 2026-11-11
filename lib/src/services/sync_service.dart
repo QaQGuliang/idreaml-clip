@@ -39,6 +39,7 @@ class SyncService extends ChangeNotifier {
   DateTime? lastSyncedAt;
   String? lastError;
   Future<void> Function()? onSynced;
+  Future<SyncResult> Function(Directory)? syncDesktopNotes;
 
   Future<void> initialize() async {
     final saved = await _repository.getSetting(_configKey);
@@ -126,7 +127,11 @@ class SyncService extends ChangeNotifier {
             deviceName: _repository.deviceName,
             items: items,
           );
-          return SyncResult(imported: changed, exported: exported);
+          final desktopChanges = await syncDesktopNotes?.call(repository);
+          return SyncResult(
+            imported: changed + (desktopChanges?.imported ?? 0),
+            exported: exported + (desktopChanges?.exported ?? 0),
+          );
         },
       );
       await _repository.markAllSynced();

@@ -10,7 +10,8 @@ FlutterWindow::FlutterWindow(const flutter::DartProject& project)
 FlutterWindow::~FlutterWindow() {}
 
 bool FlutterWindow::HandleScreenshotShortcut(const MSG& message) {
-  return screenshot_host_ && screenshot_host_->HandleShortcut(message);
+  if (screenshot_host_ && screenshot_host_->HandleShortcut(message)) return true;
+  return desktop_notes_ && desktop_notes_->HandleMessage(message);
 }
 
 bool FlutterWindow::OnCreate() {
@@ -37,6 +38,9 @@ bool FlutterWindow::OnCreate() {
   screenshot_host_ = std::make_unique<ScreenshotHost>(
       GetHandle(), flutter_controller_->view()->GetNativeWindow(),
       flutter_controller_->engine(), project_);
+  desktop_notes_ = std::make_unique<DesktopNotesHost>(
+      flutter_controller_->engine()->messenger(),
+      [this]() { return screenshot_host_ && screenshot_host_->active(); });
 
   flutter_controller_->engine()->SetNextFrameCallback([&]() {
     this->Show();
@@ -51,6 +55,7 @@ bool FlutterWindow::OnCreate() {
 }
 
 void FlutterWindow::OnDestroy() {
+  desktop_notes_.reset();
   administrator_launch_.reset();
   directory_picker_.reset();
   screenshot_host_.reset();

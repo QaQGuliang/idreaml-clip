@@ -282,6 +282,7 @@ class ScreenshotService {
   }
 
   Future<String?> updateShortcut(QuickShortcut shortcut) async {
+    if (controller.reservesDesktopShortcut(shortcut)) return 'F3 已用于便签和待办';
     if (_savingShortcut) return '正在保存快捷键，请稍候';
     if (!shortcut.isValid) return '系统不支持这个按键，请重新录入';
     if (shortcut.sameCombination(controller.quickShortcut) ||

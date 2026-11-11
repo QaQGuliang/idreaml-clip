@@ -10,6 +10,8 @@ add_executable(${BINARY_NAME} WIN32
   "flutter_window.cpp"
   "directory_picker.cpp"
   "administrator_launch.cpp"
+  "desktop_notes_host.cpp"
+  "desktop_backdrop.cpp"
   "screenshot_host.cpp"
   "pinned_image.cpp"
   "scroll_capture.cpp"
@@ -43,6 +45,7 @@ target_link_libraries(${BINARY_NAME} PRIVATE "dwmapi.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "comdlg32.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "ole32.lib" "shell32.lib" "windowscodecs.lib")
 target_link_libraries(${BINARY_NAME} PRIVATE "advapi32.lib")
+target_link_libraries(${BINARY_NAME} PRIVATE "gdiplus.lib" "shcore.lib" "comctl32.lib")
 target_include_directories(${BINARY_NAME} PRIVATE "${CMAKE_SOURCE_DIR}")
 
 # Run the Flutter tool portions of the build. This must not be removed.

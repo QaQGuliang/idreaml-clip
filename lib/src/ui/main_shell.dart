@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../app_controller.dart';
+import '../desk/desk_models.dart';
+import '../desk/desk_pages.dart';
 import '../models/arrow_style.dart';
 import '../models/clipboard_item.dart';
 import '../models/json_document.dart';
@@ -258,6 +260,27 @@ class _Sidebar extends StatelessWidget {
           onTap: () => onPage(AppPage.favorites),
         ),
         const SizedBox(height: 12),
+        if (!compact &&
+            DeskKind.values.any(
+              (kind) => controller.desktopNotes?.enabled(kind) == true,
+            ))
+          const _NavLabel('桌面'),
+        for (final kind in DeskKind.values)
+          if (controller.desktopNotes?.enabled(kind) == true)
+            _NavItem(
+              compact: compact,
+              icon: kind == DeskKind.note
+                  ? Icons.sticky_note_2_outlined
+                  : Icons.checklist_outlined,
+              label: kind.label,
+              trailing:
+                  '${controller.desktopNotes!.items(kind).where((entry) => kind == DeskKind.note || !entry.done).length}',
+              selected:
+                  controller.page ==
+                  (kind == DeskKind.note ? AppPage.notes : AppPage.todos),
+              onTap: () =>
+                  onPage(kind == DeskKind.note ? AppPage.notes : AppPage.todos),
+            ),
         if (!compact) const _NavLabel('管理'),
         _NavItem(
           compact: compact,
@@ -486,6 +509,8 @@ class _TopBar extends StatelessWidget {
   static const titles = {
     AppPage.history: ('全部历史', '长期保存的本地剪切板记录'),
     AppPage.favorites: ('我的收藏', '长期保留的重要内容'),
+    AppPage.notes: ('便签', '随手记录，独立保存'),
+    AppPage.todos: ('待办', '安排事项，记录完成进度'),
     AppPage.sync: ('云同步', '使用你自己的 Git 仓库'),
     AppPage.devices: ('设备', '管理参与同步的设备'),
     AppPage.privacy: ('隐私', '本地优先，内容由你掌控'),
@@ -602,6 +627,20 @@ class _CurrentPage extends StatelessWidget {
         return _HistoryWorkspace(controller: controller);
       case AppPage.sync:
         return _SyncPage(controller: controller);
+      case AppPage.notes:
+      case AppPage.todos:
+        final notes = controller.desktopNotes;
+        if (notes == null) return const Center(child: Text('当前平台暂未支持'));
+        return DeskPage(
+          key: ValueKey(controller.page),
+          notes: notes,
+          kind: controller.page == AppPage.notes
+              ? DeskKind.note
+              : DeskKind.todo,
+          selectedId: controller.selectedDeskId,
+          viewRequest: controller.deskViewRequest,
+          onViewed: () => controller.selectedDeskId = null,
+        );
       case AppPage.devices:
         return _DevicesPage(controller: controller);
       case AppPage.privacy:
@@ -1690,6 +1729,7 @@ enum _SettingsSection {
   shortcuts('快捷键', Icons.keyboard_alt_outlined),
   history('快捷面板与历史', Icons.history_rounded),
   screenshot('截图与贴图', Icons.screenshot_monitor_outlined),
+  desktop('便签与待办', Icons.sticky_note_2_outlined),
   startup('启动与权限', Icons.power_settings_new_rounded),
   release('版本信息', Icons.info_outline_rounded);
 
@@ -1705,6 +1745,7 @@ enum _SettingsSection {
     ].join('、'),
     history => '显示数量、搜索范围、历史保存与数据存储',
     screenshot => '取色器、长截图、箭头样式与贴图边框',
+    _SettingsSection.desktop => '功能开关、桌面区域、主题与独立同步',
     startup => desktop.administrator.supported ? '开机自动启动、管理员权限' : '开机自动启动',
     release => '查看当前版本及更新记录',
   };
@@ -1730,6 +1771,7 @@ class _SettingsPage extends StatelessWidget {
         _SettingsSection.shortcuts,
         _SettingsSection.history,
         if (desktopService.screenshots.supported) _SettingsSection.screenshot,
+        if (controller.desktopNotes != null) _SettingsSection.desktop,
         _SettingsSection.startup,
       ];
       return ListView(
@@ -1766,6 +1808,10 @@ class _SettingsPage extends StatelessWidget {
         ],
       );
     }
+    if (current == _SettingsSection.desktop &&
+        controller.desktopNotes != null) {
+      return DeskSettingsPage(notes: controller.desktopNotes!);
+    }
     final rows = _rows(context, current);
     return ListView(
       key: PageStorageKey(current),
@@ -1795,6 +1841,7 @@ class _SettingsPage extends StatelessWidget {
     BuildContext context,
     _SettingsSection group,
   ) => switch (group) {
+    _SettingsSection.desktop => [],
     _SettingsSection.shortcuts => [
       if (desktopService.supportsWinV)
         _SettingRow(

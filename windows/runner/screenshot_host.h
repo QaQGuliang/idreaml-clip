@@ -22,6 +22,7 @@ class ScreenshotHost {
   ~ScreenshotHost();
   void Close();
   bool HandleShortcut(const MSG& message);
+  bool active() const { return active_; }
 
  private:
   using Value = flutter::EncodableValue;

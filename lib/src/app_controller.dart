@@ -1,10 +1,14 @@
 import 'dart:async';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 
 import 'data/clipboard_repository.dart';
 import 'data/data_storage.dart';
+import 'desk/desktop_notes.dart';
+import 'desk/desk_repository.dart';
+import 'desk/desk_models.dart';
 import 'models/arrow_style.dart';
 import 'models/clipboard_item.dart';
 import 'models/clipboard_content.dart';
@@ -16,7 +20,16 @@ import 'services/sync_service.dart';
 import 'services/clipboard_service.dart';
 import 'services/async_gate.dart';
 
-enum AppPage { history, favorites, sync, devices, privacy, settings }
+enum AppPage {
+  history,
+  favorites,
+  notes,
+  todos,
+  sync,
+  devices,
+  privacy,
+  settings,
+}
 
 class AppController extends ChangeNotifier {
   AppController(
@@ -31,6 +44,28 @@ class AppController extends ChangeNotifier {
   final ClipboardRepository repository;
   final SyncService syncService;
   final ClipboardService clipboard;
+  DesktopNotes? desktopNotes;
+  String? selectedDeskId;
+  int deskViewRequest = 0;
+
+  bool reservesDesktopShortcut(QuickShortcut shortcut) =>
+      desktopNotes != null &&
+      DeskKind.values.any(desktopNotes!.enabled) &&
+      shortcut.key == PhysicalKeyboardKey.f3 &&
+      !shortcut.control &&
+      !shortcut.alt &&
+      !shortcut.shift &&
+      !shortcut.meta;
+
+  void _onNotesChanged() {
+    final notes = desktopNotes;
+    if ((page == AppPage.notes && notes?.enabled(DeskKind.note) != true) ||
+        (page == AppPage.todos && notes?.enabled(DeskKind.todo) != true)) {
+      page = AppPage.history;
+    }
+    if (!_disposed) notifyListeners();
+  }
+
   Timer? _monitor;
   bool _readingClipboard = false;
   bool _writingClipboard = false;
@@ -144,6 +179,17 @@ class AppController extends ChangeNotifier {
 
   Future<void> initialize({bool startMonitor = true}) async {
     await repository.initializeDevice();
+    if (Platform.isWindows && repository.storage != null) {
+      desktopNotes = DesktopNotes(
+        DeskRepository(
+          deviceId: repository.deviceId,
+          storage: repository.storage,
+        ),
+      );
+      await desktopNotes!.initialize();
+      desktopNotes!.addListener(_onNotesChanged);
+      syncService.syncDesktopNotes = desktopNotes!.synchronize;
+    }
     final settings = await repository.getSettings([
       'workspace_layout',
       'quick_shortcut',
@@ -224,7 +270,18 @@ class AppController extends ChangeNotifier {
     if (sequence != null && sequence == _lastSequence) return;
     _readingClipboard = true;
     try {
+      if (await desktopNotes?.ignoresClipboard(sequence) == true) {
+        _lastSequence = sequence;
+        return;
+      }
       final contents = await clipboard.read();
+      if (await desktopNotes?.ignoresClipboard(
+            clipboard.lastReadSequence ?? sequence,
+          ) ==
+          true) {
+        _lastSequence = clipboard.lastReadSequence ?? sequence;
+        return;
+      }
       if (_disposed ||
           _writingClipboard ||
           writeGeneration != _writeGeneration) {
@@ -619,6 +676,8 @@ class AppController extends ChangeNotifier {
 
   @override
   void dispose() {
+    desktopNotes?.removeListener(_onNotesChanged);
+    desktopNotes?.dispose();
     _disposed = true;
     _monitor?.cancel();
     clipboard.dispose();

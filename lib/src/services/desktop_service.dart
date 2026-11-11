@@ -8,6 +8,7 @@ import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../app_controller.dart';
+import '../desk/desk_models.dart';
 import '../models/quick_shortcut.dart';
 import 'quick_panel_placement.dart';
 import 'quick_preview_placement.dart';
@@ -125,6 +126,13 @@ class DesktopService with TrayListener, WindowListener {
     }
 
     await screenshots.initialize();
+    controller.desktopNotes?.openManager = (kind, id) async {
+      await showHistory();
+      controller.selectedDeskId = id;
+      controller.deskViewRequest++;
+      controller.setPage(kind == DeskKind.note ? AppPage.notes : AppPage.todos);
+    };
+    await controller.desktopNotes?.attachNative();
     await administrator.initialize(requestRestart: false);
     _publishAdministrator();
     try {
@@ -433,6 +441,7 @@ class DesktopService with TrayListener, WindowListener {
   }
 
   Future<String?> updateQuickShortcut(QuickShortcut shortcut) async {
+    if (controller.reservesDesktopShortcut(shortcut)) return 'F3 已用于便签和待办';
     if (screenshots.supported &&
         shortcut.sameCombination(controller.screenshotShortcut)) {
       return '该组合已用于截图';
@@ -497,6 +506,7 @@ class DesktopService with TrayListener, WindowListener {
     final registered = _registeredShortcut;
     try {
       await screenshots.suspendShortcut();
+      await controller.desktopNotes?.suspend(true);
       if (registered != null) {
         await hotKeyManager.unregister(registered);
         _suspendedShortcut = registered;
@@ -506,6 +516,7 @@ class DesktopService with TrayListener, WindowListener {
     } catch (_) {
       _recordingShortcut = false;
       await screenshots.resumeShortcut();
+      await controller.desktopNotes?.suspend(false);
       return '无法开始录入快捷键，请重试';
     }
   }
@@ -531,6 +542,7 @@ class DesktopService with TrayListener, WindowListener {
       _suspendedShortcut = null;
       _recordingShortcut = false;
       await screenshots.resumeShortcut();
+      await controller.desktopNotes?.suspend(false);
     }
   }
 

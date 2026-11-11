@@ -100,9 +100,9 @@ class EmbeddedGitService {
   }
 
   static void _commitChanges(Arena arena, Repository repo, String branch) {
-    // libgit2 may report an empty status map for an unborn branch even when
-    // the worktree already contains the first files.
-    if (!repo.isBranchUnborn && repo.status.isEmpty) return;
+    // Stage first: the binding's status options can omit untracked files,
+    // including a new device snapshot inside an already tracked directory.
+    // Compare trees afterwards to avoid commits when nothing has changed.
     final index = repo.index;
     arena.onReleaseAll(index.free);
     index.addAll(['*']);
@@ -125,6 +125,9 @@ class EmbeddedGitService {
       arena.onReleaseAll(oid.free);
       final parent = Commit.lookup(repo: repo, oid: oid);
       arena.onReleaseAll(parent.free);
+      final parentTree = parent.treeOid;
+      arena.onReleaseAll(parentTree.free);
+      if (parentTree.sha == treeOid.sha) return;
       parents.add(parent);
     } else {
       repo.setHead('refs/heads/$branch');
