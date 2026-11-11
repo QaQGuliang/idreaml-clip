@@ -2,8 +2,12 @@
 *.class
 *.log
 *.pyc
+*.pyo
+__pycache__/
 *.swp
 .DS_Store
+Thumbs.db
+Desktop.ini
 .atom/
 .build/
 .buildlog/
@@ -23,6 +27,9 @@ migrate_working_dir/
 # is commented out by default.
 #.vscode/
 
+# Visual Studio machine-local state.
+.vs/
+
 # Local project documents (kept outside version control).
 /doc/
 
@@ -30,6 +37,7 @@ migrate_working_dir/
 **/doc/api/
 **/ios/Flutter/.last_build_id
 .dart_tool/
+.flutter-plugins
 .flutter-plugins-dependencies
 .pub-cache/
 .pub/
@@ -37,16 +45,26 @@ migrate_working_dir/
 /dist/
 /coverage/
 
+# Local native-tool builds and offscreen verification output. Keep tool sources.
+/tool/**/build/
+cmake-build-*/
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+/macos/DerivedData/
+/render-check/
+
+# Application data if a local executable is run from the checkout root.
+/data/idreaml_clip/
+
 # Symbolication related
 app.*.symbols
 
 # Obfuscation related
 app.*.map.json
 
-# Android Studio will place build artifacts here
-/android/app/debug
-/android/app/profile
-/android/app/release
+# Unsupported, locally generated Android scaffold. Desktop runners stay tracked.
+/android/
 
 # Widget Preview related
 .widget_preview/
