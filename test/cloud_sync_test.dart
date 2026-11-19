@@ -1,4 +1,7 @@
+import 'dart:convert';
 import 'dart:io';
+
+import 'package:path/path.dart' as p;
 
 import 'package:image/image.dart' as img;
 import 'package:idreaml_clip/src/models/clipboard_content.dart';
@@ -16,144 +19,217 @@ import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 void main() {
   setUpAll(sqfliteFfiInit);
 
-  test('图片同步保留格式和内容，大量记录分文件且清理过期分片', () async {
-    final root = await Directory.systemTemp.createTemp('idreaml-image-sync-');
-    addTearDown(() => root.delete(recursive: true));
+  test('原文和原图按北京日期归档，清空与取消收藏只移除对应文件', () async {
+    final root = await Directory.systemTemp.createTemp('idreaml-sync-files-');
+    addTearDown(() => _cleanup(root, 'idreaml-sync-files-'));
     final database = ClipboardDatabase.withFactory(databaseFactoryFfi);
     await database.open(path: inMemoryDatabasePath);
     addTearDown(database.close);
     final repository = ClipboardRepository(database);
     await repository.initializeDevice();
-    final image = ClipboardContent.image(
-      img.encodePng(img.Image(width: 2, height: 2)),
-      'image/png',
-    );
-    final saved = await repository.capture(image);
-    for (var i = 0; i < 5; i++) {
-      await repository.captureText('record $i ${'long text ' * 35}');
+    final png = img.encodePng(img.Image(width: 2, height: 2));
+    final image = (await repository.capture(
+      ClipboardContent.image(png, 'image/png'),
+    ))!;
+    const raw = '\ufeff原文\r\n  第二行\n';
+    final text = (await repository.captureText(raw))!;
+    await database.database.update('clipboard_item', {
+      'created_at': DateTime.utc(2026, 11, 13, 16, 30).millisecondsSinceEpoch,
+    });
+    await repository.toggleFavorite(image.id);
+    final format = SyncFormatService();
+    Future<void> export() async {
+      await format.exportDevice(
+        repository: root,
+        deviceId: repository.deviceId,
+        deviceName: 'Test',
+        items: await repository.listForSync(),
+      );
     }
-    final format = SyncFormatService(maxFileBytes: 1400);
-    Future<void> export() => format
-        .exportDevice(
-          repository: root,
-          deviceId: repository.deviceId,
-          deviceName: 'Test',
-          items: const [],
-        )
-        .then((_) {});
-    // Export real repository records, retaining the normal monthly JSONL format.
-    await format.exportDevice(
-      repository: root,
-      deviceId: repository.deviceId,
-      deviceName: 'Test',
-      items: await repository.listForSync(),
+
+    final history = Directory(p.join(root.path, 'history', '2026-11-14'));
+    final favorite = File(
+      p.join(root.path, 'favorites', '${image.contentHash}.png'),
     );
-    final files = Directory('${root.path}/records')
-        .listSync(recursive: true)
-        .whereType<File>()
-        .toList();
-    expect(files.length, greaterThan(1));
-    for (final file in files) {
-      expect(await file.length(), lessThanOrEqualTo(1400));
-    }
-    final imported = await format.readAll(root);
-    final record = imported.records.singleWhere(
-      (record) => record.type == 'image/png',
+    await export();
+    expect(
+      await File(p.join(history.path, '003000-${text.contentHash}.txt'))
+          .readAsBytes(),
+      utf8.encode(raw),
     );
-    expect(record.content, saved!.content);
-    expect(record.contentHash, saved.contentHash);
+    expect(
+      await File(p.join(history.path, '003000-${image.contentHash}.png'))
+          .readAsBytes(),
+      png,
+    );
+    expect(await favorite.readAsBytes(), png);
+    await favorite.writeAsBytes([0, ...png.skip(1)]);
+    await expectLater(format.readAll(root), throwsFormatException);
+    await favorite.writeAsBytes(png);
+
     final second = ClipboardDatabase.withFactory(databaseFactoryFfi);
     await second.open(path: inMemoryDatabasePath);
     addTearDown(second.close);
     final target = ClipboardRepository(second);
     await target.initializeDevice();
     await target.mergeSyncData(
-      records: imported.records,
-      tombstones: imported.tombstones,
+      records: (await format.readAll(root)).records,
+      tombstones: [],
     );
     expect(
-      (await target.list())
-          .singleWhere((item) => item.isImage)
-          .payload
-          .imageBytes,
-      image.imageBytes,
+      (await target.list()).singleWhere((item) => !item.isImage).content,
+      raw,
     );
+
+    await repository.clearHistory();
     await export();
-    expect(
-      Directory('${root.path}/records')
-          .listSync(recursive: true)
-          .whereType<File>(),
-      isEmpty,
+    expect(await history.list().toList(), isEmpty);
+    expect(await favorite.readAsBytes(), png);
+    final data = await format.readAll(root);
+    await target.mergeSyncData(
+      records: data.records,
+      tombstones: data.tombstones,
     );
+    expect(await target.list(), isEmpty);
+    expect(
+      (await target.list(favoritesOnly: true)).single.payload.imageBytes,
+      png,
+    );
+
+    await repository.toggleFavorite(image.id);
+    await export();
+    expect(await favorite.exists(), isFalse);
+    final changed = await format.readAll(root);
+    await target.mergeSyncData(
+      records: changed.records,
+      tombstones: changed.tombstones,
+    );
+    expect(await target.list(favoritesOnly: true), isEmpty);
   });
 
-  test('远端较新的收藏与删除状态能合并到本地', () async {
+  test('复制使用、清空历史和收藏变更各自合并，旧快照不会恢复已取消的收藏', () async {
     final database = ClipboardDatabase.withFactory(databaseFactoryFfi);
     await database.open(path: inMemoryDatabasePath);
+    addTearDown(database.close);
     final repository = ClipboardRepository(database);
     await repository.initializeDevice();
     final item = (await repository.captureText('sync me'))!;
-    final newer = DateTime.now()
-        .add(const Duration(minutes: 1))
-        .millisecondsSinceEpoch;
-
-    await repository.mergeSyncData(
-      records: [
-        SyncRecord(
-          id: 'remote-id',
-          type: 'text',
-          content: item.content,
-          contentHash: item.contentHash,
-          createdAt: item.createdAt.millisecondsSinceEpoch,
-          updatedAt: newer,
-          lastUsedAt: newer,
-          copyCount: 4,
-          favorite: true,
-          deleted: false,
-          deviceId: 'remote-device',
-        ),
-      ],
-      tombstones: const [],
+    final start = item.historyChangedAt;
+    SyncRecord remote({
+      required int updated,
+      required int history,
+      required int favoriteTime,
+      bool favorite = false,
+      bool deleted = false,
+    }) => SyncRecord(
+      id: 'remote-id',
+      type: 'text',
+      content: item.content,
+      contentHash: item.contentHash,
+      createdAt: start,
+      updatedAt: updated,
+      lastUsedAt: updated,
+      copyCount: 4,
+      favorite: favorite,
+      deleted: deleted,
+      deviceId: 'remote-device',
+      historyChangedAt: history,
+      favoriteChangedAt: favoriteTime,
     );
-    expect((await repository.list()).single.favorite, isTrue);
+    Future<void> merge(SyncRecord record) async {
+      await repository.mergeSyncData(records: [record], tombstones: const []);
+    }
 
-    await repository.mergeSyncData(
-      records: const [],
-      tombstones: [
-        SyncTombstone(
-          id: item.id,
-          contentHash: item.contentHash,
-          deletedAt: newer + 1,
-          deviceId: 'remote-device',
-        ),
-      ],
+    await merge(
+      remote(
+        updated: start + 10,
+        history: start,
+        favoriteTime: start + 10,
+        favorite: true,
+      ),
     );
+    await merge(
+      remote(
+        updated: start + 20,
+        history: start + 20,
+        favoriteTime: 0,
+        deleted: true,
+      ),
+    );
+    await merge(remote(updated: start + 30, history: start, favoriteTime: 0));
     expect(await repository.list(), isEmpty);
-    await database.close();
+    expect((await repository.list(favoritesOnly: true)).single.copyCount, 4);
+
+    await merge(
+      remote(updated: start + 40, history: start, favoriteTime: start + 40),
+    );
+    await merge(
+      remote(
+        updated: start + 50,
+        history: start,
+        favoriteTime: start + 10,
+        favorite: true,
+      ),
+    );
+    expect(await repository.list(favoritesOnly: true), isEmpty);
   });
 
-  test('JSONL 导出后可以完整读取记录和 tombstone', () async {
-    final root = await Directory.systemTemp.createTemp('idreaml-format-');
-    addTearDown(() => root.delete(recursive: true));
+  test('旧 JSONL 保留收藏与删除状态，读取不修改旧仓库', () async {
+    final root = await Directory.systemTemp.createTemp('idreaml-legacy-jsonl-');
+    addTearDown(() => _cleanup(root, 'idreaml-legacy-jsonl-'));
     final database = ClipboardDatabase.withFactory(databaseFactoryFfi);
     await database.open(path: inMemoryDatabasePath);
+    addTearDown(database.close);
     final repository = ClipboardRepository(database);
     await repository.initializeDevice();
-    await repository.captureText('visible');
-    final deleted = await repository.captureText('deleted');
-    await repository.softDelete(deleted!.id);
-
-    final format = SyncFormatService();
-    await format.exportDevice(
-      repository: root,
-      deviceId: repository.deviceId,
-      deviceName: 'Test device',
-      items: await repository.listForSync(),
+    final payload = ClipboardContent.text('legacy favorite');
+    final file = File(
+      p.join(root.path, 'records', 'old-device', '2026-11.jsonl'),
     );
-    final imported = await format.readAll(root);
-    expect(imported.records.single.content, 'visible');
-    expect(imported.tombstones.single.contentHash, deleted.contentHash);
-    await database.close();
+    final deleted = File(
+      p.join(root.path, 'tombstones', 'old-device', 'events.jsonl'),
+    );
+    final row = SyncRecord(
+      id: 'legacy-favorite',
+      type: 'text',
+      content: payload.content,
+      contentHash: payload.hash,
+      createdAt: 100,
+      updatedAt: 120,
+      lastUsedAt: 110,
+      copyCount: 1,
+      favorite: true,
+      deleted: false,
+      deviceId: 'old-device',
+    );
+    final original = '${jsonEncode(row.toJson())}\n';
+    await file.parent.create(recursive: true);
+    await file.writeAsString(original);
+    await deleted.parent.create(recursive: true);
+    await deleted.writeAsString(
+      jsonEncode(
+        SyncTombstone(
+          id: row.id,
+          contentHash: row.contentHash,
+          deletedAt: 130,
+          deviceId: row.deviceId,
+        ).toJson(),
+      ),
+    );
+    final format = SyncFormatService();
+    expect(await format.isLegacy(root), isTrue);
+    await for (final data in format.readLegacy(root)) {
+      await repository.mergeSyncData(
+        records: data.records,
+        tombstones: data.tombstones,
+      );
+    }
+    expect(await repository.list(), isEmpty);
+    expect(
+      (await repository.list(favoritesOnly: true)).single.content,
+      payload.content,
+    );
+    expect(await file.readAsString(), original);
   });
 
   test('内置 Git 可在两个工作目录之间推送与拉取', () async {
@@ -226,4 +302,12 @@ void main() {
     await credentials.deleteToken();
     expect(await credentials.readToken(), isNull);
   });
+}
+
+Future<void> _cleanup(Directory root, String prefix) async {
+  final resolved = await root.resolveSymbolicLinks();
+  final temp = await Directory.systemTemp.resolveSymbolicLinks();
+  expect(p.isWithin(temp, resolved), isTrue);
+  expect(p.basename(resolved), startsWith(prefix));
+  await Directory(resolved).delete(recursive: true);
 }

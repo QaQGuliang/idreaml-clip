@@ -50,11 +50,11 @@ class _Clipboard extends ClipboardService {
 
 class _Credentials implements CredentialStore {
   @override
-  Future<String?> readToken() async => null;
+  Future<String?> readToken({String? id}) async => null;
   @override
-  Future<void> writeToken(String token) async {}
+  Future<void> writeToken(String token, {String? id}) async {}
   @override
-  Future<void> deleteToken() async {}
+  Future<void> deleteToken({String? id}) async {}
 }
 
 class _ScreenshotRepository extends ClipboardRepository {

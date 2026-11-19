@@ -482,7 +482,9 @@ class _QuickPanelState extends State<QuickPanel> {
                               onCopy: () => _useItem(item, paste: false),
                               onHover: (context) => _hoverItem(item, context),
                               onExit: _leaveItem,
-                              onDelete: () => controller.deleteItem(item.id),
+                              onDelete: controller.quickFavoritesOnly
+                                  ? null
+                                  : () => controller.deleteItem(item.id),
                               onFavorite: () =>
                                   controller.toggleFavorite(item.id),
                               onMenuChanged: (open) {
@@ -647,7 +649,7 @@ class _QuickItem extends StatefulWidget {
   final VoidCallback onCopy;
   final ValueChanged<BuildContext> onHover;
   final VoidCallback onExit;
-  final VoidCallback onDelete;
+  final VoidCallback? onDelete;
   final VoidCallback onFavorite;
   final ValueChanged<bool> onMenuChanged;
 
@@ -679,11 +681,12 @@ class _QuickItemState extends State<_QuickItem> {
               onPressed: widget.onCopy,
               child: const Text('复制'),
             ),
-            MenuItemButton(
-              leadingIcon: const Icon(Icons.delete_outline_rounded, size: 17),
-              onPressed: widget.onDelete,
-              child: const Text('删除'),
-            ),
+            if (widget.onDelete != null)
+              MenuItemButton(
+                leadingIcon: const Icon(Icons.delete_outline_rounded, size: 17),
+                onPressed: widget.onDelete,
+                child: const Text('删除'),
+              ),
           ],
           builder: (context, menu, child) => Material(
             color: widget.selected

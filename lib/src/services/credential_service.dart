@@ -10,9 +10,9 @@ import 'package:win32/win32.dart';
 import '../data/data_storage.dart';
 
 abstract interface class CredentialStore {
-  Future<String?> readToken();
-  Future<void> writeToken(String token);
-  Future<void> deleteToken();
+  Future<String?> readToken({String? id});
+  Future<void> writeToken(String token, {String? id});
+  Future<void> deleteToken({String? id});
 }
 
 /// Stores the Git token as a Windows DPAPI-protected blob. The encrypted data
@@ -29,28 +29,30 @@ class SecureCredentialService implements CredentialStore {
   Future<T> _access<T>(Future<T> Function() action) =>
       storage?.access.run(action) ?? action();
 
-  Future<File> _tokenFile() async {
+  Future<File> _tokenFile(String? id) async {
+    if (id != null && !RegExp(r'^[a-f0-9-]{36}$').hasMatch(id)) {
+      throw const FormatException('同步凭据标识无效。');
+    }
+    final filename = id == null ? 'git_token.dpapi' : 'git_token_$id.dpapi';
     if (storage != null) {
-      return File(p.join(storage!.credentials.path, 'git_token.dpapi'));
+      return File(p.join(storage!.credentials.path, filename));
     }
     final root = await _supportDirectory();
-    return File(
-      p.join(root.path, 'idreaml_clip', 'credentials', 'git_token.dpapi'),
-    );
+    return File(p.join(root.path, 'idreaml_clip', 'credentials', filename));
   }
 
   @override
-  Future<String?> readToken() => _access(() async {
-    final file = await _tokenFile();
+  Future<String?> readToken({String? id}) => _access(() async {
+    final file = await _tokenFile(id);
     if (!await file.exists()) return null;
     _requireWindows();
     return utf8.decode(_unprotect(await file.readAsBytes()));
   });
 
   @override
-  Future<void> writeToken(String token) => _access(() async {
+  Future<void> writeToken(String token, {String? id}) => _access(() async {
     _requireWindows();
-    final file = await _tokenFile();
+    final file = await _tokenFile(id);
     await file.parent.create(recursive: true);
     final temporary = File('${file.path}.tmp');
     await temporary.writeAsBytes(_protect(utf8.encode(token)), flush: true);
@@ -59,8 +61,8 @@ class SecureCredentialService implements CredentialStore {
   });
 
   @override
-  Future<void> deleteToken() => _access(() async {
-    final file = await _tokenFile();
+  Future<void> deleteToken({String? id}) => _access(() async {
+    final file = await _tokenFile(id);
     if (await file.exists()) await file.delete();
   });
 

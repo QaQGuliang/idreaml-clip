@@ -20,11 +20,12 @@ import 'package:idreaml_clip/src/services/sync_service.dart';
 
 class _NoCredentials implements CredentialStore {
   @override
-  Future<String?> readToken() async => null;
+  Future<String?> readToken({String? id}) async => null;
   @override
-  Future<void> writeToken(String token) async => throw StateError('验证程序不保存令牌');
+  Future<void> writeToken(String token, {String? id}) async =>
+      throw StateError('验证程序不保存令牌');
   @override
-  Future<void> deleteToken() async {}
+  Future<void> deleteToken({String? id}) async {}
 }
 
 Future<void> main() async {

@@ -27,6 +27,13 @@ class DesktopNotes extends ChangeNotifier {
 
   DeskSettings config(DeskKind kind) => settings[kind] ?? const DeskSettings();
   bool enabled(DeskKind kind) => config(kind).enabled;
+  SyncModuleState syncState(DeskKind kind) {
+    if (!enabled(kind)) return SyncModuleState.featureDisabled;
+    return config(kind).sync
+        ? SyncModuleState.participating
+        : SyncModuleState.syncDisabled;
+  }
+
   List<DeskEntry> versions(String id) =>
       entries.where((e) => e.id == id).toList();
   List<DeskEntry> items(DeskKind kind) {
@@ -184,16 +191,37 @@ class DesktopNotes extends ChangeNotifier {
   }
 
   Future<SyncResult> synchronize(Directory root) async {
-    final kinds = DeskKind.values
-        .where((kind) => enabled(kind) && config(kind).sync)
-        .toSet();
-    if (kinds.isEmpty) return const SyncResult(imported: 0, exported: 0);
-    final result = await repository.synchronize(root, kinds);
-    await reload();
-    return SyncResult(
-      imported: result,
-      exported: entries.where((e) => kinds.contains(e.kind)).length,
+    // Keep the reported scope consistent if settings change during I/O.
+    final states = {for (final kind in DeskKind.values) kind: syncState(kind)};
+    final imported = <DeskKind, int>{};
+    final exported = <DeskKind, int>{};
+    for (final kind in DeskKind.values) {
+      if (states[kind] == SyncModuleState.participating) {
+        imported[kind] = await repository.synchronize(root, {
+          kind,
+        }, onExported: (count) => exported[kind] = count);
+      }
+    }
+    if (imported.isNotEmpty) await reload();
+    SyncModuleResult resultFor(DeskKind kind) => SyncModuleResult(
+      state: states[kind]!,
+      imported: imported[kind] ?? 0,
+      exported: exported[kind] ?? 0,
     );
+    final notes = resultFor(DeskKind.note);
+    final todos = resultFor(DeskKind.todo);
+    return SyncResult(
+      imported: notes.imported + todos.imported,
+      exported: notes.exported + todos.exported,
+      notes: notes,
+      todos: todos,
+    );
+  }
+
+  Future<int> importLegacy(Directory root) async {
+    final imported = await repository.importLegacy(root);
+    if (imported > 0) await reload();
+    return imported;
   }
 
   Future<void> publish() async {

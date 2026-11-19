@@ -1,12 +1,14 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:uuid/uuid.dart';
 
 import '../data/data_storage.dart';
 import '../services/async_gate.dart';
+import '../services/sync_archive.dart';
 import 'desk_models.dart';
 
 class DeskRepository {
@@ -193,89 +195,128 @@ class DeskRepository {
     }),
   );
 
-  Future<int> synchronize(Directory root, Set<DeskKind> kinds) async {
-    if (!RegExp(r'^[A-Za-z0-9_-]{1,128}$').hasMatch(deviceId)) {
-      throw const FormatException('同步设备标识无效');
-    }
-    var changed = 0;
-    for (final kind in kinds) {
-      final folder = Directory(p.join(root.path, 'desktop-v1', kind.name));
-      final incoming = <DeskEntry>[];
-      if (await folder.exists()) {
-        await for (final entity in folder.list(followLinks: false)) {
-          if (entity is! File || !entity.path.endsWith('.json')) continue;
-          if (await entity.length() > maxSyncFileBytes) {
-            throw const FormatException('便签/待办同步文件超过大小限制');
-          }
-          final data =
-              jsonDecode(await entity.readAsString()) as Map<String, dynamic>;
-          if (data['version'] != 1 ||
-              data['kind'] != kind.name ||
-              data['entries'] is! List) {
-            throw const FormatException('不支持的便签/待办同步格式');
-          }
-          for (final raw in data['entries'] as List) {
-            final entry = DeskEntry.fromJson(
-              Map<String, dynamic>.from(raw as Map),
-            );
-            if (entry.kind != kind) throw const FormatException('同步模块类型不一致');
-            incoming.add(entry);
-          }
+  static String _folder(DeskKind kind) =>
+      kind == DeskKind.note ? 'notes' : 'todos';
+
+  Future<int> importLegacy(Directory root) async {
+    final archive = SyncArchive(root);
+    final entries = <DeskEntry>[];
+    for (final kind in DeskKind.values) {
+      for (final file in await archive.jsonFiles('desktop-v1/${kind.name}')) {
+        final data = await archive.readJson(file, limit: maxSyncFileBytes);
+        if (data['version'] != 1 ||
+            data['kind'] != kind.name ||
+            data['entries'] is! List) {
+          throw const FormatException('不支持的旧便签或待办同步格式');
         }
+        for (final raw in data['entries'] as List) {
+          final entry = DeskEntry.fromJson(
+            Map<String, dynamic>.from(raw as Map),
+          );
+          if (entry.kind != kind) throw const FormatException('同步模块类型不一致');
+          entries.add(entry);
+        }
+      }
+    }
+    return merge(entries);
+  }
+
+  Future<int> synchronize(
+    Directory root,
+    Set<DeskKind> kinds, {
+    void Function(int)? onExported,
+  }) async {
+    final archive = SyncArchive(root);
+    var changed = 0;
+    var exported = 0;
+    for (final kind in kinds) {
+      final folder = _folder(kind);
+      final metaFolder = 'config/metadata/$folder';
+      final incoming = <DeskEntry>[];
+      final previousBodies = <String>{};
+      final previousMetadata = <String>{};
+      for (final file in await archive.jsonFiles(metaFolder)) {
+        final json = await archive.readJson(file, limit: maxSyncFileBytes);
+        final revision = json['revision'] as String;
+        final id = json['id'] as String;
+        final key = _entryKey(id, revision);
+        if (json['schema_version'] != SyncArchive.version ||
+            json['kind'] != kind.name ||
+            p.basename(file.path) != '$key.json') {
+          throw const FormatException('便签或待办同步元数据无效');
+        }
+        final deleted = json['deleted'] == true;
+        final bodyPath = '$folder/$key.md';
+        final body = deleted
+            ? ''
+            : await _readBody(archive, bodyPath, json, kind);
+        incoming.add(DeskEntry.fromJson({...json, 'body': body}));
+        if (!deleted) previousBodies.add(bodyPath);
+        previousMetadata.add('$metaFolder/$key.json');
       }
       changed += await merge(incoming);
-      final entries = (await load()).where((e) => e.kind == kind).toList()
-        ..sort((a, b) => a.revision.compareTo(b.revision));
-      await folder.create(recursive: true);
-      // Only this device's snapshot is replaced. Other modules and clients'
-      // files are never cleaned up. Tombstones remain in snapshots indefinitely.
-      final prefix = '{"version":1,"kind":"${kind.name}","entries":[';
-      final expected = <String>{};
-      var part = 0;
-      var rows = <String>[];
-      var bytes = utf8.encode(prefix).length + 2;
-      Future<void> flush() async {
-        final name = part == 0 ? '$deviceId.json' : '$deviceId.$part.json';
-        expected.add(name);
-        final file = File(p.join(folder.path, name));
-        final temporary = File('${file.path}.tmp');
-        await temporary.writeAsString(
-          '$prefix${rows.join(',')}]}',
-          flush: true,
-        );
-        if (await file.exists()) await file.delete();
-        await temporary.rename(file.path);
-        part++;
-        rows = [];
-        bytes = utf8.encode(prefix).length + 2;
-      }
-
+      final entries = (await load()).where((entry) => entry.kind == kind);
       for (final entry in entries) {
-        final row = jsonEncode(entry.toJson());
-        final length = utf8.encode(row).length;
-        if (length + utf8.encode(prefix).length + 2 > maxSyncFileBytes) {
-          throw const FormatException('单条便签/待办同步数据过大');
+        final key = _entryKey(entry.id, entry.revision);
+        final json = entry.toJson()..remove('body');
+        json['schema_version'] = SyncArchive.version;
+        if (!entry.deleted) {
+          final bodyPath = '$folder/$key.md';
+          final markdown =
+              '${_bodyPrefix(kind, entry.title, entry.done)}${entry.body}';
+          if (utf8.encode(markdown).length > maxSyncFileBytes) {
+            throw const FormatException('单条便签或待办超过同步大小限制');
+          }
+          await archive.writeText(bodyPath, markdown);
+          previousBodies.remove(bodyPath);
         }
-        if (rows.isNotEmpty && bytes + length + 1 > maxSyncFileBytes) {
-          await flush();
-        }
-        bytes += length + (rows.isEmpty ? 0 : 1);
-        rows.add(row);
+        final metaPath = '$metaFolder/$key.json';
+        await archive.writeJson(metaPath, json);
+        previousMetadata.remove(metaPath);
+        exported++;
       }
-      if (rows.isNotEmpty || part == 0) await flush();
-      await for (final file in folder.list(followLinks: false)) {
-        if (file is! File) continue;
-        final name = p.basename(file.path);
-        final parts = name.split('.');
-        final own =
-            name == '$deviceId.json' ||
-            (parts.length == 3 &&
-                parts[0] == deviceId &&
-                int.tryParse(parts[1]) != null &&
-                parts[2] == 'json');
-        if (own && !expected.contains(name)) await file.delete();
+      for (final obsolete in [...previousBodies, ...previousMetadata]) {
+        await archive.remove(obsolete);
       }
     }
+    onExported?.call(exported);
     return changed;
+  }
+
+  // Revision suffixes keep both readable versions available until a user
+  // resolves concurrent edits. Obsolete revisions are removed from the tip.
+  static String _entryKey(String id, String revision) {
+    final safe = RegExp(r'^[A-Za-z0-9_-]{1,128}$');
+    if (!safe.hasMatch(id) || !safe.hasMatch(revision)) {
+      throw const FormatException('便签或待办同步标识无效');
+    }
+    return '${sha256.convert(utf8.encode(id))}-$revision';
+  }
+
+  static String _bodyPrefix(DeskKind kind, String title, bool done) =>
+      kind == DeskKind.todo
+      ? '- [${done ? 'x' : ' '}] '
+      : title.isEmpty
+      ? ''
+      : '# $title\n\n';
+
+  Future<String> _readBody(
+    SyncArchive archive,
+    String path,
+    Map<String, dynamic> json,
+    DeskKind kind,
+  ) async {
+    final file = await archive.file(path);
+    if (!await file.exists() || await file.length() > maxSyncFileBytes) {
+      throw const FormatException('便签或待办正文缺失或超过大小限制');
+    }
+    final text = await file.readAsString();
+    final prefix = _bodyPrefix(
+      kind,
+      json['title'] as String,
+      json['done'] == true,
+    );
+    if (!text.startsWith(prefix)) throw const FormatException('便签或待办正文格式无效');
+    return text.substring(prefix.length);
   }
 }

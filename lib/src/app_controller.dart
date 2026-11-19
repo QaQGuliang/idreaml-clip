@@ -189,6 +189,7 @@ class AppController extends ChangeNotifier {
       await desktopNotes!.initialize();
       desktopNotes!.addListener(_onNotesChanged);
       syncService.syncDesktopNotes = desktopNotes!.synchronize;
+      syncService.importDesktopNotes = desktopNotes!.importLegacy;
     }
     final settings = await repository.getSettings([
       'workspace_layout',

@@ -16,6 +16,8 @@ class ClipboardItem {
     this.sourceApp,
     this.imagePath,
     this.type = 'text',
+    this.historyChangedAt = 0,
+    this.favoriteChangedAt = 0,
   });
 
   final String id;
@@ -28,6 +30,8 @@ class ClipboardItem {
   final int copyCount;
   final bool favorite;
   final bool deleted;
+  final int historyChangedAt;
+  final int favoriteChangedAt;
   final String deviceId;
   final String syncState;
   final String? sourceApp;
@@ -58,6 +62,8 @@ class ClipboardItem {
     copyCount: map['copy_count']! as int,
     favorite: (map['favorite']! as int) == 1,
     deleted: (map['deleted']! as int) == 1,
+    historyChangedAt: map['history_changed_at'] as int? ?? 0,
+    favoriteChangedAt: map['favorite_changed_at'] as int? ?? 0,
     deviceId: map['device_id']! as String,
     syncState: map['sync_state']! as String,
     sourceApp: map['source_app'] as String?,

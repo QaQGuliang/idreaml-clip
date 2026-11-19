@@ -61,7 +61,7 @@ class _StorageContents extends StatelessWidget {
     ('database/desktop.db', '便签、待办及其本机设置和草稿'),
     ('images/', '剪切板图片和截图的原始文件'),
     ('config/settings.db', '软件设置、快捷键、窗口布局和同步配置'),
-    ('credentials/', '加密保存的同步访问令牌'),
+    ('credentials/', '加密保存的同步连接凭据'),
     ('sync/', '用于云同步的本地 Git 仓库缓存'),
     ('.idreaml-clip-data', '数据目录标识，用于迁移校验和旧目录清理'),
   ];

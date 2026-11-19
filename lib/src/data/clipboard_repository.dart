@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
 
@@ -7,6 +8,7 @@ import 'package:uuid/uuid.dart';
 import '../models/clipboard_item.dart';
 import '../models/clipboard_content.dart';
 import '../models/sync_models.dart';
+import '../services/device_identity.dart';
 import 'clipboard_database.dart';
 import 'data_storage.dart';
 
@@ -18,19 +20,38 @@ class ClipboardStats {
 }
 
 class ClipboardRepository {
-  ClipboardRepository(this._database) : _uuid = const Uuid();
+  ClipboardRepository(this._database, {String? Function()? machineIdentity})
+    : _uuid = const Uuid(),
+      _machineIdentity = machineIdentity ?? readMachineId;
 
   final ClipboardDatabase _database;
   final Uuid _uuid;
+  final String? Function() _machineIdentity;
   String? _deviceId;
+  late final String? machineId = validMachineId(_machineIdentity());
 
   Database get _db => _database.database;
   DataStorage? get storage => _database.storage;
   Future<T> access<T>(Future<T> Function() action) => _database.access(action);
   Future<StorageMoveResult> moveStorage(String path) => _database.moveTo(path);
 
+  // The SQLite binding's UTF-8 decoder removes a leading BOM. Read those
+  // values with a prefix so the original clipboard text survives a round trip.
+  static const _contentColumns = [
+    '*',
+    "CASE WHEN type NOT LIKE 'image/%' AND substr(content, 1, 1) = char(65279) "
+        "THEN ' ' || content END AS prefixed_content",
+  ];
+
+  static Map<String, Object?> _restoreText(Map<String, Object?> row) {
+    final prefixed = row['prefixed_content'] as String?;
+    return prefixed == null ? row : {...row, 'content': prefixed.substring(1)};
+  }
+
   Future<ClipboardItem> _item(Map<String, Object?> row) async =>
-      ClipboardItem.fromMap(await _database.images?.hydrate(row) ?? row);
+      ClipboardItem.fromMap(
+        _restoreText(await _database.images?.hydrate(row) ?? row),
+      );
 
   Future<List<ClipboardItem>> _items(
     List<Map<String, Object?>> rows, {
@@ -44,7 +65,10 @@ class ClipboardRepository {
               row['type'] as String,
               row['content'] as String,
             );
-            return ClipboardItem.fromMap(row, imagePath: file?.path);
+            return ClipboardItem.fromMap(
+              _restoreText(row),
+              imagePath: file?.path,
+            );
           })
           .toList(growable: false);
     }
@@ -68,20 +92,34 @@ class ClipboardRepository {
       '本机';
 
   Future<String> initializeDevice() => access(() async {
-    final savedId = await getSetting('device_id');
-    final deviceId = savedId ?? _uuid.v4();
-    if (savedId == null) await setSetting('device_id', deviceId);
+    final settings = await getSettings(['device_id', 'device_machine_id']);
+    final savedId = settings['device_id'];
+    final previousMachine = settings['device_machine_id'];
+    final copied =
+        previousMachine != null &&
+        machineId != null &&
+        previousMachine != machineId;
+    final deviceId = copied ? _uuid.v4() : savedId ?? _uuid.v4();
+    if (deviceId != savedId) await setSetting('device_id', deviceId);
+    if (machineId != null && previousMachine != machineId) {
+      await setSetting('device_machine_id', machineId!);
+    }
     _deviceId = deviceId;
 
     final now = DateTime.now().millisecondsSinceEpoch;
-    await _db.insert('device', {
-      'id': deviceId,
-      'name': deviceName,
-      'platform': Platform.operatingSystem,
-      'created_at': now,
-      'last_seen_at': now,
-      'is_current': 1,
-    }, conflictAlgorithm: ConflictAlgorithm.replace);
+    await _db.transaction((txn) async {
+      await txn.update('device', {'is_current': 0}, where: 'is_current = 1');
+      await _mergeDevice(
+        txn,
+        SyncDevice(
+          id: deviceId,
+          name: deviceName,
+          platform: Platform.operatingSystem,
+          lastSeenAt: now,
+          machineId: machineId,
+        ),
+      );
+    });
     return deviceId;
   });
 
@@ -164,6 +202,7 @@ class ClipboardRepository {
           'copy_count': 1,
           'favorite': 0,
           'deleted': 0,
+          'history_changed_at': now,
           'device_id': deviceId,
           'sync_state': 'dirty',
           'source_app': null,
@@ -181,11 +220,15 @@ class ClipboardRepository {
       await txn.rawUpdate(
         '''
         UPDATE clipboard_item
-        SET content = ?, updated_at = ?, last_used_at = ?,
-            copy_count = copy_count + 1, deleted = 0, sync_state = 'dirty'
+        SET content = ?, type = ?, created_at = CASE WHEN created_at = 0
+            THEN ? ELSE created_at END, updated_at = ?, last_used_at = ?,
+            copy_count = copy_count + 1,
+            history_changed_at = CASE WHEN deleted = 1
+              THEN max(?, history_changed_at + 1) ELSE history_changed_at END,
+            deleted = 0, sync_state = 'dirty'
         WHERE id = ?
       ''',
-        [content, now, now, id],
+        [content, payload.type, now, now, now, now, id],
       );
       final rows = await txn.query(
         'clipboard_item',
@@ -205,7 +248,7 @@ class ClipboardRepository {
     int offset = 0,
     bool loadImages = true,
   }) => access(() async {
-    final where = <String>['deleted = 0'];
+    final where = <String>[favoritesOnly ? 'favorite = 1' : 'deleted = 0'];
     final args = <Object?>[];
     if (query.trim().isNotEmpty) {
       where.add(
@@ -218,7 +261,6 @@ class ClipboardRepository {
         query.trim(),
       ]);
     }
-    if (favoritesOnly) where.add('favorite = 1');
     if (todayOnly) {
       final now = DateTime.now();
       final start = DateTime(
@@ -231,6 +273,7 @@ class ClipboardRepository {
     }
     final rows = await _db.query(
       'clipboard_item',
+      columns: _contentColumns,
       where: where.join(' AND '),
       whereArgs: args,
       orderBy: 'last_used_at DESC, rowid ASC',
@@ -254,10 +297,11 @@ class ClipboardRepository {
       '''
       UPDATE clipboard_item
       SET favorite = CASE favorite WHEN 1 THEN 0 ELSE 1 END,
+          favorite_changed_at = max(?, favorite_changed_at + 1),
           updated_at = ?, sync_state = 'dirty'
-      WHERE id = ? AND deleted = 0
+      WHERE id = ? AND (deleted = 0 OR favorite = 1)
     ''',
-      [now, id],
+      [now, now, id],
     );
   });
 
@@ -268,32 +312,27 @@ class ClipboardRepository {
       UPDATE clipboard_item
       SET last_used_at = ?, updated_at = ?, copy_count = copy_count + 1,
           sync_state = 'dirty'
-      WHERE id = ? AND deleted = 0
+      WHERE id = ? AND (deleted = 0 OR favorite = 1)
     ''',
       [now, now, id],
     );
   });
 
-  Future<void> softDelete(String id) => access(() async {
-    await _db.update(
-      'clipboard_item',
-      {
-        'deleted': 1,
-        'updated_at': DateTime.now().millisecondsSinceEpoch,
-        'sync_state': 'dirty',
-      },
-      where: 'id = ?',
-      whereArgs: [id],
-    );
-  });
+  Future<void> softDelete(String id) =>
+      _deleteHistory('deleted = 0 AND id = ?', [id]);
 
-  Future<void> clearHistory() => access(() async {
-    await _db.update('clipboard_item', {
-      'deleted': 1,
-      'updated_at': DateTime.now().millisecondsSinceEpoch,
-      'sync_state': 'dirty',
-    }, where: 'deleted = 0');
-  });
+  Future<void> clearHistory() => _deleteHistory('deleted = 0');
+
+  Future<void> _deleteHistory(String where, [List<Object?> args = const []]) =>
+      access(() async {
+        final now = DateTime.now().millisecondsSinceEpoch;
+        await _db.rawUpdate(
+          'UPDATE clipboard_item SET deleted = 1, updated_at = ?, '
+          "history_changed_at = max(?, history_changed_at + 1), sync_state = 'dirty' "
+          'WHERE $where',
+          [now, now, ...args],
+        );
+      });
 
   Future<void> enforceHistoryLimit(int limit) => access(() async {
     if (limit <= 0) return;
@@ -301,7 +340,8 @@ class ClipboardRepository {
     await _db.rawUpdate(
       '''
       UPDATE clipboard_item
-      SET deleted = 1, updated_at = ?, sync_state = 'dirty'
+      SET deleted = 1, updated_at = ?,
+          history_changed_at = max(?, history_changed_at + 1), sync_state = 'dirty'
       WHERE id IN (
         SELECT id FROM clipboard_item
         WHERE deleted = 0 AND favorite = 0
@@ -309,26 +349,19 @@ class ClipboardRepository {
         LIMIT -1 OFFSET ?
       )
     ''',
-      [now, limit],
+      [now, now, limit],
     );
   });
 
-  Future<void> cleanupOlderThan(int days) => access(() async {
+  Future<void> cleanupOlderThan(int days) async {
     if (days <= 0) return;
     final cutoff = DateTime.now()
         .subtract(Duration(days: days))
         .millisecondsSinceEpoch;
-    await _db.update(
-      'clipboard_item',
-      {
-        'deleted': 1,
-        'updated_at': DateTime.now().millisecondsSinceEpoch,
-        'sync_state': 'dirty',
-      },
-      where: 'deleted = 0 AND favorite = 0 AND last_used_at < ?',
-      whereArgs: [cutoff],
-    );
-  });
+    await _deleteHistory('deleted = 0 AND favorite = 0 AND last_used_at < ?', [
+      cutoff,
+    ]);
+  }
 
   Future<ClipboardStats> stats() => access(() async {
     final historyRows = await _db.rawQuery(
@@ -336,7 +369,7 @@ class ClipboardRepository {
     );
     final favoriteRows = await _db.rawQuery(
       'SELECT COUNT(*) AS total FROM clipboard_item '
-      'WHERE deleted = 0 AND favorite = 1',
+      'WHERE favorite = 1',
     );
     final history = historyRows.single['total']! as int;
     final favorites = favoriteRows.single['total']! as int;
@@ -375,12 +408,48 @@ class ClipboardRepository {
     }, conflictAlgorithm: ConflictAlgorithm.replace);
   });
 
-  Future<List<ClipboardItem>> listForSync({bool loadImages = true}) => access(
-    () async {
-      final rows = await _db.query('clipboard_item', orderBy: 'created_at ASC');
-      return _items(rows, loadImages: loadImages);
-    },
-  );
+  Future<List<SyncHistoryEntry>> updateSyncHistory({
+    required DateTime cutoff,
+    SyncHistoryEntry? entry,
+  }) => access(() async {
+    final rows = await _database.settings.transaction((txn) async {
+      if (entry != null) {
+        await txn.insert('sync_history', {
+          'completed_at': entry.completedAt.millisecondsSinceEpoch,
+          'trigger': entry.trigger.name,
+          'succeeded': entry.succeeded ? 1 : 0,
+          'details': entry.details,
+        });
+      }
+      await txn.delete(
+        'sync_history',
+        where: 'completed_at <= ?',
+        whereArgs: [cutoff.millisecondsSinceEpoch],
+      );
+      return txn.query('sync_history', orderBy: 'completed_at DESC, id DESC');
+    });
+    return [
+      for (final row in rows)
+        SyncHistoryEntry(
+          completedAt: DateTime.fromMillisecondsSinceEpoch(
+            row['completed_at']! as int,
+          ),
+          trigger: SyncTrigger.values.byName(row['trigger']! as String),
+          succeeded: row['succeeded'] == 1,
+          details: row['details']! as String,
+        ),
+    ];
+  });
+
+  Future<List<ClipboardItem>> listForSync({bool loadImages = true}) =>
+      access(() async {
+        final rows = await _db.query(
+          'clipboard_item',
+          columns: _contentColumns,
+          orderBy: 'created_at ASC',
+        );
+        return _items(rows, loadImages: loadImages);
+      });
 
   Future<int> mergeSyncData({
     required List<SyncRecord> records,
@@ -390,118 +459,53 @@ class ClipboardRepository {
     var changes = 0;
     await _db.transaction((txn) async {
       for (final device in devices) {
-        final current = device.id == _deviceId;
-        await txn.insert('device', {
-          'id': device.id,
-          'name': device.name,
-          'platform': device.platform,
-          'created_at': device.lastSeenAt,
-          'last_seen_at': device.lastSeenAt,
-          'is_current': current ? 1 : 0,
-        }, conflictAlgorithm: ConflictAlgorithm.replace);
+        await _mergeDevice(txn, device);
       }
       for (final remote in records) {
-        final images = _database.images;
-        final storedImage = images != null && remote.type.startsWith('image/');
-        final rows = await txn.query(
-          'clipboard_item',
-          columns: [
-            'id',
-            'created_at',
-            'updated_at',
-            'last_used_at',
-            'copy_count',
-            if (storedImage) 'content',
-          ],
-          where: 'content_hash = ?',
-          whereArgs: [remote.contentHash],
-          limit: 1,
-        );
-        final local = rows.firstOrNull;
-        final payload = ClipboardContent(
-          type: remote.type,
-          content: remote.content,
-        );
-        if (local != null && remote.updatedAt <= (local['updated_at'] as int)) {
-          // A remote copy can still repair a missing local image without
-          // re-hashing each healthy image on every scheduled sync.
-          final reference = local['content'];
-          if (images != null && reference is String) {
-            final file = images.fileFor(remote.type, reference);
-            if (file != null && !await file.exists()) {
-              await images.persist(payload);
-            }
-          }
-          continue;
-        }
-        final content = await images?.persist(payload) ?? remote.content;
-        if (local == null) {
-          await txn.insert('clipboard_item', {
-            'id': remote.id,
-            'type': remote.type,
-            'content': content,
-            'content_hash': remote.contentHash,
-            'created_at': remote.createdAt,
-            'updated_at': remote.updatedAt,
-            'last_used_at': remote.lastUsedAt,
-            'copy_count': remote.copyCount,
-            'favorite': remote.favorite ? 1 : 0,
-            'deleted': remote.deleted ? 1 : 0,
-            'device_id': remote.deviceId,
-            'sync_state': 'clean',
-            'source_app': remote.sourceApp,
-          });
-          changes++;
-          continue;
-        }
-
-        await txn.update(
-          'clipboard_item',
-          {
-            'type': remote.type,
-            'content': content,
-            'created_at': min(remote.createdAt, local['created_at'] as int),
-            'updated_at': remote.updatedAt,
-            'last_used_at': max(
-              remote.lastUsedAt,
-              local['last_used_at'] as int,
-            ),
-            'copy_count': max(remote.copyCount, local['copy_count'] as int),
-            'favorite': remote.favorite ? 1 : 0,
-            'deleted': remote.deleted ? 1 : 0,
-            'device_id': remote.deviceId,
-            'sync_state': 'clean',
-            'source_app': remote.sourceApp,
-          },
-          where: 'id = ?',
-          whereArgs: [local['id']],
-        );
-        changes++;
+        if (await _mergeRecord(txn, remote)) changes++;
       }
 
       for (final tombstone in tombstones) {
-        final rows = await txn.query(
-          'clipboard_item',
-          where: 'id = ? OR content_hash = ?',
-          whereArgs: [tombstone.id, tombstone.contentHash],
-          limit: 1,
-        );
-        if (rows.isEmpty) continue;
-        final local = ClipboardItem.fromMap(rows.single);
-        if (!local.deleted &&
-            tombstone.deletedAt >= local.updatedAt.millisecondsSinceEpoch) {
+        final local = await _findByHash(txn, tombstone.contentHash);
+        if (local != null &&
+            tombstone.deletedAt < (local['history_changed_at']! as int)) {
+          continue;
+        }
+        if (local != null &&
+            local['deleted'] == 1 &&
+            local['history_changed_at'] == tombstone.deletedAt) {
+          continue;
+        }
+        if (local == null) {
+          await txn.insert('clipboard_item', {
+            'id': tombstone.id,
+            'type': 'text',
+            'content': '',
+            'content_hash': tombstone.contentHash,
+            'created_at': 0,
+            'updated_at': tombstone.deletedAt,
+            'last_used_at': 0,
+            'deleted': 1,
+            'history_changed_at': tombstone.deletedAt,
+            'device_id': tombstone.deviceId,
+            'sync_state': 'clean',
+          });
+        } else {
           await txn.update(
             'clipboard_item',
             {
               'deleted': 1,
-              'updated_at': tombstone.deletedAt,
-              'sync_state': 'clean',
+              'history_changed_at': tombstone.deletedAt,
+              'updated_at': max(
+                local['updated_at']! as int,
+                tombstone.deletedAt,
+              ),
             },
             where: 'id = ?',
-            whereArgs: [local.id],
+            whereArgs: [local['id']],
           );
-          changes++;
         }
+        changes++;
       }
     });
     return changes;
@@ -513,23 +517,198 @@ class ClipboardRepository {
     }, where: "sync_state != 'clean'");
   });
 
+  Future<Map<String, Object?>?> _findByHash(
+    DatabaseExecutor db,
+    String hash,
+  ) async {
+    final rows = await db.query(
+      'clipboard_item',
+      columns: _contentColumns,
+      where: 'content_hash = ?',
+      whereArgs: [hash],
+      limit: 1,
+    );
+    return rows.isEmpty ? null : _restoreText(rows.single);
+  }
+
+  Future<bool> _mergeRecord(DatabaseExecutor db, SyncRecord remote) async {
+    final local = await _findByHash(db, remote.contentHash);
+    final priorHistory = local?['history_changed_at'] as int? ?? 0;
+    final priorFavorite = local?['favorite_changed_at'] as int? ?? 0;
+    final priorDeleted = local?['deleted'] == 1;
+    final priorStar = local?['favorite'] == 1;
+    final historyTime =
+        remote.historyChangedAt ??
+        (remote.deleted ? remote.updatedAt : remote.lastUsedAt);
+    final favoriteTime = remote.favoriteChangedAt ?? (remote.favorite ? 1 : 0);
+    final takeHistory =
+        historyTime > priorHistory ||
+        (historyTime == priorHistory && remote.deleted);
+    // Old snapshots cannot distinguish copying from canceling a favorite.
+    // An explicit v2 state always takes precedence over an ambiguous v1 flag.
+    final takeFavorite =
+        favoriteTime > priorFavorite ||
+        (favoriteTime == priorFavorite && favoriteTime > 0 && !remote.favorite);
+    final deleted = takeHistory || local == null
+        ? remote.deleted
+        : priorDeleted;
+    final favorite = takeFavorite || local == null
+        ? remote.favorite
+        : priorStar;
+    final priorUpdated = local?['updated_at'] as int? ?? 0;
+    final remoteNewer = local == null || remote.updatedAt > priorUpdated;
+    final created = local?['created_at'] as int? ?? 0;
+    final images = _database.images;
+    final localContent = local?['content'] as String? ?? '';
+    final localImage = images?.fileFor(
+      local?['type'] as String? ?? 'text',
+      localContent,
+    );
+    final needsPayload =
+        remote.content.isNotEmpty || remote.payloadPath != null;
+    var content = localContent;
+    if (needsPayload &&
+        (content.isEmpty ||
+            (localImage != null && !await localImage.exists()))) {
+      final source = remote.payloadPath;
+      if (source != null &&
+          remote.type.startsWith('image/') &&
+          images != null) {
+        content = await images.persistFile(
+          File(source),
+          remote.type,
+          remote.contentHash,
+        );
+      } else {
+        final isImage = remote.type.startsWith('image/');
+        final payload = ClipboardContent(
+          type: remote.type,
+          content: source == null
+              ? remote.content
+              : isImage
+              ? base64Encode(await File(source).readAsBytes())
+              : await _readOriginalText(File(source)),
+        );
+        content =
+            await images?.persist(payload, hash: remote.contentHash) ??
+            payload.content;
+      }
+    }
+    final values = <String, Object?>{
+      'type': needsPayload || local == null ? remote.type : local['type'],
+      'content': content,
+      'created_at': created == 0
+          ? remote.createdAt
+          : remote.createdAt == 0
+          ? created
+          : min(created, remote.createdAt),
+      'updated_at': max(priorUpdated, remote.updatedAt),
+      'last_used_at': max(
+        local?['last_used_at'] as int? ?? 0,
+        remote.lastUsedAt,
+      ),
+      'copy_count': max(local?['copy_count'] as int? ?? 0, remote.copyCount),
+      'favorite': favorite ? 1 : 0,
+      'deleted': deleted ? 1 : 0,
+      'history_changed_at': takeHistory || local == null
+          ? historyTime
+          : priorHistory,
+      'favorite_changed_at': takeFavorite || local == null
+          ? favoriteTime
+          : priorFavorite,
+      'device_id': remoteNewer ? remote.deviceId : local['device_id'],
+      'source_app': remoteNewer ? remote.sourceApp : local['source_app'],
+    };
+    if (local == null) {
+      await db.insert('clipboard_item', {
+        ...values,
+        'id': remote.id,
+        'content_hash': remote.contentHash,
+        'sync_state': 'clean',
+      });
+    } else {
+      values.removeWhere((key, value) => local[key] == value);
+      if (values.isEmpty) return false;
+      await db.update(
+        'clipboard_item',
+        values,
+        where: 'id = ?',
+        whereArgs: [local['id']],
+      );
+    }
+    return true;
+  }
+
+  static Future<String> _readOriginalText(File file) async {
+    final bytes = await file.readAsBytes();
+    final text = utf8.decode(bytes);
+    // The UTF-8 decoder drops an initial BOM, which can be clipboard content.
+    if (bytes.length >= 3 &&
+        bytes[0] == 0xef &&
+        bytes[1] == 0xbb &&
+        bytes[2] == 0xbf) {
+      return '\ufeff$text';
+    }
+    return text;
+  }
+
+  Future<void> _mergeDevice(DatabaseExecutor db, SyncDevice device) async {
+    final local = (await db.query(
+      'device',
+      where: 'id = ?',
+      whereArgs: [device.id],
+    )).firstOrNull;
+    final current = device.id == _deviceId;
+    final newest =
+        local == null || device.lastSeenAt >= (local['last_seen_at']! as int);
+    await db.insert('device', {
+      'id': device.id,
+      'name': newest ? device.name : local['name'],
+      'platform': newest ? device.platform : local['platform'],
+      'created_at': local?['created_at'] ?? device.lastSeenAt,
+      'last_seen_at': max(
+        device.lastSeenAt,
+        local?['last_seen_at'] as int? ?? 0,
+      ),
+      'machine_id': current
+          ? machineId ?? validMachineId(local?['machine_id'] as String?)
+          : validMachineId(device.machineId) ??
+                validMachineId(local?['machine_id'] as String?),
+      'is_current': current ? 1 : 0,
+    }, conflictAlgorithm: ConflictAlgorithm.replace);
+  }
+
   Future<List<DeviceInfo>> listDevices() => access(() async {
     final rows = await _db.query(
       'device',
-      orderBy: 'is_current DESC, last_seen_at DESC',
+      orderBy: 'last_seen_at DESC, id ASC',
     );
-    return rows
-        .map(
-          (row) => DeviceInfo(
-            id: row['id']! as String,
-            name: row['name']! as String,
-            platform: row['platform']! as String,
-            lastSeenAt: DateTime.fromMillisecondsSinceEpoch(
-              row['last_seen_at']! as int,
-            ),
-            isCurrent: (row['is_current']! as int) == 1,
-          ),
-        )
-        .toList(growable: false);
+    final groups = <String, DeviceInfo>{};
+    for (final row in rows) {
+      final id = row['id']! as String;
+      final machine = validMachineId(row['machine_id'] as String?);
+      final key = machine == null ? 'installation:$id' : 'machine:$machine';
+      final prior = groups[key];
+      final isCurrent = id == _deviceId;
+      groups[key] = DeviceInfo(
+        id: prior?.id ?? id,
+        name: prior?.name ?? row['name']! as String,
+        platform: prior?.platform ?? row['platform']! as String,
+        lastSeenAt:
+            prior?.lastSeenAt ??
+            DateTime.fromMillisecondsSinceEpoch(row['last_seen_at']! as int),
+        isCurrent: isCurrent || (prior?.isCurrent ?? false),
+        machineId: machine,
+      );
+    }
+    return [
+      ...groups.values.where((entry) => entry.isCurrent),
+      ...groups.values.where((entry) => !entry.isCurrent),
+    ];
+  });
+
+  Future<List<SyncDevice>> listSyncDevices() => access(() async {
+    final rows = await _db.query('device');
+    return rows.map(SyncDevice.fromJson).toList();
   });
 }

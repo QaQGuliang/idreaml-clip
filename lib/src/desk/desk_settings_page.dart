@@ -233,7 +233,7 @@ class _DeskSettingsPageState extends State<DeskSettingsPage> {
                   const Align(
                     alignment: Alignment.centerLeft,
                     child: Text(
-                      '使用“云同步”中已配置的仓库和同步频率，仅同步内容与状态。显示位置、主题和草稿保存在本机。',
+                      '每台电脑分别开启此功能及同步开关，使用“云同步”中配置的仓库和频率。可在云同步页查看本机各模块的参与状态和结果。显示位置、主题和草稿保存在本机。',
                       style: TextStyle(
                         fontSize: 11,
                         color: AppColors.muted,

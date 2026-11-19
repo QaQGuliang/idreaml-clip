@@ -14,7 +14,25 @@ class ImageStore {
 
   Future<String> persist(ClipboardContent content, {String? hash}) async {
     if (!content.isImage) return content.content;
-    final extension = switch (content.type) {
+    return _persist(
+      content.type,
+      hash ?? content.hash,
+      (file) => file.writeAsBytes(content.imageBytes, flush: true),
+    );
+  }
+
+  Future<String> persistFile(File source, String type, String hash) =>
+      _persist(type, hash, (file) => source.copy(file.path));
+
+  Future<String> _persist(
+    String type,
+    String hash,
+    Future<File> Function(File) write,
+  ) async {
+    if (!RegExp(r'^[a-f0-9]{64}$').hasMatch(hash)) {
+      throw const FormatException('图片内容标识无效');
+    }
+    final extension = switch (type) {
       'image/png' => 'png',
       'image/jpeg' => 'jpg',
       'image/gif' => 'gif',
@@ -22,12 +40,12 @@ class ImageStore {
       'image/bmp' => 'bmp',
       _ => 'bin',
     };
-    final name = '${hash ?? content.hash}.$extension';
+    final name = '$hash.$extension';
     final file = File(p.join(storage.images.path, name));
     if (!await file.exists()) {
       final temporary = File('${file.path}.${const Uuid().v4()}.tmp');
       try {
-        await temporary.writeAsBytes(content.imageBytes, flush: true);
+        await write(temporary);
         await temporary.rename(file.path);
       } finally {
         if (await temporary.exists()) await temporary.delete();

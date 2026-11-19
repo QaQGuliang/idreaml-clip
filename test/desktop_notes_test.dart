@@ -347,13 +347,14 @@ void main() {
     await a.savePreference('draft.note', '敏感草稿');
     await a.savePreference('settings.note', '本机显示器');
     await a.synchronize(git, {DeskKind.note});
-    final file = File(p.join(git.path, 'desktop-v1', 'note', 'device-a.json'));
-    expect(await file.exists(), true);
-    expect(
-      await Directory(p.join(git.path, 'desktop-v1', 'todo')).exists(),
-      false,
-    );
+    final file = Directory(p.join(git.path, 'notes'))
+        .listSync()
+        .whereType<File>()
+        .single;
+    expect(p.extension(file.path), '.md');
+    expect(await Directory(p.join(git.path, 'todos')).exists(), false);
     final text = await file.readAsString();
+    expect(text, '便签');
     expect(text, isNot(contains('敏感草稿')));
     expect(text, isNot(contains('本机显示器')));
     await b.synchronize(git, {DeskKind.note});
@@ -388,20 +389,52 @@ void main() {
     await notes.updateSettings(DeskKind.note, {'enabled': true});
     await notes.save(DeskKind.note, body: '本地内容');
     final git = Directory(p.join(root.path, 'remote'));
-    await notes.synchronize(git);
+    final paused = await notes.synchronize(git);
+    expect(paused.notes!.state, SyncModuleState.syncDisabled);
+    expect(paused.todos!.state, SyncModuleState.featureDisabled);
+    expect(paused.exported, 0);
     expect(await git.exists(), false);
     await notes.updateSettings(DeskKind.note, {'sync': true, 'enabled': false});
-    await notes.synchronize(git);
+    final disabled = await notes.synchronize(git);
+    expect(disabled.notes!.state, SyncModuleState.featureDisabled);
     expect(await git.exists(), false);
     await notes.updateSettings(DeskKind.note, {'enabled': true});
-    await notes.synchronize(git);
-    expect(
-      await File(p.join(git.path, 'desktop-v1', 'note', 'device-a.json'))
-          .exists(),
-      true,
-    );
+    final resumed = await notes.synchronize(git);
+    expect(resumed.notes!.state, SyncModuleState.participating);
+    expect(resumed.notes!.imported, 0);
+    expect(resumed.notes!.exported, 1);
+    expect(await Directory(p.join(git.path, 'notes')).exists(), true);
     expect(notes.items(DeskKind.note).single.body, '本地内容');
     notes.dispose();
+  });
+
+  test('分别报告便签和待办的实际导入及快照数量', () async {
+    await a.save(DeskKind.note, body: '便签一');
+    await a.save(DeskKind.note, body: '便签二');
+    await a.save(DeskKind.todo, body: '待办一');
+    final git = Directory(p.join(root.path, 'remote'));
+    await a.synchronize(git, DeskKind.values.toSet());
+    final notes = DesktopNotes(b);
+    addTearDown(notes.dispose);
+    await notes.initialize();
+    for (final kind in DeskKind.values) {
+      await notes.updateSettings(kind, {'enabled': true, 'sync': true});
+    }
+    final imported = await notes.synchronize(git);
+    expect(imported.imported, 3);
+    expect(imported.exported, 3);
+    expect(imported.notes!.imported, 2);
+    expect(imported.notes!.exported, 2);
+    expect(imported.todos!.imported, 1);
+    expect(imported.todos!.exported, 1);
+    await notes.updateSettings(DeskKind.note, {'sync': false});
+    final again = await notes.synchronize(git);
+    expect(again.imported, 0);
+    expect(again.exported, 1);
+    expect(again.notes!.state, SyncModuleState.syncDisabled);
+    expect(again.notes!.exported, 0);
+    expect(again.todos!.state, SyncModuleState.participating);
+    expect(again.todos!.exported, 1);
   });
 
   test('未来同步格式拒绝导入，不清除本地内容', () async {
@@ -412,10 +445,7 @@ void main() {
     await File(
       p.join(folder.path, 'future.json'),
     ).writeAsString(jsonEncode({'version': 99, 'kind': 'note', 'entries': []}));
-    await expectLater(
-      a.synchronize(git, {DeskKind.note}),
-      throwsFormatException,
-    );
+    await expectLater(a.importLegacy(git), throwsFormatException);
     expect((await a.load()).single.body, '本地安全保留');
   });
 
@@ -483,7 +513,7 @@ void main() {
     expect(head(), previousHead, reason: '没有数据变动时不产生重复同步提交');
   });
 
-  test('大快照按字节分片，重新同步保留全部内容且只清理本设备旧分片', () async {
+  test('每条便签一个正文文件，删除后只保留删除状态', () async {
     final chunked = DeskRepository(
       deviceId: 'device-a',
       testPath: p.join(root.path, 'a.db'),
@@ -495,19 +525,30 @@ void main() {
     }
     final git = Directory(p.join(root.path, 'remote'));
     await chunked.synchronize(git, {DeskKind.note});
-    final folder = Directory(p.join(git.path, 'desktop-v1', 'note'));
+    final folder = Directory(p.join(git.path, 'notes'));
     final files = await folder.list().where((f) => f is File).toList();
-    expect(files.length, greaterThan(1));
+    expect(files, hasLength(8));
     for (final file in files.cast<File>()) {
       expect(await file.length(), lessThanOrEqualTo(1500));
-      expect(jsonDecode(await file.readAsString())['version'], 1);
+      expect(p.extension(file.path), '.md');
     }
     await b.synchronize(git, {DeskKind.note});
     expect((await b.load()).length, 8);
+    final removed = (await b.load()).first;
+    await b.save(
+      DeskKind.note,
+      id: removed.id,
+      body: '',
+      deleted: true,
+      expected: {removed.revision},
+    );
+    await b.synchronize(git, {DeskKind.note});
     await a.synchronize(git, {DeskKind.note});
-    expect(await File(p.join(folder.path, 'device-b.json')).exists(), true);
-    expect(await File(p.join(folder.path, 'device-a.1.json')).exists(), false);
-    expect((await a.load()).length, 8);
+    expect(await folder.list().where((f) => f is File).toList(), hasLength(7));
+    expect(
+      (await a.load()).singleWhere((e) => e.id == removed.id).deleted,
+      isTrue,
+    );
   });
 
   test('并行修改设置不会互相覆盖，空正文不能写入数据库', () async {

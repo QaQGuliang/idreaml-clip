@@ -21,6 +21,15 @@ void main() {
       await repository.captureText('已有历史');
       await repository.setSetting('recording_enabled', 'false');
       await database.database.execute('DROP TABLE screenshot_commit');
+      await database.database.execute(
+        'ALTER TABLE clipboard_item DROP COLUMN history_changed_at',
+      );
+      await database.database.execute(
+        'ALTER TABLE clipboard_item DROP COLUMN favorite_changed_at',
+      );
+      await database.database.execute(
+        'ALTER TABLE device DROP COLUMN machine_id',
+      );
       await database.database.setVersion(1);
       await database.close();
       database = ClipboardDatabase.withFactory(databaseFactoryFfi);
@@ -38,7 +47,7 @@ void main() {
         const ClipboardContent.text('回执验证'),
       );
       expect((await upgraded.list()).first.copyCount, 1);
-      expect(await database.database.getVersion(), 2);
+      expect(await database.database.getVersion(), 3);
     } finally {
       await database.close();
       await directory.delete(recursive: true);

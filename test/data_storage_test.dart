@@ -44,11 +44,11 @@ class _Git extends EmbeddedGitService {
 
 class _Token implements CredentialStore {
   @override
-  Future<String?> readToken() async => 'test-token';
+  Future<String?> readToken({String? id}) async => 'test-token';
   @override
-  Future<void> writeToken(String token) async {}
+  Future<void> writeToken(String token, {String? id}) async {}
   @override
-  Future<void> deleteToken() async {}
+  Future<void> deleteToken({String? id}) async {}
 }
 
 void main() {
@@ -83,6 +83,53 @@ void main() {
   tearDown(() async {
     await database.close();
     await sandbox.delete(recursive: true);
+  });
+
+  test('升级旧数据库时恢复被历史删除隐藏的收藏', () async {
+    final path = p.join(sandbox.path, 'old-schema.db');
+    final old = await databaseFactoryFfi.openDatabase(
+      path,
+      options: OpenDatabaseOptions(
+        version: 2,
+        onCreate: (db, _) async {
+          await db.execute('''
+            CREATE TABLE clipboard_item (
+              id TEXT PRIMARY KEY, type TEXT NOT NULL, content TEXT NOT NULL,
+              content_hash TEXT NOT NULL UNIQUE, created_at INTEGER NOT NULL,
+              updated_at INTEGER NOT NULL, last_used_at INTEGER NOT NULL,
+              copy_count INTEGER NOT NULL, favorite INTEGER NOT NULL,
+              deleted INTEGER NOT NULL, device_id TEXT NOT NULL,
+              sync_state TEXT NOT NULL, source_app TEXT
+            )
+          ''');
+          await db.execute('CREATE TABLE device (id TEXT PRIMARY KEY)');
+          await db.insert('clipboard_item', {
+            'id': 'old-favorite',
+            'type': 'text',
+            'content': '旧版本地收藏',
+            'content_hash': const ClipboardContent.text('旧版本地收藏').hash,
+            'created_at': 100,
+            'updated_at': 300,
+            'last_used_at': 200,
+            'copy_count': 1,
+            'favorite': 1,
+            'deleted': 1,
+            'device_id': 'old-device',
+            'sync_state': 'clean',
+          });
+        },
+      ),
+    );
+    await old.close();
+    final upgraded = ClipboardDatabase.withFactory(databaseFactoryFfi);
+    await upgraded.open(path: path);
+    addTearDown(upgraded.close);
+    final clips = ClipboardRepository(upgraded);
+    expect(await clips.list(), isEmpty);
+    final favorite = (await clips.list(favoritesOnly: true)).single;
+    expect(favorite.content, '旧版本地收藏');
+    expect(favorite.historyChangedAt, 300);
+    expect(favorite.favoriteChangedAt, 300);
   });
 
   test('列表仅读取图片引用，迁移后从当前目录复制，丢失的图片不阻塞列表', () async {
@@ -442,6 +489,7 @@ void main() {
         username: 'test',
         branch: 'main',
       ),
+      token: 'test-token',
     );
     final syncing = sync.syncNow();
     await git.started.future;
@@ -470,13 +518,19 @@ void main() {
 
   test('迁移保留 DPAPI 令牌并在新目录继续读写', () async {
     final credentials = SecureCredentialService(storage: storage);
+    const id = '8292dfa6-61ac-4087-a8be-565cd8194fb7';
     await credentials.writeToken('original-token');
+    await credentials.writeToken('private-password', id: id);
     await repository.moveStorage(p.join(sandbox.path, 'encrypted-data'));
     expect(await credentials.readToken(), 'original-token');
+    expect(await credentials.readToken(id: id), 'private-password');
     await credentials.writeToken('next-token');
     expect(await credentials.readToken(), 'next-token');
     await credentials.deleteToken();
     expect(await credentials.readToken(), isNull);
+    expect(await credentials.readToken(id: id), 'private-password');
+    await credentials.deleteToken(id: id);
+    expect(await credentials.readToken(id: id), isNull);
   }, skip: !Platform.isWindows);
 
   test('不可访问的已配置路径不被静默重建为空历史', () async {
@@ -547,7 +601,10 @@ void main() {
       items: await repository.listForSync(loadImages: false),
     );
     final imported = await format.readAll(export);
-    expect(imported.records.single.content, picture.content);
+    expect(
+      await File(imported.records.single.payloadPath!).readAsBytes(),
+      picture.imageBytes,
+    );
     final otherStorage = DataStorage(
       installationDirectory: Directory(p.join(sandbox.path, 'second-install')),
       supportDirectory: Directory(p.join(sandbox.path, 'second-support')),

@@ -2,16 +2,18 @@ import 'dart:convert';
 import 'dart:io';
 import 'dart:isolate';
 
+import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 
 import '../models/clipboard_item.dart';
 import '../models/sync_models.dart';
+import 'sync_archive.dart';
 
 class SyncImportData {
   const SyncImportData({
-    required this.records,
-    required this.tombstones,
-    required this.devices,
+    this.records = const [],
+    this.tombstones = const [],
+    this.devices = const [],
   });
   final List<SyncRecord> records;
   final List<SyncTombstone> tombstones;
@@ -21,181 +23,281 @@ class SyncImportData {
 class SyncFormatService {
   SyncFormatService({this.maxFileBytes = 64 * 1024 * 1024});
 
-  // A 32 MB image expands to about 43 MB in a JSON/base64 record. Split monthly
-  // history into bounded files instead of letting image records break sync.
   final int maxFileBytes;
+  static final _hashPattern = RegExp(r'^[a-f0-9]{64}$');
+  static final _devicePattern = RegExp(r'^[A-Za-z0-9_-]{1,128}$');
+
+  static String _extension(String type) => switch (type) {
+    'image/png' => 'png',
+    'image/jpeg' => 'jpg',
+    'image/gif' => 'gif',
+    'image/webp' => 'webp',
+    'image/bmp' => 'bmp',
+    _ => type.startsWith('image/') ? 'bin' : 'txt',
+  };
+
+  static String _historyPath(String hash, int createdAt, String extension) {
+    final date = DateTime.fromMillisecondsSinceEpoch(
+      createdAt,
+      isUtc: true,
+    ).add(const Duration(hours: 8));
+    String pad(int value) => value.toString().padLeft(2, '0');
+    final day = '${date.year}-${pad(date.month)}-${pad(date.day)}';
+    final time = '${pad(date.hour)}${pad(date.minute)}${pad(date.second)}';
+    return 'history/$day/$time-$hash.$extension';
+  }
+
+  static String _metadata(String hash) =>
+      'config/metadata/clipboard/$hash.json';
+
+  Future<bool> isLegacy(Directory repository) async {
+    final archive = SyncArchive(repository);
+    if (await (await archive.file('config/format.json')).exists()) return false;
+    for (final directory in [
+      'records',
+      'tombstones',
+      'desktop-v1',
+      'devices',
+    ]) {
+      if (await Directory((await archive.file(directory)).path).exists()) {
+        return true;
+      }
+    }
+    return await (await archive.file('schema.json')).exists();
+  }
 
   Future<int> exportDevice({
     required Directory repository,
     required String deviceId,
     required String deviceName,
     required List<ClipboardItem> items,
+    List<SyncDevice> devices = const [],
+    String? machineId,
   }) => Isolate.run(() async {
-    await _writeJson(File(p.join(repository.path, 'schema.json')), {
+    final archive = SyncArchive(repository);
+    await _checkFormat(archive);
+    const attributes =
+        '/history/** -text\n/favorites/** -text\n/notes/** -text\n/todos/** -text\n';
+    final attributesFile = await archive.file('.gitattributes');
+    final existingAttributes = await attributesFile.exists()
+        ? await attributesFile.readAsString()
+        : '';
+    if (!existingAttributes.endsWith(attributes)) {
+      await archive.writeText(
+        '.gitattributes',
+        existingAttributes.isEmpty
+            ? attributes
+            : '${existingAttributes.trimRight()}\n$attributes',
+      );
+    }
+    await archive.writeJson('config/format.json', {
       'name': 'idreaml-clip-sync',
-      'schema_version': 1,
-      'format': 'jsonl',
+      'schema_version': SyncArchive.version,
+      'history_time_zone': 'Asia/Shanghai',
     });
-    await _writeJson(
-      File(p.join(repository.path, 'devices', '$deviceId.json')),
-      {
-        'schema_version': 1,
-        'id': deviceId,
-        'name': deviceName,
-        'platform': Platform.operatingSystem,
-        'last_seen_at': DateTime.now().toUtc().millisecondsSinceEpoch,
-      },
-    );
-
-    final recordDirectory = Directory(
-      p.join(repository.path, 'records', deviceId),
-    );
-    await recordDirectory.create(recursive: true);
-    final groups = <String, List<ClipboardItem>>{};
-    for (final item in items.where((item) => !item.deleted)) {
-      final date = item.createdAt.toUtc();
-      final month = '${date.year}-${date.month.toString().padLeft(2, '0')}';
-      groups.putIfAbsent(month, () => []).add(item);
-    }
-    final expectedFiles = <String>{};
-    for (final entry in groups.entries) {
-      entry.value.sort((a, b) => a.createdAt.compareTo(b.createdAt));
-      var part = 0;
-      var size = 0;
-      var buffer = StringBuffer();
-      Future<void> flush() async {
-        if (buffer.isEmpty) return;
-        final name = part == 0
-            ? '${entry.key}.jsonl'
-            : '${entry.key}.${part.toString().padLeft(3, '0')}.jsonl';
-        expectedFiles.add(name);
-        await _writeText(
-          File(p.join(recordDirectory.path, name)),
-          buffer.toString(),
-        );
-        part++;
-        size = 0;
-        buffer = StringBuffer();
+    final profiles = {
+      for (final device in devices) device.id: device,
+      deviceId: SyncDevice(
+        id: deviceId,
+        name: deviceName,
+        platform: Platform.operatingSystem,
+        lastSeenAt: DateTime.now().millisecondsSinceEpoch,
+        machineId:
+            machineId ??
+            devices
+                .where((device) => device.id == deviceId)
+                .firstOrNull
+                ?.machineId,
+      ),
+    };
+    for (final profile in profiles.values) {
+      if (!_devicePattern.hasMatch(profile.id)) {
+        throw const FormatException('同步设备标识无效');
       }
+      await archive.writeJson(
+        'config/devices/${profile.id}.json',
+        profile.toJson(),
+      );
+    }
 
-      for (final item in entry.value) {
-        final record = SyncRecord.fromItem(item).toJson();
-        final path = item.imagePath;
-        if (path != null) {
-          record['content'] = base64Encode(await File(path).readAsBytes());
+    for (final item in items) {
+      final hash = item.contentHash;
+      if (!_hashPattern.hasMatch(hash)) {
+        throw const FormatException('同步内容标识无效');
+      }
+      final meta = _metadata(hash);
+      final metadata = await archive.file(meta);
+      final ext = _extension(item.type);
+      final history = _historyPath(
+        hash,
+        item.createdAt.millisecondsSinceEpoch,
+        ext,
+      );
+      final favorite = 'favorites/$hash.$ext';
+      if (await metadata.exists()) {
+        final previous = await archive.readJson(metadata);
+        final oldExt = _extension(previous['type'] as String);
+        final oldHistory = _historyPath(
+          hash,
+          previous['created_at'] as int,
+          oldExt,
+        );
+        if (oldHistory != history || item.deleted) {
+          await archive.remove(oldHistory);
         }
-        final line = '${jsonEncode(record)}\n';
-        final bytes = utf8.encode(line).length;
-        if (bytes > maxFileBytes) throw const FormatException('单条同步记录过大');
-        if (size + bytes > maxFileBytes) await flush();
-        buffer.write(line);
-        size += bytes;
+        if (oldExt != ext) await archive.remove('favorites/$hash.$oldExt');
       }
-      await flush();
-    }
-    for (final old in recordDirectory.listSync().whereType<File>()) {
-      if (p.extension(old.path) == '.jsonl' &&
-          !expectedFiles.contains(p.basename(old.path))) {
-        await old.delete();
+      if (item.deleted) await archive.remove(history);
+      if (!item.favorite) await archive.remove(favorite);
+      if (!item.deleted || item.favorite) {
+        final source = item.imagePath == null ? null : File(item.imagePath!);
+        if (source != null && !await source.exists()) {
+          throw SyncFailure(SyncPhase.reconcile, '无法读取本机图片，请检查数据目录。');
+        }
+        final bytes = item.isImage && source == null
+            ? item.payload.imageBytes
+            : null;
+        for (final destination in [
+          if (!item.deleted) history,
+          if (item.favorite) favorite,
+        ]) {
+          if (source != null) {
+            if (await source.length() > maxFileBytes) _tooLarge();
+            await archive.copy(destination, source);
+          } else if (bytes != null) {
+            if (bytes.length > maxFileBytes) _tooLarge();
+            await archive.writeBytes(destination, bytes);
+          } else {
+            final textBytes = utf8.encode(item.content);
+            if (textBytes.length > maxFileBytes) _tooLarge();
+            await archive.writeBytes(destination, textBytes);
+          }
+        }
       }
+      final record = SyncRecord.fromItem(item).toJson()..remove('content');
+      record['id'] = 'clip-$hash';
+      record['schema_version'] = SyncArchive.version;
+      await archive.writeJson(meta, record);
     }
-
-    final tombstones = items
-        .where((item) => item.deleted)
-        .map(
-          (item) => SyncTombstone(
-            id: item.id,
-            contentHash: item.contentHash,
-            deletedAt: item.updatedAt.millisecondsSinceEpoch,
-            deviceId: deviceId,
-          ).toJson(),
-        );
-    await _writeJsonLines(
-      File(p.join(repository.path, 'tombstones', deviceId, 'events.jsonl')),
-      tombstones,
-    );
     return items.length;
   });
 
   Future<SyncImportData> readAll(Directory repository) => Isolate.run(() async {
+    final archive = SyncArchive(repository);
+    await _checkFormat(archive);
     final records = <SyncRecord>[];
-    final tombstones = <SyncTombstone>[];
     final devices = <SyncDevice>[];
-    final recordsRoot = Directory(p.join(repository.path, 'records'));
-    final tombstonesRoot = Directory(p.join(repository.path, 'tombstones'));
-    final devicesRoot = Directory(p.join(repository.path, 'devices'));
-    if (recordsRoot.existsSync()) {
-      for (final file
-          in recordsRoot.listSync(recursive: true).whereType<File>()) {
-        if (p.extension(file.path) != '.jsonl') continue;
-        for (final json in await _readJsonLines(file)) {
-          records.add(SyncRecord.fromJson(json));
-        }
+    for (final file in await archive.jsonFiles('config/metadata/clipboard')) {
+      final json = await archive.readJson(file);
+      final hash = json['content_hash'] as String;
+      if (!_hashPattern.hasMatch(hash) ||
+          p.basename(file.path) != '$hash.json' ||
+          json['schema_version'] != SyncArchive.version ||
+          json['history_changed_at'] is! int ||
+          json['favorite_changed_at'] is! int) {
+        throw const FormatException('剪切板同步元数据无效');
       }
-    }
-    if (tombstonesRoot.existsSync()) {
-      for (final file
-          in tombstonesRoot.listSync(recursive: true).whereType<File>()) {
-        if (p.extension(file.path) != '.jsonl') continue;
-        for (final json in await _readJsonLines(file)) {
-          tombstones.add(SyncTombstone.fromJson(json));
+      final type = json['type'] as String;
+      final extension = _extension(type);
+      String? source;
+      for (final relative in [
+        if (json['deleted'] != true)
+          _historyPath(hash, json['created_at'] as int, extension),
+        if (json['favorite'] == true) 'favorites/$hash.$extension',
+      ]) {
+        final payload = await archive.file(relative);
+        if (!await payload.exists()) {
+          throw const FormatException('仓库中的剪切板内容文件缺失');
         }
+        if (await payload.length() > maxFileBytes) _tooLarge();
+        final digest = await sha256.bind(_hashInput(payload, type)).single;
+        if (digest.toString() != hash) {
+          throw const FormatException('仓库中的剪切板内容与元数据不一致');
+        }
+        source ??= payload.path;
       }
+      records.add(
+        SyncRecord.fromJson({
+          ...json,
+          'id': 'clip-$hash',
+          'content': '',
+        }, payloadPath: source),
+      );
     }
-    if (devicesRoot.existsSync()) {
-      for (final file in devicesRoot.listSync().whereType<File>()) {
-        if (p.extension(file.path) != '.json' ||
-            await file.length() > maxFileBytes) {
-          continue;
-        }
-        final value = jsonDecode(await file.readAsString());
-        if (value is Map<String, dynamic>) {
-          devices.add(SyncDevice.fromJson(value));
-        }
+    for (final file in await archive.jsonFiles('config/devices')) {
+      final json = await archive.readJson(file);
+      final device = SyncDevice.fromJson(json);
+      if (!_devicePattern.hasMatch(device.id) ||
+          p.basename(file.path) != '${device.id}.json') {
+        throw const FormatException('同步设备标识无效');
       }
+      devices.add(device);
     }
-    return SyncImportData(
-      records: records,
-      tombstones: tombstones,
-      devices: devices,
-    );
+    return SyncImportData(records: records, devices: devices);
   });
 
-  Future<List<Map<String, dynamic>>> _readJsonLines(File file) async {
-    if (await file.length() > maxFileBytes) {
-      throw const FormatException('同步文件超过大小限制');
+  // Match ClipboardContent.hash without keeping a whole image in memory.
+  static Stream<List<int>> _hashInput(File file, String type) async* {
+    if (type.startsWith('image/')) {
+      yield utf8.encode('$type\u0000');
+      yield* file.openRead().transform(base64.encoder).transform(utf8.encoder);
+    } else {
+      yield* file.openRead();
     }
-    final result = <Map<String, dynamic>>[];
-    final lines = file
-        .openRead()
-        .transform(utf8.decoder)
-        .transform(const LineSplitter());
-    await for (final line in lines) {
-      if (line.trim().isEmpty) continue;
-      final value = jsonDecode(line);
-      if (value is! Map<String, dynamic>) {
-        throw const FormatException('同步记录必须是 JSON 对象');
+  }
+
+  Stream<SyncImportData> readLegacy(Directory repository) async* {
+    final archive = SyncArchive(repository);
+    final schema = await archive.file('schema.json');
+    if (await schema.exists() &&
+        (await archive.readJson(schema))['schema_version'] != 1) {
+      throw const FormatException('不支持的旧仓库格式');
+    }
+    for (final folder in ['records', 'tombstones']) {
+      final directory = Directory((await archive.file(folder)).path);
+      if (!await directory.exists()) continue;
+      await for (final file in directory.list(
+        recursive: true,
+        followLinks: false,
+      )) {
+        if (file is! File || !file.path.endsWith('.jsonl')) continue;
+        if (await file.length() > maxFileBytes) _tooLarge();
+        final records = <SyncRecord>[];
+        final tombstones = <SyncTombstone>[];
+        await for (final line
+            in file
+                .openRead()
+                .transform(utf8.decoder)
+                .transform(const LineSplitter())) {
+          if (line.trim().isEmpty) continue;
+          final json = jsonDecode(line) as Map<String, dynamic>;
+          if (folder == 'records') {
+            records.add(SyncRecord.fromJson(json));
+          } else {
+            tombstones.add(SyncTombstone.fromJson(json));
+          }
+        }
+        yield SyncImportData(records: records, tombstones: tombstones);
       }
-      result.add(value);
     }
-    return result;
+    final devices = <SyncDevice>[];
+    for (final file in await archive.jsonFiles('devices')) {
+      devices.add(SyncDevice.fromJson(await archive.readJson(file)));
+    }
+    if (devices.isNotEmpty) yield SyncImportData(devices: devices);
   }
 
-  Future<void> _writeJson(File file, Map<String, Object?> value) => _writeText(
-    file,
-    '${const JsonEncoder.withIndent('  ').convert(value)}\n',
-  );
-
-  Future<void> _writeJsonLines(
-    File file,
-    Iterable<Map<String, Object?>> values,
-  ) => _writeText(file, '${values.map(jsonEncode).join('\n')}\n');
-
-  Future<void> _writeText(File file, String value) async {
-    await file.parent.create(recursive: true);
-    final temporary = File('${file.path}.tmp');
-    await temporary.writeAsString(value, flush: true);
-    if (file.existsSync()) await file.delete();
-    await temporary.rename(file.path);
+  Future<void> _checkFormat(SyncArchive archive) async {
+    final format = await archive.file('config/format.json');
+    if (!await format.exists()) return;
+    final value = await archive.readJson(format);
+    if (value['name'] != 'idreaml-clip-sync' ||
+        value['schema_version'] != SyncArchive.version ||
+        value['history_time_zone'] != 'Asia/Shanghai') {
+      throw SyncFailure(SyncPhase.reconcile, '仓库同步格式不受当前版本支持。');
+    }
   }
+
+  static Never _tooLarge() =>
+      throw SyncFailure(SyncPhase.reconcile, '同步内容文件超过大小限制。');
 }

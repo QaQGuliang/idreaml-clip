@@ -36,7 +36,7 @@ class ClipboardDatabase {
     _database = await _factory!.openDatabase(
       databasePath,
       options: OpenDatabaseOptions(
-        version: 2,
+        version: 3,
         onConfigure: (db) async {
           await db.execute('PRAGMA foreign_keys = ON');
           await db.execute('PRAGMA journal_mode = WAL');
@@ -44,6 +44,28 @@ class ClipboardDatabase {
         onCreate: _createSchema,
         onUpgrade: (db, oldVersion, newVersion) async {
           if (oldVersion < 2) await _createScreenshotReceipts(db);
+          if (oldVersion < 3) {
+            await db.execute(
+              'ALTER TABLE clipboard_item ADD COLUMN history_changed_at INTEGER NOT NULL DEFAULT 0',
+            );
+            await db.execute(
+              'ALTER TABLE clipboard_item ADD COLUMN favorite_changed_at INTEGER NOT NULL DEFAULT 0',
+            );
+            // Old versions hid deleted favorites, but kept the favorite flag.
+            // Keep both flags so those entries can reappear in Favorites.
+            await db.execute('''
+              UPDATE clipboard_item
+              SET history_changed_at = CASE WHEN deleted = 1 THEN updated_at ELSE last_used_at END,
+                  favorite_changed_at = CASE WHEN favorite = 1 THEN updated_at ELSE 0 END
+            ''');
+            await db.execute(
+              'DROP INDEX IF EXISTS clipboard_item_favorite_idx',
+            );
+            await db.execute(
+              'CREATE INDEX clipboard_item_favorite_idx ON clipboard_item(favorite, last_used_at DESC)',
+            );
+            await db.execute('ALTER TABLE device ADD COLUMN machine_id TEXT');
+          }
         },
       ),
     );
@@ -82,6 +104,26 @@ class ClipboardDatabase {
         await close();
         rethrow;
       }
+    }
+    // The local log is additive and independent of the existing data schemas.
+    // Older app versions can still open the same databases.
+    try {
+      await settings.execute('''
+        CREATE TABLE IF NOT EXISTS sync_history (
+          id INTEGER PRIMARY KEY,
+          completed_at INTEGER NOT NULL,
+          trigger TEXT NOT NULL,
+          succeeded INTEGER NOT NULL,
+          details TEXT NOT NULL
+        )
+      ''');
+      await settings.execute(
+        'CREATE INDEX IF NOT EXISTS sync_history_completed_idx '
+        'ON sync_history(completed_at DESC, id DESC)',
+      );
+    } catch (_) {
+      await close();
+      rethrow;
     }
   }
 
@@ -151,6 +193,8 @@ class ClipboardDatabase {
         copy_count INTEGER NOT NULL DEFAULT 1,
         favorite INTEGER NOT NULL DEFAULT 0,
         deleted INTEGER NOT NULL DEFAULT 0,
+        history_changed_at INTEGER NOT NULL DEFAULT 0,
+        favorite_changed_at INTEGER NOT NULL DEFAULT 0,
         device_id TEXT NOT NULL,
         sync_state TEXT NOT NULL DEFAULT 'dirty',
         source_app TEXT
@@ -162,7 +206,7 @@ class ClipboardDatabase {
     );
     await db.execute(
       'CREATE INDEX clipboard_item_favorite_idx '
-      'ON clipboard_item(favorite, deleted, last_used_at DESC)',
+      'ON clipboard_item(favorite, last_used_at DESC)',
     );
     await db.execute('''
       CREATE TABLE app_setting (
@@ -178,6 +222,7 @@ class ClipboardDatabase {
         platform TEXT NOT NULL,
         created_at INTEGER NOT NULL,
         last_seen_at INTEGER NOT NULL,
+        machine_id TEXT,
         is_current INTEGER NOT NULL DEFAULT 0
       )
     ''');

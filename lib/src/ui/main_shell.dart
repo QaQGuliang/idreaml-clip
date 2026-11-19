@@ -1,3 +1,5 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -13,6 +15,7 @@ import '../models/sync_models.dart';
 import '../models/workspace_layout.dart';
 import '../screenshot/arrow_style_picker.dart';
 import '../services/desktop_service.dart';
+import '../services/directory_picker.dart';
 import 'app_theme.dart';
 import 'common.dart';
 import 'clipboard_image.dart';
@@ -763,7 +766,9 @@ class _HistoryWorkspaceState extends State<_HistoryWorkspace> {
                                 },
                                 onFavorite: () =>
                                     controller.toggleFavorite(item.id),
-                                onDelete: () => controller.deleteItem(item.id),
+                                onDelete: controller.page == AppPage.favorites
+                                    ? null
+                                    : () => controller.deleteItem(item.id),
                               );
                             },
                           ),
@@ -866,7 +871,7 @@ class _HistoryItem extends StatelessWidget {
   final VoidCallback onTap;
   final VoidCallback onUse;
   final VoidCallback onFavorite;
-  final VoidCallback onDelete;
+  final VoidCallback? onDelete;
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -887,19 +892,20 @@ class _HistoryItem extends StatelessWidget {
             color: item.favorite ? AppColors.warning : AppColors.muted,
           ),
         ),
-        IconButton(
-          tooltip: '删除',
-          onPressed: onDelete,
-          constraints: compactActions
-              ? const BoxConstraints.tightFor(width: 32, height: 32)
-              : null,
-          padding: compactActions ? EdgeInsets.zero : null,
-          icon: const Icon(
-            Icons.close_rounded,
-            size: 17,
-            color: AppColors.muted,
+        if (onDelete != null)
+          IconButton(
+            tooltip: '删除',
+            onPressed: onDelete,
+            constraints: compactActions
+                ? const BoxConstraints.tightFor(width: 32, height: 32)
+                : null,
+            padding: compactActions ? EdgeInsets.zero : null,
+            icon: const Icon(
+              Icons.close_rounded,
+              size: 17,
+              color: AppColors.muted,
+            ),
           ),
-        ),
       ];
       return Material(
         color: selected ? const Color(0xFFF7F5FF) : Colors.transparent,
@@ -1145,21 +1151,78 @@ class _SyncPage extends StatelessWidget {
   const _SyncPage({required this.controller});
   final AppController controller;
 
+  Future<void> _importLegacy(BuildContext context) async {
+    final connected = controller.syncService.config != null;
+    final source = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('导入旧仓库'),
+        content: const Text('将旧版仓库最新快照与本机数据合并。导入后，可以连接一个新的私有仓库上传。'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('取消'),
+          ),
+          if (Platform.isWindows)
+            TextButton(
+              onPressed: () => Navigator.pop(context, 'folder'),
+              child: const Text('选择仓库目录'),
+            ),
+          if (connected)
+            FilledButton(
+              onPressed: () => Navigator.pop(context, 'remote'),
+              child: const Text('从当前连接导入'),
+            ),
+        ],
+      ),
+    );
+    if (source == null || !context.mounted) return;
+    try {
+      Directory? checkout;
+      if (source == 'folder') {
+        final path = await DirectoryPicker.choose();
+        if (path == null || !context.mounted) return;
+        checkout = Directory(path);
+      }
+      final count = await controller.syncService.importRepository(
+        checkout: checkout,
+      );
+      if (context.mounted) showMessage(context, '导入完成，合并了 $count 项变更。');
+    } catch (error) {
+      if (context.mounted) {
+        showMessage(context, error is StateError ? error.message : '无法导入旧仓库。');
+      }
+    }
+  }
+
   Future<void> _editConnection(
     BuildContext context,
     SyncProvider provider,
   ) async {
     final current = controller.syncService.config;
-    final remote = TextEditingController(text: current?.remoteUrl ?? '');
-    final username = TextEditingController(text: current?.username ?? '');
-    final branch = TextEditingController(text: current?.branch ?? 'main');
+    final existing = current?.provider == provider ? current : null;
+    final remote = TextEditingController(text: existing?.remoteUrl ?? '');
+    final username = TextEditingController(text: existing?.username ?? '');
+    final branch = TextEditingController(text: existing?.branch ?? 'main');
     final token = TextEditingController();
+    final isSelfHosted = provider == SyncProvider.custom;
+    final credentialLabel = isSelfHosted ? '密码或访问令牌' : '访问令牌';
+    final example = switch (provider) {
+      SyncProvider.gitee => 'https://gitee.com/账号/仓库.git',
+      SyncProvider.github => 'https://github.com/账号/仓库.git',
+      SyncProvider.gitlab => 'https://gitlab.com/账号/仓库.git',
+      SyncProvider.custom => 'https://git.example.com/团队/仓库.git',
+    };
     String? error;
-    final saved = await showDialog<bool>(
+    var saving = false;
+    var skipCertificate = existing?.skipCertificateVerification ?? false;
+    var scheme = Uri.tryParse(remote.text.trim())?.scheme;
+    final route = DialogRoute<bool>(
       context: context,
       builder: (dialogContext) => StatefulBuilder(
         builder: (context, setState) => AlertDialog(
           title: Text('${_providerName(provider)} 仓库连接'),
+          scrollable: true,
           content: SizedBox(
             width: 500,
             child: Column(
@@ -1167,9 +1230,17 @@ class _SyncPage extends StatelessWidget {
               children: [
                 TextField(
                   controller: remote,
-                  decoration: const InputDecoration(
-                    labelText: 'HTTPS 仓库地址',
-                    hintText: 'https://gitee.com/你的账号/仓库.git',
+                  onChanged: isSelfHosted
+                      ? (value) => setState(() {
+                          scheme = Uri.tryParse(value.trim())?.scheme;
+                          skipCertificate = false;
+                        })
+                      : null,
+                  decoration: InputDecoration(
+                    labelText: isSelfHosted
+                        ? 'HTTP / HTTPS 克隆地址'
+                        : 'HTTPS 克隆地址',
+                    hintText: example,
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -1181,9 +1252,13 @@ class _SyncPage extends StatelessWidget {
                 TextField(
                   controller: token,
                   obscureText: true,
+                  autocorrect: false,
+                  enableSuggestions: false,
                   decoration: InputDecoration(
-                    labelText: current == null ? '访问令牌' : '访问令牌（留空则不修改）',
-                    helperText: '令牌仅保存到系统安全凭证库，不进入 SQLite 或 Git。',
+                    labelText: credentialLabel,
+                    helperText: existing == null
+                        ? '凭据加密保存在本机。'
+                        : '仓库和账号不变时，可留空沿用已保存的凭据。',
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -1191,6 +1266,28 @@ class _SyncPage extends StatelessWidget {
                   controller: branch,
                   decoration: const InputDecoration(labelText: '同步分支'),
                 ),
+                if (isSelfHosted && scheme == 'https') ...[
+                  const SizedBox(height: 8),
+                  SwitchListTile(
+                    contentPadding: EdgeInsets.zero,
+                    title: const Text('跳过 HTTPS 证书校验'),
+                    subtitle: const Text('仅用于你信任的服务器。开启后，应用无法验证服务器身份。'),
+                    value: skipCertificate,
+                    onChanged: saving
+                        ? null
+                        : (value) => setState(() => skipCertificate = value),
+                  ),
+                ],
+                if (isSelfHosted && scheme == 'http') ...[
+                  const SizedBox(height: 8),
+                  const Align(
+                    alignment: Alignment.centerLeft,
+                    child: Text(
+                      'HTTP 会明文传输凭据和同步数据，请在可信网络中使用。',
+                      style: TextStyle(color: AppColors.muted, fontSize: 12),
+                    ),
+                  ),
+                ],
                 if (error != null) ...[
                   const SizedBox(height: 10),
                   Align(
@@ -1206,42 +1303,57 @@ class _SyncPage extends StatelessWidget {
           ),
           actions: [
             TextButton(
-              onPressed: () => Navigator.pop(dialogContext, false),
+              onPressed: saving
+                  ? null
+                  : () => Navigator.pop(dialogContext, false),
               child: const Text('取消'),
             ),
             FilledButton(
-              onPressed: () async {
-                if (current == null && token.text.trim().isEmpty) {
-                  setState(() => error = '首次连接需要填写访问令牌。');
-                  return;
-                }
-                try {
-                  await controller.saveSyncConfig(
-                    SyncConfig(
-                      provider: provider,
-                      remoteUrl: remote.text.trim(),
-                      username: username.text.trim(),
-                      branch: branch.text.trim(),
-                      intervalMinutes: current?.intervalMinutes ?? 10,
-                      enabled: current?.enabled ?? true,
-                      syncOnStartup: current?.syncOnStartup ?? true,
-                    ),
-                    token: token.text,
-                  );
-                  if (dialogContext.mounted) Navigator.pop(dialogContext, true);
-                } catch (value) {
-                  setState(
-                    () =>
-                        error = '$value'.replaceFirst('FormatException: ', ''),
-                  );
-                }
-              },
+              onPressed: saving
+                  ? null
+                  : () async {
+                      setState(() {
+                        saving = true;
+                        error = null;
+                      });
+                      try {
+                        await controller.saveSyncConfig(
+                          SyncConfig(
+                            provider: provider,
+                            remoteUrl: remote.text.trim(),
+                            username: username.text.trim(),
+                            branch: branch.text.trim(),
+                            intervalMinutes: current?.intervalMinutes ?? 10,
+                            enabled: current?.enabled ?? true,
+                            syncOnStartup: current?.syncOnStartup ?? true,
+                            certificateExceptionUrl:
+                                scheme == 'https' && skipCertificate
+                                ? remote.text.trim()
+                                : null,
+                          ),
+                          token: token.text,
+                        );
+                        if (dialogContext.mounted) {
+                          Navigator.pop(dialogContext, true);
+                        }
+                      } catch (value) {
+                        if (!dialogContext.mounted) return;
+                        setState(() {
+                          saving = false;
+                          error = value is FormatException
+                              ? value.message
+                              : '无法保存连接，请检查本机数据目录后重试。';
+                        });
+                      }
+                    },
               child: const Text('保存连接'),
             ),
           ],
         ),
       ),
     );
+    final saved = await Navigator.of(context, rootNavigator: true).push(route);
+    await route.completed;
     remote.dispose();
     username.dispose();
     branch.dispose();
@@ -1255,11 +1367,12 @@ class _SyncPage extends StatelessWidget {
     SyncProvider.gitee => 'Gitee',
     SyncProvider.github => 'GitHub',
     SyncProvider.gitlab => 'GitLab',
-    SyncProvider.custom => '自定义 Git',
+    SyncProvider.custom => '自托管 Git',
   };
 
   @override
   Widget build(BuildContext context) => ListView(
+    key: const ValueKey('cloud-sync-page'),
     children: [
       const _LocalFirstBanner(),
       const SizedBox(height: 14),
@@ -1276,12 +1389,27 @@ class _SyncPage extends StatelessWidget {
               (SyncProvider.gitee, 'Gitee', '国内访问友好，推荐首选', 'G'),
               (SyncProvider.github, 'GitHub', '使用个人访问令牌连接', 'GH'),
               (SyncProvider.gitlab, 'GitLab', '使用个人访问令牌连接', 'GL'),
+              (
+                SyncProvider.custom,
+                '自托管 Git',
+                '支持自己服务器上的 HTTP 和 HTTPS 克隆地址',
+                'Git',
+              ),
             ])
               _ProviderRow(
                 provider: provider,
                 connected:
                     controller.syncService.config?.provider == provider.$1,
                 onTap: () => _editConnection(context, provider.$1),
+              ),
+            if (Platform.isWindows || controller.syncService.config != null)
+              TextButton.icon(
+                onPressed:
+                    controller.syncService.status == CloudSyncStatus.syncing
+                    ? null
+                    : () => _importLegacy(context),
+                icon: const Icon(Icons.folder_open_rounded, size: 16),
+                label: const Text('导入旧仓库'),
               ),
           ],
         ),
@@ -1293,16 +1421,43 @@ class _SyncPage extends StatelessWidget {
           children: [
             const _SectionTitle(title: '当前同步状态', subtitle: '本地数据库始终是主数据源'),
             const SizedBox(height: 14),
-            const _SettingRow(
-              title: '本地剪切板',
-              subtitle: '监听、历史、搜索、收藏和删除均可离线使用',
-              trailing: StatusPill(label: '运行中'),
-            ),
-            const Divider(height: 1),
             _SettingRow(
               title: 'Git 云同步',
               subtitle: _syncSubtitle(),
               trailing: _syncStatusPill(),
+            ),
+            if (controller.syncService.config?.skipCertificateVerification ==
+                true)
+              const Padding(
+                padding: EdgeInsets.only(bottom: 8),
+                child: Text(
+                  '当前连接已跳过 HTTPS 证书校验',
+                  style: TextStyle(color: AppColors.danger, fontSize: 12),
+                ),
+              ),
+            const Divider(height: 1),
+            _moduleSyncRow(
+              '剪切板',
+              SyncModuleState.participating,
+              controller.syncService.lastResult?.clipboard,
+            ),
+            for (final kind in DeskKind.values) ...[
+              const Divider(height: 1),
+              _moduleSyncRow(
+                kind.label,
+                controller.desktopNotes?.syncState(kind) ??
+                    SyncModuleState.unavailable,
+                kind == DeskKind.note
+                    ? controller.syncService.lastResult?.notes
+                    : controller.syncService.lastResult?.todos,
+              ),
+            ],
+            const Padding(
+              padding: EdgeInsets.only(top: 8),
+              child: Text(
+                '导入统计本次合入的变更，导出快照统计写入仓库的完整记录数（含删除状态）。',
+                style: TextStyle(color: AppColors.muted, fontSize: 12),
+              ),
             ),
             if (controller.syncService.config != null) ...[
               const Divider(height: 1),
@@ -1357,9 +1512,15 @@ class _SyncPage extends StatelessWidget {
                     ),
                     TextButton(
                       onPressed: () async {
-                        await controller.disconnectSync();
-                        if (context.mounted) {
-                          showMessage(context, '已断开云同步并移除本机令牌');
+                        try {
+                          await controller.disconnectSync();
+                          if (context.mounted) {
+                            showMessage(context, '已断开云同步并移除本机凭据');
+                          }
+                        } catch (_) {
+                          if (context.mounted) {
+                            showMessage(context, '未能完成断开操作，请检查本机数据目录。');
+                          }
                         }
                       },
                       child: const Text('断开连接'),
@@ -1379,7 +1540,7 @@ class _SyncPage extends StatelessWidget {
                                   result == null
                                       ? controller.syncService.lastError ??
                                             '同步失败'
-                                      : '同步完成：导入 ${result.imported} 项，导出 ${result.exported} 项',
+                                      : '同步完成\n${result.description}',
                                 );
                               }
                             },
@@ -1404,6 +1565,11 @@ class _SyncPage extends StatelessWidget {
           ],
         ),
       ),
+      const SizedBox(height: 14),
+      _SyncHistoryCard(
+        entries: controller.syncService.history,
+        unavailable: controller.syncService.historyUnavailable,
+      ),
     ],
   );
 
@@ -1415,6 +1581,40 @@ class _SyncPage extends StatelessWidget {
       return '上次同步：${relativeTime(sync.lastSyncedAt!)}';
     }
     return '${_providerName(sync.config!.provider)} · ${sync.config!.branch} 分支';
+  }
+
+  Widget _moduleSyncRow(
+    String name,
+    SyncModuleState state,
+    SyncModuleResult? previous,
+  ) {
+    final cloud = controller.syncService.config;
+    var label = state.label;
+    var detail = switch (state) {
+      SyncModuleState.featureDisabled => '在设置 → 便签与待办中启用$name。',
+      SyncModuleState.syncDisabled => '在设置 → 便签与待办中开启“同步$name”。',
+      SyncModuleState.unavailable => '当前平台未提供此模块。',
+      SyncModuleState.participating => '本机每次云同步都会导入并导出$name。',
+    };
+    if (state == SyncModuleState.participating && cloud == null) {
+      label = '未配置仓库';
+      detail = '保存上方仓库连接后，$name将参与同步。';
+    } else if (state == SyncModuleState.participating &&
+        cloud?.enabled == false) {
+      label = '云同步已暂停';
+      detail = '开启下方云同步开关后，$name将参与同步。';
+    }
+    if (previous != null) detail += '\n上次完成 · ${previous.description}';
+    return _SettingRow(
+      title: '$name同步',
+      subtitle: detail,
+      trailing: StatusPill(
+        label: label,
+        color: state == SyncModuleState.participating && cloud?.enabled == true
+            ? AppColors.success
+            : AppColors.muted,
+      ),
+    );
   }
 
   StatusPill _syncStatusPill() => switch (controller.syncService.status) {
@@ -1438,6 +1638,84 @@ class _SyncPage extends StatelessWidget {
       icon: Icons.schedule_rounded,
     ),
   };
+}
+
+class _SyncHistoryCard extends StatelessWidget {
+  const _SyncHistoryCard({required this.entries, required this.unavailable});
+
+  final List<SyncHistoryEntry> entries;
+  final bool unavailable;
+
+  @override
+  Widget build(BuildContext context) => AppCard(
+    child: Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const _SectionTitle(title: '同步记录', subtitle: '本机保留最近 7 天'),
+        const SizedBox(height: 10),
+        if (unavailable)
+          const Padding(
+            padding: EdgeInsets.only(bottom: 8),
+            child: Text('同步记录暂时无法保存或读取，请检查数据目录。'),
+          ),
+        if (entries.isEmpty)
+          const Text('暂无同步记录', style: TextStyle(color: AppColors.muted))
+        else
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxHeight: 240),
+            child: ListView.separated(
+              primary: false,
+              shrinkWrap: true,
+              itemCount: entries.length,
+              separatorBuilder: (_, _) => const Divider(height: 1),
+              itemBuilder: (context, index) {
+                final entry = entries[index];
+                final localizations = MaterialLocalizations.of(context);
+                final time = entry.completedAt.toLocal();
+                final date = localizations.formatCompactDate(time);
+                final clock = localizations.formatTimeOfDay(
+                  TimeOfDay.fromDateTime(time),
+                  alwaysUse24HourFormat: true,
+                );
+                return Padding(
+                  padding: const EdgeInsets.symmetric(
+                    vertical: 8,
+                    horizontal: 2,
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Wrap(
+                        spacing: 10,
+                        runSpacing: 4,
+                        crossAxisAlignment: WrapCrossAlignment.center,
+                        children: [
+                          StatusPill(
+                            label: entry.succeeded ? '成功' : '失败',
+                            color: entry.succeeded
+                                ? AppColors.success
+                                : AppColors.danger,
+                          ),
+                          Text('$date $clock · ${entry.trigger.label}'),
+                        ],
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        entry.details,
+                        style: const TextStyle(
+                          color: AppColors.muted,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ],
+                  ),
+                );
+              },
+            ),
+          ),
+      ],
+    ),
+  );
 }
 
 class _LocalFirstBanner extends StatelessWidget {
@@ -1597,6 +1875,17 @@ class _DevicesPage extends StatelessWidget {
                             ),
                             const SizedBox(height: 3),
                             Text(
+                              device.shortMachineId == null
+                                  ? device.isCurrent
+                                        ? '设备编号不可用'
+                                        : '旧记录 · 无设备编号'
+                                  : '设备编号 ${device.shortMachineId}',
+                              style: const TextStyle(
+                                fontSize: 10.5,
+                                color: AppColors.muted,
+                              ),
+                            ),
+                            Text(
                               '${device.platform} · 最近同步 ${relativeTime(device.lastSeenAt)}',
                               style: const TextStyle(
                                 fontSize: 10.5,
@@ -1627,7 +1916,7 @@ class _PrivacyPage extends StatelessWidget {
       context: context,
       builder: (context) => AlertDialog(
         title: const Text('清空全部历史？'),
-        content: const Text('全部记录（包括收藏）会被软删除，以便未来同步删除状态。'),
+        content: const Text('全部历史中的所有记录都会移除，已收藏的内容仍可在收藏中查看。历史删除状态会同步到其他设备。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -1643,7 +1932,7 @@ class _PrivacyPage extends StatelessWidget {
     );
     if (confirmed == true) {
       await controller.clearHistory();
-      if (context.mounted) showMessage(context, '已清空全部历史');
+      if (context.mounted) showMessage(context, '已清空全部历史，收藏内容已保留');
     }
   }
 
@@ -1677,7 +1966,7 @@ class _PrivacyPage extends StatelessWidget {
             const Divider(height: 1),
             _SettingRow(
               title: '清空历史',
-              subtitle: '清空全部记录，并为未来同步保留删除状态',
+              subtitle: '移除全部历史中的记录，收藏列表保留',
               trailing: OutlinedButton.icon(
                 style: OutlinedButton.styleFrom(
                   foregroundColor: AppColors.danger,
