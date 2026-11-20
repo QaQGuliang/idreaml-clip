@@ -37,6 +37,15 @@ void main() {
     m.dispose();
   });
 
+  test('新建截图与长图编辑默认使用选择工具', () {
+    final model = ScreenshotModel(const Size(100, 100));
+    expect(model.tool, ScreenshotTool.select);
+    final long = ScreenshotModel.forLongImage(const Size(100, 300), model);
+    expect(long.tool, ScreenshotTool.select);
+    model.dispose();
+    long.dispose();
+  });
+
   test('一次拖动只有一个撤销项，新的修改清空重做分支', () {
     final m = ScreenshotModel(const Size(100, 100));
     m.selectAll();

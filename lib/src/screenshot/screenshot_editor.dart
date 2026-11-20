@@ -11,6 +11,7 @@ import 'arrow_style_picker.dart';
 import 'screenshot_color_picker.dart';
 import 'screenshot_model.dart';
 import 'screenshot_renderer.dart';
+import 'screenshot_toolbar_placement.dart';
 import 'scroll_capture_controller.dart';
 
 part 'long_editor_toolbar.dart';
@@ -142,6 +143,7 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
   final _canvasKey = GlobalKey();
   final _toolbarKey = GlobalKey();
   Offset? _toolbarOffset;
+  Rect? _toolbarSelection;
   bool _draggingToolbar = false;
   int? _textId;
   Offset? _textOrigin;
@@ -364,7 +366,12 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
   void _changed() {
     if (!mounted) return;
     final selection = _model!.selection;
-    if (!_monitors.contains(selection)) _toolbarOffset = null;
+    // A manual placement belongs to the selection it was dragged from. Any
+    // reselect, resize, undo or full-screen switch restores automatic layout.
+    if (selection != _toolbarSelection) {
+      _toolbarSelection = selection;
+      _toolbarOffset = null;
+    }
     if (_error == _screenGapWarning &&
         (selection == null || !_hasMonitorGap(selection))) {
       _error = null;
@@ -509,7 +516,7 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
     final toolbar =
         _toolbarKey.currentContext!.findRenderObject()! as RenderBox;
     setState(() {
-      _toolbarOffset = _keepToolbarOnScreen(
+      _toolbarOffset = clampToolbarToScreen(
         _toolbarOffset! + details.delta,
         _scaledRect(_toolsMonitor).size,
         toolbar.size,
@@ -1153,7 +1160,6 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
           final toolsArea = _scaledRect(_toolsMonitor).intersect(viewport);
           final pickerArea = _scaledRect(_monitorAt(_pointer) ?? _toolsMonitor)
               .intersect(viewport);
-          final fullScreen = selected == _toolsMonitor;
           final textObject = _textId == null
               ? null
               : m.annotations.firstWhere((a) => a.id == _textId);
@@ -1247,15 +1253,14 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
                     selection: rect
                         ?.intersect(toolsArea)
                         .shift(-toolsArea.topLeft),
-                    fullScreen: fullScreen,
-                    draggedOffset: fullScreen ? _toolbarOffset : null,
+                    draggedOffset: _toolbarOffset,
                   ),
                   children: [
                     LayoutId(
                       id: _ToolbarPart.tools,
                       child: SizedBox(
                         key: const ValueKey('screenshot-toolbar'),
-                        child: _toolbar(m, selected != null, fullScreen),
+                        child: _toolbar(m, selected != null),
                       ),
                     ),
                     if (rect != null)
@@ -1993,8 +1998,9 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
         disabledForegroundColor: light
             ? const Color(0xFF666977)
             : _overlayDisabledToolColor,
-        minimumSize: const Size(32, 32),
-        padding: const EdgeInsets.symmetric(horizontal: 6),
+        minimumSize: const Size(30, 30),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+        padding: const EdgeInsets.symmetric(horizontal: 4),
         textStyle: Theme.of(context).textTheme.labelLarge
             ?.copyWith(fontSize: 13, fontWeight: FontWeight.w600),
       ),
@@ -2031,7 +2037,33 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
     ),
   );
 
-  Widget _toolbar(ScreenshotModel m, bool selected, bool fullScreen) {
+  Widget _styleMenu(ScreenshotModel m) => SizedBox.square(
+    dimension: 30,
+    child: PopupMenuButton<void>(
+      key: const ValueKey('screenshot-style-menu'),
+      tooltip: '标注样式',
+      enabled: _editable,
+      position: PopupMenuPosition.under,
+      padding: EdgeInsets.zero,
+      color: const Color(0xF21F2027),
+      surfaceTintColor: Colors.transparent,
+      elevation: 8,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+      constraints: const BoxConstraints(maxWidth: 320),
+      icon: const Icon(Icons.tune, size: 19),
+      itemBuilder: (_) => [
+        PopupMenuItem<void>(
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+          child: ListenableBuilder(
+            listenable: m,
+            builder: (_, _) => _styleControls(m),
+          ),
+        ),
+      ],
+    ),
+  );
+
+  Widget _toolbar(ScreenshotModel m, bool selected) {
     Widget button(
       IconData icon,
       String tooltip,
@@ -2045,153 +2077,123 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
         foregroundColor: _overlayToolColor,
         disabledForegroundColor: _overlayDisabledToolColor,
         backgroundColor: active ? const Color(0xFF6D28D9) : null,
-        minimumSize: const Size(32, 32),
+        minimumSize: const Size(30, 30),
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-        padding: const EdgeInsets.all(6),
+        padding: const EdgeInsets.all(5),
       ),
       icon: glyph ?? Icon(icon, size: 19),
     );
+    final styleTool = m.selected?.tool ?? m.tool;
     return Material(
       key: _toolbarKey,
       color: const Color(0xF21F2027),
       elevation: 8,
       borderRadius: BorderRadius.circular(10),
-      child: SingleChildScrollView(
-        child: Stack(
-          children: [
-            // Only the background accepts drags. Buttons and style controls
-            // above it keep their own gestures, including long presses.
-            if (fullScreen)
-              Positioned.fill(
-                child: MouseRegion(
-                  cursor: _busy
-                      ? SystemMouseCursors.basic
-                      : _draggingToolbar
-                      ? SystemMouseCursors.grabbing
-                      : SystemMouseCursors.grab,
-                  child: GestureDetector(
-                    behavior: HitTestBehavior.opaque,
-                    onPanStart: _busy ? null : _startToolbarDrag,
-                    onPanUpdate: _busy ? null : _moveToolbar,
-                    onPanEnd: (_) => _endToolbarDrag(),
-                    onPanCancel: _endToolbarDrag,
-                  ),
-                ),
+      child: Stack(
+        children: [
+          // Only the background accepts drags. Buttons and popup anchors above
+          // it keep their own gestures, including long presses.
+          Positioned.fill(
+            child: MouseRegion(
+              cursor: _busy
+                  ? SystemMouseCursors.basic
+                  : _draggingToolbar
+                  ? SystemMouseCursors.grabbing
+                  : SystemMouseCursors.grab,
+              child: GestureDetector(
+                behavior: HitTestBehavior.opaque,
+                onPanStart: _busy ? null : _startToolbarDrag,
+                onPanUpdate: _busy ? null : _moveToolbar,
+                onPanEnd: (_) => _endToolbarDrag(),
+                onPanCancel: _endToolbarDrag,
               ),
-            Padding(
-              padding: EdgeInsets.symmetric(
-                horizontal: fullScreen ? 30 : 8,
-                vertical: 6,
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
+            ),
+          ),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
+            child: SingleChildScrollView(
+              child: Wrap(
+                spacing: 2,
+                runSpacing: 2,
+                alignment: WrapAlignment.center,
+                crossAxisAlignment: WrapCrossAlignment.center,
                 children: [
-                  Wrap(
-                    spacing: 2,
-                    runSpacing: 2,
-                    alignment: WrapAlignment.center,
-                    crossAxisAlignment: WrapCrossAlignment.center,
-                    children: [
-                      button(
-                        Icons.help_outline,
-                        '截图帮助',
-                        _showScreenshotHelp,
-                        glyph: _helpGlyph(light: false),
-                      ),
-                      if (selected)
-                        for (final command in _annotationCommands(m)) ...[
-                          button(
-                            command.icon,
-                            command.label,
-                            command.run,
-                            active: command.active,
-                          ),
-                          if (command.tool == ScreenshotTool.arrow &&
-                              (m.selected?.tool ?? m.tool) ==
-                                  ScreenshotTool.arrow)
-                            _arrowStylePicker(m),
-                        ],
-                      button(
-                        Icons.fullscreen,
-                        '当前屏幕全屏',
-                        !_editable
-                            ? null
-                            : () {
-                                _commitText();
-                                m.selectAll(_toolsMonitor);
-                              },
-                      ),
-                      button(
-                        Icons.crop_free,
-                        '重新框选',
-                        selected && _editable ? _reselect : null,
-                      ),
-                      button(
-                        Icons.swipe_down_alt,
-                        '长截图',
-                        selected && _editable ? _startLongScreenshot : null,
-                      ),
-                      for (final command in _historyCommands(m))
-                        button(command.icon, command.label, command.run),
-                      button(
-                        Icons.colorize,
-                        '取色器（F2）',
-                        _canPickColor ? _togglePicker : null,
-                        active: _canPickColor && _showColorPicker,
-                      ),
-                      _pinButton(enabled: selected && _editable, light: false),
-                      button(
-                        Icons.save_alt,
-                        '另存为并完成',
-                        selected && !_locked
-                            ? () => _finish(action: _ScreenshotAction.saveAs)
-                            : null,
-                      ),
-                      button(Icons.close, '取消（Esc）', _close),
-                      button(
-                        Icons.check,
-                        _locked ? '重试完成' : '完成（Enter）',
-                        selected ? _finish : null,
-                        active: true,
-                      ),
-                    ],
+                  button(
+                    Icons.help_outline,
+                    '截图帮助',
+                    _showScreenshotHelp,
+                    glyph: _helpGlyph(light: false),
                   ),
-                  if (selected && m.tool != ScreenshotTool.select ||
-                      m.selected != null)
-                    IgnorePointer(
-                      ignoring: !_editable,
-                      child: _styleControls(m),
-                    ),
                   if (selected)
-                    Padding(
-                      padding: const EdgeInsets.only(top: 3),
-                      child: Text(
-                        '已选区域 ${m.selection!.width.toInt()} × ${m.selection!.height.toInt()} · '
-                        '${(m.selected?.tool ?? m.tool).label}'
-                        '${switch (m.selected?.tool ?? m.tool) {
-                          ScreenshotTool.mosaic => ' · 1 / 2 调块大小',
-                          ScreenshotTool.text || ScreenshotTool.number => ' · 1 / 2 调字号',
-                          final tool when tool.usesWidth => ' · 1 / 2 调粗细',
-                          _ => '',
-                        }}',
-                        style: const TextStyle(
-                          fontSize: 10,
-                          color: _overlayDisabledToolColor,
-                        ),
+                    for (final command in _annotationCommands(m)) ...[
+                      button(
+                        command.icon,
+                        command.label,
+                        command.run,
+                        active: command.active,
                       ),
-                    ),
+                      if (command.tool == ScreenshotTool.arrow &&
+                          (m.selected?.tool ?? m.tool) == ScreenshotTool.arrow)
+                        _arrowStylePicker(m),
+                    ],
+                  // Colors, width and font size live in a popup anchored to
+                  // this button so the bar stays one row by default.
+                  if (styleTool != ScreenshotTool.select) _styleMenu(m),
+                  button(
+                    Icons.fullscreen,
+                    '当前屏幕全屏',
+                    !_editable
+                        ? null
+                        : () {
+                            _commitText();
+                            m.selectAll(_toolsMonitor);
+                          },
+                  ),
+                  button(
+                    Icons.crop_free,
+                    '重新框选',
+                    selected && _editable ? _reselect : null,
+                  ),
+                  button(
+                    Icons.swipe_down_alt,
+                    '长截图',
+                    selected && _editable ? _startLongScreenshot : null,
+                  ),
+                  for (final command in _historyCommands(m))
+                    button(command.icon, command.label, command.run),
+                  button(
+                    Icons.colorize,
+                    '取色器（F2）',
+                    _canPickColor ? _togglePicker : null,
+                    active: _canPickColor && _showColorPicker,
+                  ),
+                  _pinButton(enabled: selected && _editable, light: false),
+                  button(
+                    Icons.save_alt,
+                    '另存为并完成',
+                    selected && !_locked
+                        ? () => _finish(action: _ScreenshotAction.saveAs)
+                        : null,
+                  ),
+                  button(Icons.close, '取消（Esc）', _close),
+                  button(
+                    Icons.check,
+                    _locked ? '重试完成' : '完成（Enter）',
+                    selected ? _finish : null,
+                    active: true,
+                  ),
                 ],
               ),
             ),
-            if (_busy)
-              const Positioned(
-                left: 30,
-                right: 30,
-                bottom: 1,
-                child: LinearProgressIndicator(minHeight: 2),
-              ),
-          ],
-        ),
+          ),
+          if (_busy)
+            const Positioned(
+              left: 8,
+              right: 8,
+              bottom: 1,
+              child: LinearProgressIndicator(minHeight: 2),
+            ),
+        ],
       ),
     );
   }
@@ -2220,20 +2222,16 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
 
 enum _ToolbarPart { tools, dimensions }
 
-Offset _keepToolbarOnScreen(Offset offset, Size screen, Size toolbar) => Offset(
-  offset.dx.clamp(8.0, math.max(8.0, screen.width - toolbar.width - 8)),
-  offset.dy.clamp(8.0, math.max(8.0, screen.height - toolbar.height - 8)),
-);
+/// Two button rows plus padding: narrow screens wrap, never stack a third row.
+const double _toolbarMaxHeight = 96;
 
 class _ScreenshotToolbarLayout extends MultiChildLayoutDelegate {
   _ScreenshotToolbarLayout({
     required this.selection,
-    required this.fullScreen,
     required this.draggedOffset,
   });
 
   final Rect? selection;
-  final bool fullScreen;
   final Offset? draggedOffset;
 
   @override
@@ -2244,40 +2242,24 @@ class _ScreenshotToolbarLayout extends MultiChildLayoutDelegate {
       _ToolbarPart.tools,
       BoxConstraints(
         maxWidth: width,
-        maxHeight: math.max(0.0, size.height - 16),
+        maxHeight: math.min(math.max(0.0, size.height - 16), _toolbarMaxHeight),
       ),
     );
     final rect = selection;
-    final Offset position;
-    if (rect == null || fullScreen) {
-      position = _keepToolbarOnScreen(
-        draggedOffset ?? const Offset(8, 8),
-        size,
-        toolbar,
-      );
-    } else {
-      // Use the measured height: styles and wrapped buttons change it.
-      final double top;
-      if (rect.bottom + toolbar.height <= size.height) {
-        top = rect.bottom;
-      } else if (rect.top >= toolbar.height) {
-        top = rect.top - toolbar.height;
-      } else {
-        // When neither outer edge has room, attach inside the bottom edge.
-        top = (rect.bottom - toolbar.height).clamp(
-          0.0,
-          size.height - toolbar.height,
-        );
-      }
-      position = Offset(rect.left.clamp(0.0, size.width - toolbar.width), top);
-    }
+    final placement = placeScreenshotToolbar(
+      screen: size,
+      toolbar: toolbar,
+      selection: rect,
+      dragOffset: draggedOffset,
+    );
+    final position = placement.offset;
     positionChild(_ToolbarPart.tools, position);
     if (hasChild(_ToolbarPart.dimensions)) {
       final label = layoutChild(
         _ToolbarPart.dimensions,
         BoxConstraints.loose(size),
       );
-      final left = rect!.left.clamp(0.0, size.width - label.width);
+      var left = rect!.left.clamp(0.0, size.width - label.width);
       var top = (rect.top - label.height - 4).clamp(
         0.0,
         size.height - label.height,
@@ -2290,6 +2272,17 @@ class _ScreenshotToolbarLayout extends MultiChildLayoutDelegate {
                     : position.dy + toolbar.height + 4)
                 .clamp(0.0, size.height - label.height);
       }
+      // A toolbar beside or below the selection leaves no vertical gap there.
+      if ((Offset(left, top) & label).overlaps(position & toolbar)) {
+        final beside = position.dx >= label.width + 4
+            ? position.dx - label.width - 4
+            : position.dx + toolbar.width + 4;
+        left = beside.clamp(0.0, size.width - label.width);
+        top = (rect.top - label.height - 4).clamp(
+          0.0,
+          size.height - label.height,
+        );
+      }
       positionChild(_ToolbarPart.dimensions, Offset(left, top));
     }
   }
@@ -2297,7 +2290,6 @@ class _ScreenshotToolbarLayout extends MultiChildLayoutDelegate {
   @override
   bool shouldRelayout(_ScreenshotToolbarLayout oldDelegate) =>
       oldDelegate.selection != selection ||
-      oldDelegate.fullScreen != fullScreen ||
       oldDelegate.draggedOffset != draggedOffset;
 }
 

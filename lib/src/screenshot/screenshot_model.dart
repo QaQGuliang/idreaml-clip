@@ -221,7 +221,9 @@ class ScreenshotModel extends ChangeNotifier {
   final Size size;
   Rect? selection;
   List<ScreenshotAnnotation> annotations = [];
-  ScreenshotTool tool = ScreenshotTool.rectangle;
+  // Open on the selection tool so the first click adjusts the captured region
+  // instead of starting a new rectangle annotation.
+  ScreenshotTool tool = ScreenshotTool.select;
   int? selectedId;
   int nextId = 1;
   int nextNumber = 1;
