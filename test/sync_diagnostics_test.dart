@@ -379,7 +379,7 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
-  testWidgets('云同步页面底部显示近期成功和失败的记录', (tester) async {
+  testWidgets('同步记录卡片默认折叠，显示数量与最近失败状态并可进入明细页返回', (tester) async {
     await tester.runAsync(() async {
       await sync.syncNow(trigger: SyncTrigger.scheduled);
       now = now.add(const Duration(minutes: 1));
@@ -405,11 +405,62 @@ void main() {
     );
     await tester.pumpAndSettle();
     expect(find.text('本机保留最近 7 天'), findsOneWidget);
-    expect(find.text('成功'), findsOneWidget);
-    expect(find.text('失败'), findsOneWidget);
-    expect(find.textContaining('12:01 · 手动同步'), findsOneWidget);
-    expect(find.textContaining('12:00 · 定时同步'), findsOneWidget);
-    expect(find.textContaining('上传到远端失败'), findsWidgets);
+    final count = find.byKey(const ValueKey('sync-history-count'));
+    expect(count, findsOneWidget);
+    expect(tester.widget<Text>(count).data, '2 条');
+    expect(find.text('最近同步失败'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('sync-history-failed-dot')),
+      findsOneWidget,
+    );
+    expect(find.textContaining('12:01'), findsOneWidget);
+    // 折叠状态不渲染明细列表。
+    expect(find.text('12:01 · 手动同步'), findsNothing);
+    expect(find.text('12:00 · 定时同步'), findsNothing);
+    expect(find.text('成功'), findsNothing);
+    expect(find.text('失败'), findsNothing);
+
+    await tester.tap(find.byKey(const ValueKey('sync-history-view-all')));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(AppBar, '同步记录'), findsOneWidget);
+    expect(find.text('成功'), findsWidgets);
+    expect(find.text('失败'), findsWidgets);
+    expect(find.textContaining('上传到远端失败'), findsOneWidget);
+    expect(find.text('12:01 · 手动同步'), findsOneWidget);
+    expect(find.text('12:00 · 定时同步'), findsOneWidget);
+    expect(find.text('2 条'), findsNWidgets(2));
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(AppBar, '同步记录'), findsNothing);
+    expect(find.byKey(const ValueKey('sync-history-count')), findsOneWidget);
+    expect(find.text('最近同步失败'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('无同步记录时保留提示并禁用查看全部', (tester) async {
+    await tester.runAsync(() => controller.setPage(AppPage.sync));
+    tester.view.devicePixelRatio = 1;
+    tester.view.physicalSize = const Size(900, 620);
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await tester.pumpWidget(
+      IdreamlClipApp(
+        controller: controller,
+        desktopService: RecordingDesktopService(controller),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(
+      find.text('同步记录'),
+      120,
+      scrollable: _syncPageScrollable(),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('暂无同步记录'), findsOneWidget);
+    expect(find.byKey(const ValueKey('sync-history-count')), findsNothing);
+    final viewAll = find.byKey(const ValueKey('sync-history-view-all'));
+    expect(tester.widget<TextButton>(viewAll).onPressed, isNull);
     expect(tester.takeException(), isNull);
   });
 

@@ -27,6 +27,7 @@ import 'json_split_preview.dart';
 import 'release_info_card.dart';
 import 'storage_directory_card.dart';
 import 'sync_archive_browser.dart';
+import 'sync_history_page.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({
@@ -2065,90 +2066,106 @@ class _SyncHistoryCard extends StatelessWidget {
   final List<SyncHistoryEntry> entries;
   final bool unavailable;
 
+  bool get _canOpen => entries.isNotEmpty && !unavailable;
+
+  void _openHistory(BuildContext context) {
+    if (!_canOpen) return;
+    Navigator.of(context, rootNavigator: true).push(
+      MaterialPageRoute<void>(
+        builder: (_) => SyncHistoryPage(
+          entries: List<SyncHistoryEntry>.of(entries),
+          unavailable: unavailable,
+        ),
+      ),
+    );
+  }
+
   @override
-  Widget build(BuildContext context) => AppCard(
-    child: Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Row(
-          children: [
-            const Expanded(
-              child: _SectionTitle(title: '同步记录', subtitle: '本机保留最近 7 天'),
+  Widget build(BuildContext context) {
+    final latest = entries.isEmpty ? null : entries.first;
+    return AppCard(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Expanded(
+                child: _SectionTitle(title: '同步记录', subtitle: '本机保留最近 7 天'),
+              ),
+              const SizedBox(width: 8),
+              TextButton.icon(
+                key: const ValueKey('sync-history-view-all'),
+                onPressed: _canOpen ? () => _openHistory(context) : null,
+                iconAlignment: IconAlignment.end,
+                icon: const Icon(Icons.chevron_right_rounded, size: 16),
+                label: const Text('查看全部'),
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          if (unavailable)
+            const Text(
+              '同步记录暂时无法保存或读取，请检查数据目录。',
+              style: TextStyle(color: AppColors.muted),
+            )
+          else if (latest == null)
+            const Text('暂无同步记录', style: TextStyle(color: AppColors.muted))
+          else ...[
+            Row(
+              children: [
+                Text(
+                  '${entries.length} 条',
+                  key: const ValueKey('sync-history-count'),
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w800,
+                    fontSize: 15,
+                  ),
+                ),
+                const SizedBox(width: 10),
+                if (!latest.succeeded) ...[
+                  Container(
+                    key: const ValueKey('sync-history-failed-dot'),
+                    width: 8,
+                    height: 8,
+                    decoration: const BoxDecoration(
+                      color: AppColors.danger,
+                      shape: BoxShape.circle,
+                    ),
+                  ),
+                  const SizedBox(width: 6),
+                ],
+                StatusPill(
+                  label: latest.succeeded ? '最近同步成功' : '最近同步失败',
+                  color: latest.succeeded
+                      ? AppColors.success
+                      : AppColors.danger,
+                  icon: latest.succeeded
+                      ? Icons.cloud_done_outlined
+                      : Icons.error_outline_rounded,
+                ),
+              ],
             ),
+            const SizedBox(height: 6),
             Text(
-              '${entries.length} 条',
-              key: const ValueKey('sync-history-count'),
-              style: const TextStyle(fontSize: 11, color: AppColors.muted),
+              '最近同步 · ${_historyTime(context, latest.completedAt)}',
+              style: Theme.of(context).textTheme.bodySmall,
             ),
           ],
-        ),
-        const SizedBox(height: 10),
-        if (unavailable)
-          const Padding(
-            padding: EdgeInsets.only(bottom: 8),
-            child: Text('同步记录暂时无法保存或读取，请检查数据目录。'),
-          ),
-        if (entries.isEmpty)
-          const Text(
-            '完成第一次同步后，记录会显示在这里。',
-            style: TextStyle(color: AppColors.muted),
-          )
-        else
-          ConstrainedBox(
-            constraints: const BoxConstraints(maxHeight: 240),
-            child: ListView.separated(
-              primary: false,
-              shrinkWrap: true,
-              itemCount: entries.length,
-              separatorBuilder: (_, _) => const Divider(height: 1),
-              itemBuilder: (context, index) {
-                final entry = entries[index];
-                final localizations = MaterialLocalizations.of(context);
-                final time = entry.completedAt.toLocal();
-                final date = localizations.formatCompactDate(time);
-                final clock = localizations.formatTimeOfDay(
-                  TimeOfDay.fromDateTime(time),
-                  alwaysUse24HourFormat: true,
-                );
-                return Padding(
-                  padding: const EdgeInsets.symmetric(
-                    vertical: 8,
-                    horizontal: 2,
-                  ),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Wrap(
-                        spacing: 10,
-                        runSpacing: 4,
-                        crossAxisAlignment: WrapCrossAlignment.center,
-                        children: [
-                          StatusPill(
-                            label: entry.succeeded ? '成功' : '失败',
-                            color: entry.succeeded
-                                ? AppColors.success
-                                : AppColors.danger,
-                          ),
-                          Text('$date $clock · ${entry.trigger.label}'),
-                        ],
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        entry.details,
-                        style: const TextStyle(
-                          color: AppColors.muted,
-                          fontSize: 12,
-                        ),
-                      ),
-                    ],
-                  ),
-                );
-              },
-            ),
-          ),
-      ],
-    ),
-  );
+        ],
+      ),
+    );
+  }
+
+  String _historyTime(BuildContext context, DateTime value) {
+    final local = value.toLocal();
+    final date = MaterialLocalizations.of(context).formatCompactDate(local);
+    final clock = MaterialLocalizations.of(context).formatTimeOfDay(
+      TimeOfDay.fromDateTime(local),
+      alwaysUse24HourFormat: true,
+    );
+    return '$date $clock';
+  }
 }
 
 class _LocalFirstBanner extends StatelessWidget {
