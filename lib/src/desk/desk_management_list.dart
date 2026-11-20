@@ -5,6 +5,67 @@ import '../ui/common.dart';
 import 'desk_models.dart';
 import 'desktop_notes.dart';
 
+/// 待办的紧凑时间文案；未安排时间时返回 null。
+///
+/// 当天区间显示"今天 09:00–10:00"，跨天显示"11/21 09:00 – 11/22 10:00"，
+/// 只有结束时间的条目显示"截止 …"。
+String? deskScheduleLabel(DeskEntry entry, {DateTime? now}) {
+  final startAt = entry.startAt;
+  final endAt = entry.endAt;
+  if (startAt == null && endAt == null) return null;
+  final today = now ?? DateTime.now();
+  if (startAt != null && endAt != null) {
+    final start = DateTime.fromMillisecondsSinceEpoch(startAt);
+    final end = DateTime.fromMillisecondsSinceEpoch(endAt);
+    if (_sameCalendarDay(start, end)) {
+      return '${_scheduleDay(start, today)} ${_scheduleClock(start)}'
+          '–${_scheduleClock(end)}';
+    }
+    return '${_scheduleDay(start, today)} ${_scheduleClock(start)}'
+        ' – ${_scheduleDay(end, today)} ${_scheduleClock(end)}';
+  }
+  final value = DateTime.fromMillisecondsSinceEpoch(startAt ?? endAt!);
+  return '${startAt == null ? '截止 ' : ''}'
+      '${_scheduleDay(value, today)} ${_scheduleClock(value)}';
+}
+
+/// 未完成待办在结束时间（无则开始时间）已到时视为逾期。
+bool deskTodoOverdue(DeskEntry entry, {DateTime? now}) {
+  if (entry.done) return false;
+  final due = entry.endAt ?? entry.startAt;
+  if (due == null) return false;
+  return due <= (now ?? DateTime.now()).millisecondsSinceEpoch;
+}
+
+/// 绝对提醒与提前提醒都算"已设置提醒"。
+bool deskTodoReminded(DeskEntry entry) =>
+    entry.remindAt != null || entry.remindBeforeMinutes != null;
+
+bool _sameCalendarDay(DateTime a, DateTime b) =>
+    a.year == b.year && a.month == b.month && a.day == b.day;
+
+String _scheduleClock(DateTime value) =>
+    '${value.hour.toString().padLeft(2, '0')}:'
+    '${value.minute.toString().padLeft(2, '0')}';
+
+String _scheduleDay(DateTime value, DateTime now) {
+  // 用小时差换算天数，避开夏令时导致的一天不足 24 小时。
+  final days =
+      (DateTime(
+                value.year,
+                value.month,
+                value.day,
+              ).difference(DateTime(now.year, now.month, now.day)).inHours /
+              24)
+          .round();
+  if (days == 0) return '今天';
+  if (days == 1) return '明天';
+  if (days == -1) return '昨天';
+  return value.year == now.year
+      ? '${value.month}/${value.day}'
+      : '${value.year}/${value.month}/${value.day}';
+}
+
 /// A single paper-like list, matching the approved desktop module prototype.
 class DeskManagementList extends StatefulWidget {
   const DeskManagementList({
@@ -276,6 +337,9 @@ class _DeskManagementListState extends State<DeskManagementList> {
   Widget _entry(DeskEntry row, bool compact) {
     final conflict = widget.notes.versions(row.id).length > 1;
     final todo = widget.kind == DeskKind.todo;
+    final scheduleLabel = todo ? deskScheduleLabel(row) : null;
+    final overdue = todo && deskTodoOverdue(row);
+    final reminded = todo && deskTodoReminded(row);
     final typography = DeskEntryTypography.fromEntry(
       row,
       widget.notes.config(widget.kind),
@@ -372,6 +436,16 @@ class _DeskManagementListState extends State<DeskManagementList> {
                             key: ValueKey('desk-entry-meta-${row.id}'),
                             style: typography.metadataStyle,
                           ),
+                          if (scheduleLabel != null) ...[
+                            const SizedBox(height: 6),
+                            _schedule(
+                              row,
+                              scheduleLabel,
+                              typography,
+                              overdue: overdue,
+                              reminded: reminded,
+                            ),
+                          ],
                         ],
                       ),
                     ),
@@ -446,6 +520,49 @@ class _DeskManagementListState extends State<DeskManagementList> {
             ],
           ),
         ),
+      ],
+    );
+  }
+
+  /// 时间徽标：紧凑单行，窄栏自动换行，逾期用警示色并加"已逾期"。
+  Widget _schedule(
+    DeskEntry row,
+    String label,
+    DeskEntryTypography typography, {
+    required bool overdue,
+    required bool reminded,
+  }) {
+    final base = typography.metadataStyle;
+    final style = base.copyWith(
+      fontSize: (typography.size - 2).clamp(10.0, 30.0).toDouble(),
+      color: overdue ? AppColors.danger : base.color,
+      fontWeight: overdue ? FontWeight.w700 : FontWeight.w500,
+    );
+    return Wrap(
+      spacing: 5,
+      runSpacing: 3,
+      crossAxisAlignment: WrapCrossAlignment.center,
+      children: [
+        if (reminded)
+          Icon(
+            Icons.notifications_active_outlined,
+            key: ValueKey('desk-entry-reminder-${row.id}'),
+            size: 13,
+            color: style.color,
+          ),
+        Text(
+          label,
+          key: ValueKey('desk-entry-schedule-${row.id}'),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
+          style: style,
+        ),
+        if (overdue)
+          Text(
+            '已逾期',
+            key: ValueKey('desk-entry-overdue-${row.id}'),
+            style: style,
+          ),
       ],
     );
   }

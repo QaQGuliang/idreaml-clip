@@ -551,6 +551,43 @@ struct DesktopNotesHost::Impl {
         const auto minute=(value.wMinute<10 ? L"0" : L"")+std::to_wstring(value.wMinute);
         return std::to_wstring(value.wMonth)+L"月"+std::to_wstring(value.wDay)+L"日 · "+std::to_wstring(value.wHour)+L":"+minute;
       };
+      // 待办卡片的时间行：有开始/结束时间才绘制，逾期用错误色。
+      struct Schedule { std::wstring text; bool overdue=false; };
+      auto schedule=[&](const M& row) {
+        Schedule result;
+        const double start=N(row,"startAt",0), end=N(row,"endAt",0);
+        if (!(start>0) && !(end>0)) return result;
+        // 行 JSON 的数字可能是 int32/int64/double，统一按毫秒转本地时间。
+        auto local=[&](double milliseconds,SYSTEMTIME& out) {
+          if (!(milliseconds>0)) return false;
+          const ULONGLONG ticks=static_cast<ULONGLONG>(milliseconds)*10000ULL+116444736000000000ULL;
+          FILETIME utc{static_cast<DWORD>(ticks),static_cast<DWORD>(ticks>>32)}, value{};
+          if (!FileTimeToLocalFileTime(&utc,&value)) return false;
+          return FileTimeToSystemTime(&value,&out)!=FALSE;
+        };
+        auto clock=[&](const SYSTEMTIME& value) {
+          return std::to_wstring(value.wHour)+L":"
+            +((value.wMinute<10) ? L"0" : L"")+std::to_wstring(value.wMinute);
+        };
+        auto day=[&](const SYSTEMTIME& value) {
+          return std::to_wstring(value.wMonth)+L"/"+std::to_wstring(value.wDay);
+        };
+        SYSTEMTIME first{}, last{};
+        const bool has_start=local(start,first), has_end=local(end,last);
+        if (has_start && has_end) {
+          result.text = first.wYear==last.wYear && first.wMonth==last.wMonth && first.wDay==last.wDay
+            ? day(first)+L" "+clock(first)+L"–"+clock(last)
+            : day(first)+L" "+clock(first)+L" – "+day(last)+L" "+clock(last);
+        } else if (has_start) result.text=day(first)+L" "+clock(first);
+        else if (has_end) result.text=L"截止 "+day(last)+L" "+clock(last);
+        if (result.text.empty() || B(row,"done")) return result;
+        FILETIME now_file{}; GetSystemTimeAsFileTime(&now_file);
+        const ULONGLONG now_ticks=(static_cast<ULONGLONG>(now_file.dwHighDateTime)<<32)|now_file.dwLowDateTime;
+        const double now_ms=(static_cast<double>(now_ticks)-116444736000000000.0)/10000.0;
+        const double due=end>0 ? end : start;
+        result.overdue=due>0 && due<=now_ms;
+        return result;
+      };
       g.SetClip(RectF(0,content_top,width,std::max(0.0f,height-content_top)));
       float y=content_top-static_cast<float>(rail.scroll);
       for (const auto& row : rail.rows) {
@@ -569,7 +606,9 @@ struct DesktopNotesHost::Impl {
         const auto title_lines=heading_text.empty() ? std::vector<std::wstring>{} : lines(heading_text,*fonts.heading,text_width,2);
         const float title_height=is_todo || title_lines.empty() ? 0 : static_cast<float>(title_lines.size())*title_line+7;
         const float body_height=static_cast<float>(body_lines.size())*body_line;
-        const float h=is_todo ? 18+body_height+4+caption_line+18 : 18+caption_line+7+title_height+body_height+18;
+        const auto time_line=is_todo ? schedule(row) : Schedule{};
+        const float schedule_height=time_line.text.empty() ? 0 : caption_line+5;
+        const float h=is_todo ? 18+body_height+4+caption_line+schedule_height+18 : 18+caption_line+7+title_height+body_height+18;
         if (y+h>content_top && y<height) {
           card(RectF(inset,y,card_width,h));
           const auto clipped=g.Save();
@@ -595,6 +634,12 @@ struct DesktopNotesHost::Impl {
           if (is_todo) {
             const auto meta=conflict ? std::wstring(L"有同步冲突 · 点击查看") : date(N(row,"updated"));
             drawText(meta.c_str(),fonts.caption.get(),RectF(left,text_y+4,text_width,caption_line),&single,&muted);
+            if (!time_line.text.empty()) {
+              SolidBrush overdue(Color(255,216,68,97));
+              drawText(time_line.text.c_str(),fonts.caption.get(),
+                RectF(left,text_y+4+caption_line+5,text_width,caption_line),&single,
+                time_line.overdue ? &overdue : &muted);
+            }
           }
           if (conflict) g.FillEllipse(&accent,width-inset-14,y+12,5.0f,5.0f);
           g.Restore(clipped);

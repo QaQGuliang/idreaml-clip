@@ -43,7 +43,29 @@ class DesktopNotes extends ChangeNotifier {
     final ids = <String>{};
     final sorted = entries.where((e) => e.kind == kind && !e.deleted).toList()
       ..sort((a, b) => b.created.compareTo(a.created));
-    return sorted.where((e) => ids.add(e.id)).toList();
+    final values = sorted.where((e) => ids.add(e.id)).toList();
+    // 便签沿用建立时间倒序；待办把已安排开始时间的未完成事项按开始时间
+    // 升序前置，其余（含已完成）保持原有顺序，分组不受影响。
+    return kind == DeskKind.todo ? _scheduledFirst(values) : values;
+  }
+
+  /// 稳定排序：开始时间相同的条目保持原有相对顺序。
+  static List<DeskEntry> _scheduledFirst(List<DeskEntry> values) {
+    final scheduled = <({int index, DeskEntry entry})>[];
+    final rest = <DeskEntry>[];
+    for (var index = 0; index < values.length; index++) {
+      final entry = values[index];
+      if (!entry.done && entry.startAt != null) {
+        scheduled.add((index: index, entry: entry));
+      } else {
+        rest.add(entry);
+      }
+    }
+    scheduled.sort((a, b) {
+      final byStart = a.entry.startAt!.compareTo(b.entry.startAt!);
+      return byStart != 0 ? byStart : a.index.compareTo(b.index);
+    });
+    return [...scheduled.map((e) => e.entry), ...rest];
   }
 
   List<String> conflicts(DeskKind kind) => entries
