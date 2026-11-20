@@ -143,7 +143,6 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
   final _canvasKey = GlobalKey();
   final _toolbarKey = GlobalKey();
   Offset? _toolbarOffset;
-  Rect? _toolbarSelection;
   bool _draggingToolbar = false;
   int? _textId;
   Offset? _textOrigin;
@@ -366,12 +365,6 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
   void _changed() {
     if (!mounted) return;
     final selection = _model!.selection;
-    // A manual placement belongs to the selection it was dragged from. Any
-    // reselect, resize, undo or full-screen switch restores automatic layout.
-    if (selection != _toolbarSelection) {
-      _toolbarSelection = selection;
-      _toolbarOffset = null;
-    }
     if (_error == _screenGapWarning &&
         (selection == null || !_hasMonitorGap(selection))) {
       _error = null;

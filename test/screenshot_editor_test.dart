@@ -808,17 +808,17 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('全屏选区没有外侧空间时工具栏贴边成条，可拖走让出内容', (tester) async {
+  testWidgets('全屏默认在屏幕左下角，可拖走让出内容', (tester) async {
     await mount(tester);
     await tester.tap(find.byTooltip('当前屏幕全屏'));
     await tester.pump();
     final bar = tester.getRect(toolbar);
-    expect(bar.top, 8);
+    expect(bar.bottom, 592);
     expect(bar.height, lessThan(60));
     expect(bar.left, lessThan(200));
-    await dragToolbar(tester, const Offset(0, 200));
+    await dragToolbar(tester, const Offset(0, -200));
     final moved = tester.getRect(toolbar);
-    expect(moved.top, greaterThan(bar.top + 150));
+    expect(moved.top, lessThan(bar.top - 150));
     expect(moved.bottom, lessThanOrEqualTo(600));
     expect(tester.takeException(), isNull);
     await tester.pump(const Duration(milliseconds: 300));
@@ -1010,7 +1010,7 @@ void main() {
     await tester.tap(find.byTooltip('选择 / 调整'));
     await tester.pump();
     await tester.dragFrom(
-      const Offset(200, 310) / 1.5,
+      const Offset(200, 265) / 1.5,
       const Offset(840, 0) / 1.5,
     );
     await tester.pump();
@@ -1560,11 +1560,11 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('选区下方工具栏紧贴边框，非全屏也能从空白处拖动并保持位置', (tester) async {
+  testWidgets('工具栏默认贴选区左下角，非全屏也能从空白处拖动并保持位置', (tester) async {
     await mount(tester);
     await tester.tapAt(const Offset(100, 150));
     await tester.pump();
-    expect(tester.getRect(toolbar).top, 400);
+    expect(tester.getRect(toolbar).bottom, 400);
     final beforeDrag = tester.getRect(toolbar);
     // Pressing a button never drags the bar.
     await tester.drag(
@@ -1590,7 +1590,7 @@ void main() {
   });
 
   for (final pixelRatio in [1.0, 1.5, 2.0]) {
-    testWidgets('缩放 $pixelRatio 时上方工具栏按实际高度贴边，移动选区后跟随', (tester) async {
+    testWidgets('缩放 $pixelRatio 时工具栏贴选区左下角', (tester) async {
       await mount(tester);
       tester.view.devicePixelRatio = pixelRatio;
       await tester.pump();
@@ -1601,37 +1601,17 @@ void main() {
       await tester.pump();
       await tester.tap(find.byTooltip('选择 / 调整'));
       await tester.pump();
-      expect(tester.getRect(toolbar).bottom, closeTo(400 / pixelRatio, .01));
+      expect(tester.getRect(toolbar).bottom, closeTo(580 / pixelRatio, .01));
       await tester.tap(find.byTooltip('矩形'));
       await tester.pump();
       final styledToolbar = tester.getRect(toolbar);
-      // The style popup leaves the bar a single row; it stays off the canvas.
-      expect(
-        (styledToolbar.bottom - 400 / pixelRatio).abs() < .01 ||
-            (styledToolbar.top - 580 / pixelRatio).abs() < .01 ||
-            (styledToolbar.bottom - 580 / pixelRatio).abs() < .01,
-        isTrue,
-      );
+      // The style popup leaves the bar a single row at the selection corner.
+      expect(styledToolbar.bottom, closeTo(580 / pixelRatio, .01));
       expect(
         tester
             .getRect(find.text('350 × 180 px'))
             .overlaps(tester.getRect(toolbar)),
         isFalse,
-      );
-      await tester.tap(find.byTooltip('选择 / 调整'));
-      await tester.pump();
-      await tester.dragFrom(
-        Offset(260, 480) / pixelRatio,
-        Offset(0, -240) / pixelRatio,
-      );
-      await tester.pump();
-      final rect = tester.getRect(toolbar);
-      // At high scaling there may only be room inside the lower edge.
-      expect(
-        (rect.top - 340 / pixelRatio).abs() < .01 ||
-            (rect.bottom - 160 / pixelRatio).abs() < .01 ||
-            (rect.bottom - 340 / pixelRatio).abs() < .01,
-        isTrue,
       );
       expect(tester.takeException(), isNull);
       await tester.pump(const Duration(milliseconds: 300));
@@ -1639,7 +1619,7 @@ void main() {
     });
   }
 
-  testWidgets('全屏按住工具栏空白处可拖动且不越界，撤销全屏后恢复选区贴边', (tester) async {
+  testWidgets('全屏按住工具栏空白处可拖动且不越界，撤销全屏后保持手动位置', (tester) async {
     await mount(tester);
     tester.view.physicalSize = const Size(1200, 900);
     await tester.pump();
@@ -1649,23 +1629,27 @@ void main() {
     await tester.pump();
     final before = tester.getRect(toolbar);
     expect(find.byIcon(Icons.drag_indicator), findsNothing);
-    await dragToolbar(tester, const Offset(120, 160), hold: true);
+    await dragToolbar(tester, const Offset(120, -160), hold: true);
     await tester.pump();
     final moved = tester.getRect(toolbar);
     expect(moved.left, greaterThan(before.left + 80));
-    expect(moved.top, greaterThan(before.top + 120));
+    expect(moved.top, lessThan(before.top - 120));
     expect(find.text('800 × 600 px'), findsOneWidget);
     await dragToolbar(tester, const Offset(2000, 2000));
     await tester.pump();
     expect(tester.getRect(toolbar).right, lessThanOrEqualTo(1200));
     expect(tester.getRect(toolbar).bottom, lessThanOrEqualTo(900));
+    final dragged = tester.getRect(toolbar);
     await tester.tap(find.byTooltip('矩形'));
     await tester.pump();
     expect(tester.getRect(toolbar).bottom, lessThanOrEqualTo(900));
     await tester.tap(find.byTooltip('撤销（Ctrl + Z）'));
     await tester.pump();
     expect(find.text('400 × 300 px'), findsOneWidget);
-    expect(tester.getRect(toolbar).top, 600);
+    // A manual placement now survives selection changes; the bar stays pinned
+    // to the bottom-right edge even if undo adds a redo button (width change).
+    expect(tester.getRect(toolbar).bottom, dragged.bottom);
+    expect(tester.getRect(toolbar).right, dragged.right);
     expect(tester.takeException(), isNull);
     await tester.pump(const Duration(milliseconds: 300));
     await tester.pumpWidget(const SizedBox.shrink());
@@ -1681,12 +1665,12 @@ void main() {
     final blank = Offset(beforeDrag.left + 3, beforeDrag.center.dy);
     await tester.dragFrom(
       blank,
-      const Offset(0, 90),
+      const Offset(0, -90),
       kind: PointerDeviceKind.mouse,
     );
     await tester.pump();
     final moved = tester.getRect(toolbar);
-    expect(moved.top, greaterThan(beforeDrag.top + 50));
+    expect(moved.top, lessThan(beforeDrag.top - 50));
     expect(calls.where((c) => c.method == 'commit'), isEmpty);
 
     await tester.drag(
@@ -1719,18 +1703,18 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('接近整屏的非全屏选区放到选区上方，不压住框选内容', (tester) async {
+  testWidgets('接近整屏的非全屏选区默认放在选区左下角，允许重叠', (tester) async {
     await mount(tester);
     await tester.dragFrom(const Offset(20, 70), const Offset(750, 520));
     await tester.pump();
     await tester.tap(find.byTooltip('矩形'));
     await tester.pump();
     final bar = tester.getRect(toolbar);
-    expect(bar.bottom, 70);
-    expect(bar.top, greaterThanOrEqualTo(0));
+    expect(bar.bottom, 590);
+    expect(bar.left, greaterThanOrEqualTo(8));
     // A single row: the bar never grows into a stacked block near full screen.
     expect(bar.height, lessThan(60));
-    expect(bar.overlaps(const Rect.fromLTRB(20, 70, 770, 590)), isFalse);
+    expect(bar.overlaps(const Rect.fromLTRB(20, 70, 770, 590)), isTrue);
     // The size badge follows without hiding behind the bar.
     expect(tester.getRect(find.text('750 × 520 px')).overlaps(bar), isFalse);
     expect(tester.takeException(), isNull);

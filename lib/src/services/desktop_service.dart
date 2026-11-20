@@ -154,9 +154,7 @@ class DesktopService with TrayListener, WindowListener {
 
   /// 快捷面板与快速新增共用同一套浮层窗口样式，进入任一模式后只需配置一次。
   bool _popupWindowConfigured = false;
-  bool _mainVisible = false;
   bool _composerVisible = false;
-  bool _composerReturnMain = true;
   bool _composerRestore = true;
   bool _composerDismissing = false;
   int? _foregroundBeforeComposer;
@@ -183,7 +181,6 @@ class DesktopService with TrayListener, WindowListener {
       await windowManager.show();
       await windowManager.focus();
     });
-    _mainVisible = true;
   }
 
   Future<void> initialize() async {
@@ -289,7 +286,6 @@ class DesktopService with TrayListener, WindowListener {
       await _configurePopupWindow();
       await windowManager.setBounds(_toWindowCoordinates(bounds));
       await windowManager.show();
-      _mainVisible = false;
       if (initialScale != targetScale) {
         // Windows may adjust the bounds when changing DPI. A suspended
         // renderer must not hold the window transition lock indefinitely.
@@ -357,10 +353,7 @@ class DesktopService with TrayListener, WindowListener {
     _composerDismiss = null;
     try {
       final draft = await notes.draft(kind);
-      final display = _composerDisplay(
-        await _getDisplays(),
-        notes.config(kind),
-      );
+      final display = await _composerDisplay(kind, await _getDisplays());
       final scale = _displayScale(display);
       final area = _workArea(display);
       final logical = deskComposerSize(kind);
@@ -372,7 +365,6 @@ class DesktopService with TrayListener, WindowListener {
         width * scale,
         height * scale,
       );
-      _composerReturnMain = _mainVisible;
       _foregroundBeforeComposer = Platform.isWindows
           ? await _foregroundOtherThanSelf()
           : null;
@@ -393,6 +385,8 @@ class DesktopService with TrayListener, WindowListener {
       try {
         await notes.editing(true);
       } catch (_) {}
+      // 新增期间把对应桌面轨道临时置顶，但保持在其下方由快速新增窗口遮挡。
+      await _setRailRaised(kind, true);
       controller.enterComposerMode(kind, hotkey: hotkey, draft: draft);
       await windowManager.show();
       if (initialScale != scale) {
@@ -405,32 +399,43 @@ class DesktopService with TrayListener, WindowListener {
       await windowManager.setMinimumSize(_toWindowCoordinates(bounds).size);
       await windowManager.focus();
       _composerVisible = true;
+    } catch (_) {
+      // 打开失败时不能把轨道留在置顶状态。
+      await _setRailRaised(kind, false);
+      rethrow;
     } finally {
       _changingMode = false;
     }
   }
 
   /// 快速新增页面完成草稿处理后调用：隐藏浮层并回到进入前的窗口状态。
+  /// 保存、取消与失焦都不把主窗口带到前台，只恢复此前的应用焦点。
   Future<void> finishComposer(DeskComposerResult result) async {
     if (!_composerVisible) return;
     _composerVisible = false;
     _composerDismiss = null;
     _changingMode = true;
+    final kind = controller.composerKind;
     try {
       await windowManager.hide();
+      if (kind != null) await _setRailRaised(kind, false);
       controller.leaveComposerMode();
       try {
         await controller.desktopNotes?.editing(false);
       } catch (_) {}
       if (_exiting || !_composerRestore) return;
-      if (_composerReturnMain) {
-        await _applyMainWindow();
-      } else {
-        _restoreForegroundBeforeComposer();
-      }
+      _restoreForegroundBeforeComposer();
     } finally {
       _composerRestore = true;
       _changingMode = false;
+    }
+  }
+
+  Future<void> _setRailRaised(DeskKind kind, bool raised) async {
+    try {
+      await controller.desktopNotes?.setRailRaised(kind, raised);
+    } catch (_) {
+      // 轨道置顶只是视觉辅助，失败不应影响快速新增本身。
     }
   }
 
@@ -479,11 +484,41 @@ class DesktopService with TrayListener, WindowListener {
     }
   }
 
-  Display _composerDisplay(List<Display> displays, DeskSettings settings) {
-    final wanted = settings.monitor;
+  Future<Display> _composerDisplay(
+    DeskKind kind,
+    List<Display> displays,
+  ) async {
+    final notes = controller.desktopNotes;
+    final wanted = notes?.config(kind).monitor ?? '';
     if (wanted.isNotEmpty) {
       for (final display in displays) {
         if (display.id == wanted || display.name == wanted) return display;
+      }
+      // 轨道配置保存的是原生显示器 ID；屏幕插件使用的标识可能不同，
+      // 此时按工作区矩形把两者对应起来，避免总是回退到主屏。
+      if (notes?.isNative == true) {
+        try {
+          for (final monitor in await notes!.monitors()) {
+            if (monitor['id'] != wanted) continue;
+            final area = Rect.fromLTWH(
+              (monitor['workX'] as num).toDouble(),
+              (monitor['workY'] as num).toDouble(),
+              (monitor['workWidth'] as num).toDouble(),
+              (monitor['workHeight'] as num).toDouble(),
+            );
+            for (final display in displays) {
+              final work = _workArea(display);
+              if ((work.left - area.left).abs() <= 2 &&
+                  (work.top - area.top).abs() <= 2 &&
+                  (work.width - area.width).abs() <= 2 &&
+                  (work.height - area.height).abs() <= 2) {
+                return display;
+              }
+            }
+          }
+        } catch (_) {
+          // 读取原生显示器失败时沿用回退逻辑。
+        }
       }
     }
     return displays.first;
@@ -555,14 +590,12 @@ class DesktopService with TrayListener, WindowListener {
     controller.leaveQuickMode();
     await windowManager.show();
     await windowManager.focus();
-    _mainVisible = true;
   }
 
   Future<void> hide() async {
     _quickEpoch++;
     _quickPasteTarget = null;
     _quickVisible = false;
-    _mainVisible = false;
     await windowManager.hide();
   }
 

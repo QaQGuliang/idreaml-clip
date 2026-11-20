@@ -214,6 +214,17 @@ class DesktopNotes extends ChangeNotifier {
     await openComposer?.call(kind, hotkey: hotkey);
   }
 
+  bool get isNative => _native;
+
+  /// 快速新增期间临时把对应桌面轨道置顶，结束后恢复到底层。
+  Future<void> setRailRaised(DeskKind kind, bool raised) async {
+    if (!_native) return;
+    await channel.invokeMethod<void>('railActive', {
+      'kind': kind.name,
+      'raised': raised,
+    });
+  }
+
   Future<List<Map<String, dynamic>>> monitors() async =>
       (await channel.invokeListMethod<dynamic>('monitors') ?? [])
           .map((e) => Map<String, dynamic>.from(e as Map))

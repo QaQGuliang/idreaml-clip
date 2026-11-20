@@ -605,6 +605,11 @@ void main() {
     await notes.editing(true);
     expect(calls.last.method, 'editing');
     expect(calls.last.arguments, true);
+    await notes.setRailRaised(DeskKind.todo, true);
+    expect(calls.last.method, 'railActive');
+    expect(calls.last.arguments, {'kind': 'todo', 'raised': true});
+    await notes.setRailRaised(DeskKind.todo, false);
+    expect(calls.last.arguments, {'kind': 'todo', 'raised': false});
     notes.dispose();
     await Future<void>.delayed(Duration.zero);
     messenger.setMockMethodCallHandler(channel, null);

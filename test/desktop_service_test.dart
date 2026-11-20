@@ -469,7 +469,7 @@ void main() {
         return notes;
       }))!;
 
-  testWidgets('快速新增按轨道显示器居中打开，结束后恢复主窗口', (tester) async {
+  testWidgets('快速新增按轨道显示器居中打开，结束后不弹出主窗口', (tester) async {
     useNativeDpi(tester);
     controller.desktopNotes = await enabledNotes(tester, DeskKind.note);
     displays.add(
@@ -509,15 +509,23 @@ void main() {
       expect(bounds.top, closeTo(328, .01));
     }
 
+    final composerBounds = bounds;
+    final beforeFinish = windowCalls.length;
     await finish(tester, desktop.finishComposer(DeskComposerResult.saved));
     expect(controller.composerMode, isFalse);
-    expect(bounds.size, const Size(1180, 760));
-    expect(windowCalls.map((call) => call.method), contains('setAlwaysOnTop'));
+    // Saving only closes the composer; the main window is never raised.
+    expect(bounds, composerBounds);
     expect(
       windowCalls
-          .lastWhere((call) => call.method == 'setAlwaysOnTop')
-          .arguments,
-      {'isAlwaysOnTop': false},
+          .sublist(beforeFinish)
+          .where((call) => call.method == 'setSize'),
+      isEmpty,
+    );
+    expect(
+      windowCalls
+          .sublist(beforeFinish)
+          .where((call) => call.method == 'setAlwaysOnTop'),
+      isEmpty,
     );
   });
 

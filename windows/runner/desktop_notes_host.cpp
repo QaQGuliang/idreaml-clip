@@ -299,6 +299,14 @@ struct DesktopNotesHost::Impl {
         r.left,r.top,r.right-r.left,r.bottom-r.top,nullptr,nullptr,GetModuleHandle(nullptr),this);
       if (!selector) { selection_result->Error("window","区域选择窗口创建失败"); selection_result.reset(); return; }
       SetLayeredWindowAttributes(selector,0,190,LWA_ALPHA); ShowWindow(selector,SW_SHOW); SetForegroundWindow(selector); SetFocus(selector);
+    } else if (method=="railActive" && args) {
+      const auto kind=S(*args,"kind");
+      if (kind=="note" || kind=="todo") {
+        Rail& rail=kind=="note" ? note : todo;
+        rail.raised=B(*args,"raised");
+        if (rail.window) Refresh(rail);
+      }
+      result->Success();
     } else if (method=="editing") {
       RememberClipboard();
       const auto* value=call.arguments() ? std::get_if<bool>(call.arguments()) : nullptr;
