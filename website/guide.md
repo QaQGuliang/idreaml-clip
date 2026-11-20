@@ -4,7 +4,7 @@
 
 **Windows 10 / 11 x64 · 1.1.9+8**
 
-[返回项目首页](/idreaml/idreaml-clip) · [详细功能与操作边界](../docs/user-guide.md) · [离线 HTML 指南源文件（右键另存为）][offline]
+[返回项目首页](/idreaml/idreaml-clip) · [详细功能与操作边界](../docs/user-guide.md)
 
 用快捷剪切板找回文字和图片，用截图与贴图整理信息，再把灵感和计划放到桌面。应用无需注册，未配置云同步也能使用。需要在多台电脑上共享内容时，可以连接自己的 Git 仓库。
 
@@ -20,8 +20,8 @@
 
 | 版本 | 安装方式 |
 | --- | --- |
-| [Windows 安装版 EXE][setup] · 约 16.2 MB | 跟随安装向导选择目录和快捷方式。适合首次安装或覆盖升级。 |
-| [Windows 便携 ZIP][portable] · 约 18.4 MB | 完整解压到固定目录，再运行 `idreaml_clip.exe`。保留旁边的 DLL 和 `data` 目录。 |
+| [Windows 安装版 EXE][setup] · 约 15.5 MB | 跟随安装向导选择目录和快捷方式。适合首次安装或覆盖升级。 |
+| [Windows 便携 ZIP][portable] · 约 17.5 MB | 完整解压到固定目录，再运行 `idreaml_clip.exe`。保留旁边的 DLL 和 `data` 目录。 |
 
 [完整发布说明][release] · [安装版 SHA-256][setup-checksum] · [便携版 SHA-256][portable-checksum]
 
@@ -174,4 +174,3 @@
 [portable]: /idreaml/idreaml-clip/releases/download/v1.1.9/Idreaml-Clip-1.1.9%2B8-windows-x64.zip
 [setup-checksum]: /idreaml/idreaml-clip/releases/download/v1.1.9/Idreaml-Clip-1.1.9%2B8-windows-x64-setup.exe.sha256
 [portable-checksum]: /idreaml/idreaml-clip/releases/download/v1.1.9/Idreaml-Clip-1.1.9%2B8-windows-x64.zip.sha256
-[offline]: /idreaml/idreaml-clip/releases/download/v1.1.9/Idreaml-Clip-user-guide.html
