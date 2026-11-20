@@ -103,7 +103,12 @@ class _DeskManagementListState extends State<DeskManagementList> {
         showMessage(context, row.done ? '已恢复为待完成' : '已完成，桌面列表已收起');
       }
     } catch (error) {
-      if (mounted) showMessage(context, '$error');
+      if (!mounted) return;
+      final message = error is FormatException &&
+              error.message.contains('标题最多')
+          ? '标题超过 120 字，请先在编辑中精简后再完成。'
+          : '$error';
+      showMessage(context, message);
     }
   }
 
