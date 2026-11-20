@@ -1,10 +1,14 @@
 import 'dart:async';
+// `Size` comes from dart:ui here; dart:ffi only provides the native types.
+import 'dart:ffi' hide Size;
 import 'dart:io';
 
+import 'package:ffi/ffi.dart';
 import 'package:flutter/widgets.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
 import 'package:screen_retriever/screen_retriever.dart';
 import 'package:tray_manager/tray_manager.dart';
+import 'package:win32/win32.dart';
 import 'package:window_manager/window_manager.dart';
 
 import '../app_controller.dart';
@@ -22,6 +26,68 @@ import 'windows_folder_startup_service.dart';
 import 'screenshot_service.dart';
 import 'administrator_launch_service.dart';
 
+/// DWMWA_NCRENDERING_POLICY with DWMNCRP_DISABLED/ENABLED (dwmapi.h, Vista+).
+const _dwmwaNcRenderingPolicy = 2;
+const _dwmncrpDisabled = 1;
+const _dwmncrpEnabled = 2;
+
+/// DWMWA_COLOR_NONE/DWMWA_COLOR_DEFAULT for [DWMWA_BORDER_COLOR].
+const _dwmColorNone = 0xFFFFFFFE;
+const _dwmColorDefault = 0xFFFFFFFF;
+
+int _setDwmAttribute(int handle, int attribute, int value) {
+  final data = calloc<Uint32>();
+  try {
+    data.value = value;
+    return DwmSetWindowAttribute(handle, attribute, data, sizeOf<Uint32>());
+  } finally {
+    calloc.free(data);
+  }
+}
+
+/// Removes the Windows window frame effects that would otherwise sit around the
+/// quick panel.
+///
+/// The quick panel is the main window resized into a frameless popup, so DWM
+/// keeps treating it as a normal caption window and still paints its non-client
+/// frame: drop shadow, rounded corners, the 1px border and the frame band that
+/// window_manager works around with 1px/8px insets for
+/// `TitleBarStyle.hidden`. An image preview only paints the picture itself, so
+/// that frame lands on the transparent area around it and reads as a light
+/// frosted card. Disabling the non-client rendering, corners and border while
+/// the window shows the quick panel leaves the picture on its own; the main
+/// window restores the system defaults.
+class QuickWindowFrame {
+  QuickWindowFrame({
+    int Function(int handle, int attribute, int value)? setAttribute,
+  }) : _setAttribute = setAttribute ?? _setDwmAttribute;
+
+  final int Function(int handle, int attribute, int value) _setAttribute;
+
+  /// Quick panel: no non-client rendering, square corners, invisible border.
+  void applyQuick(int handle) {
+    _write(handle, _dwmwaNcRenderingPolicy, _dwmncrpDisabled);
+    _write(handle, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND);
+    _write(handle, DWMWA_BORDER_COLOR, _dwmColorNone);
+  }
+
+  /// Main window: system defaults.
+  void applyMain(int handle) {
+    _write(handle, _dwmwaNcRenderingPolicy, _dwmncrpEnabled);
+    _write(handle, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DEFAULT);
+    _write(handle, DWMWA_BORDER_COLOR, _dwmColorDefault);
+  }
+
+  void _write(int handle, int attribute, int value) {
+    try {
+      _setAttribute(handle, attribute, value);
+    } catch (_) {
+      // Windows 10 rejects the Windows 11 attributes; the frame effects simply
+      // stay as they are, exactly as before this call existed.
+    }
+  }
+}
+
 class DesktopService with TrayListener, WindowListener {
   DesktopService(
     this.controller, {
@@ -30,6 +96,7 @@ class DesktopService with TrayListener, WindowListener {
     WinVShortcutService? winVShortcut,
     StartupService? startupService,
     AdministratorLaunchService? administrator,
+    QuickWindowFrame? windowFrame,
     this.screenshotService,
     this.onExit,
   }) : administrator =
@@ -37,6 +104,7 @@ class DesktopService with TrayListener, WindowListener {
        _canRegisterShortcut =
            canRegisterShortcut ?? shortcut_check.canRegisterShortcut,
        _winVShortcut = winVShortcut ?? WindowsWinVShortcutService(),
+       _windowFrame = windowFrame ?? QuickWindowFrame(),
        _startupService =
            startupService ??
            (Platform.isWindows
@@ -57,6 +125,7 @@ class DesktopService with TrayListener, WindowListener {
   final bool Function(QuickShortcut) _canRegisterShortcut;
   final QuickPasteService _pasteService;
   final WinVShortcutService _winVShortcut;
+  final QuickWindowFrame _windowFrame;
   final StartupService _startupService;
   bool _startupReady = false;
   int _startupRevision = 0;
@@ -202,8 +271,16 @@ class DesktopService with TrayListener, WindowListener {
         }
         await windowManager.setAlwaysOnTop(true);
         await windowManager.setSkipTaskbar(true);
-        await windowManager.setBackgroundColor(const Color(0x00000000));
         _quickWindowConfigured = true;
+      }
+      // Declared on every wake: the main window uses an opaque light backdrop,
+      // and a leftover one turns the area an expanded image preview leaves
+      // empty into a light block.
+      await windowManager.setBackgroundColor(const Color(0x00000000));
+      if (Platform.isWindows) {
+        // Windows still frames this window as a caption window, so the picture
+        // preview would sit inside that shadow, border and rounded corners.
+        _windowFrame.applyQuick(await windowManager.getId());
       }
       await windowManager.setBounds(_toWindowCoordinates(bounds));
       await windowManager.show();
@@ -278,6 +355,10 @@ class DesktopService with TrayListener, WindowListener {
         await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
       }
       await windowManager.setBackgroundColor(const Color(0xFFF4F3F8));
+      if (Platform.isWindows) {
+        // Restore the system frame the quick panel switched off.
+        _windowFrame.applyMain(await windowManager.getId());
+      }
       await windowManager.setSize(const Size(1180, 760));
       await windowManager.setMinimumSize(const Size(900, 620));
       await windowManager.center();

@@ -135,6 +135,45 @@ void main() {
     expect(tester.takeException(), isNull);
   });
 
+  testWidgets('图片预览不带任何卡片装饰，图片按原比例铺满预览区域', (tester) async {
+    final mouse = await mount(tester);
+    await mouse.moveTo(tester.getCenter(find.text('PNG 图片')));
+    await tester.pump(const Duration(milliseconds: 400));
+    await tester.pumpAndSettle();
+    final preview = find.byType(QuickHoverPreview);
+    expect(preview, findsOneWidget);
+    // 图片直接绘制：没有卡片底色、边框、圆角裁剪或模糊层。
+    final decorations = <String, Finder>{
+      'Material': find.byType(Material),
+      'DecoratedBox': find.byType(DecoratedBox),
+      'PhysicalModel': find.byType(PhysicalModel),
+      'ClipRRect': find.byType(ClipRRect),
+      'BackdropFilter': find.byType(BackdropFilter),
+      'Card': find.byType(Card),
+      'Container': find.byType(Container),
+    };
+    for (final entry in decorations.entries) {
+      expect(
+        find.descendant(of: preview, matching: entry.value),
+        findsNothing,
+        reason: '图片预览不应包含 ${entry.key}',
+      );
+    }
+    final image = find.descendant(of: preview, matching: find.byType(Image));
+    expect(image, findsOneWidget);
+    expect(tester.widget<Image>(image).fit, BoxFit.contain);
+    expect(
+      find.descendant(of: preview, matching: find.byType(InteractiveViewer)),
+      findsOneWidget,
+    );
+    // 预览区域本身即图片等比贴合后的尺寸，图片不会缩在更大的底色里。
+    expect(tester.getRect(preview), const Rect.fromLTWH(355, 93.5, 480, 240));
+    expect(
+      tester.getRect(find.byType(InteractiveViewer)),
+      tester.getRect(preview),
+    );
+  });
+
   testWidgets('JSON 预览缩进格式化，点击条目仍使用原文并请求粘贴', (tester) async {
     final mouse = await mount(tester);
     await mouse.moveTo(tester.getCenter(find.text(json)));

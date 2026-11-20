@@ -87,6 +87,9 @@ void main() {
   late List<MethodCall> windowCalls;
   late List<MethodCall> trayCalls;
   late List<MethodCall> hotkeyCalls;
+
+  // DWM writes requested by the quick panel: handle, attribute, value.
+  late List<(int, int, int)> frameWrites;
   late Offset physicalPointer;
   late List<Map<String, Object>> displays;
   late Rect bounds;
@@ -134,6 +137,7 @@ void main() {
     pasteService = _PasteService();
     winV = FakeWinVShortcut();
     startup = _StartupService();
+    frameWrites = [];
     desktop = DesktopService(
       controller,
       screenshotService: ScreenshotService(controller, supported: false),
@@ -141,6 +145,12 @@ void main() {
       pasteService: pasteService,
       winVShortcut: winV,
       startupService: startup,
+      windowFrame: QuickWindowFrame(
+        setAttribute: (handle, attribute, value) {
+          frameWrites.add((handle, attribute, value));
+          return 0;
+        },
+      ),
     );
     windowCalls = [];
     trayCalls = [];
@@ -153,6 +163,7 @@ void main() {
         TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger;
     messenger.setMockMethodCallHandler(windowChannel, (call) async {
       windowCalls.add(call);
+      if (call.method == 'getId') return 7;
       if (call.method == 'isMaximized') return maximized;
       if (call.method == 'isMinimized' || call.method == 'isFullScreen') {
         return false;
@@ -328,6 +339,53 @@ void main() {
     expect(windowCalls.map((call) => call.method), contains('setResizable'));
   });
 
+  testWidgets('快捷窗口关闭系统非客户区边框、圆角与投影，主窗口恢复默认', (tester) async {
+    useNativeDpi(tester);
+    await finish(tester, desktop.showQuick());
+    // DWMWA_NCRENDERING_POLICY=1 (DWMNCRP_DISABLED),
+    // DWMWA_WINDOW_CORNER_PREFERENCE=1 (DWMWCP_DONOTROUND),
+    // DWMWA_BORDER_COLOR=0xFFFFFFFE (DWMWA_COLOR_NONE).
+    expect(
+      frameWrites,
+      Platform.isWindows
+          ? [(7, 2, 1), (7, 33, 1), (7, 34, 0xFFFFFFFE)]
+          : isEmpty,
+    );
+    frameWrites.clear();
+    await finish(tester, desktop.showMain());
+    // DWMNCRP_ENABLED, DWMWCP_DEFAULT, DWMWA_COLOR_DEFAULT.
+    expect(
+      frameWrites,
+      Platform.isWindows
+          ? [(7, 2, 2), (7, 33, 0), (7, 34, 0xFFFFFFFF)]
+          : isEmpty,
+    );
+    frameWrites.clear();
+    await finish(tester, desktop.showQuick());
+    expect(frameWrites, hasLength(Platform.isWindows ? 3 : 0));
+  });
+
+  testWidgets('每次唤起快捷面板都重新声明透明窗口底色', (tester) async {
+    useNativeDpi(tester);
+    List<Object?> backgroundAlphas() => [
+      for (final call in windowCalls)
+        if (call.method == 'setBackgroundColor')
+          (call.arguments as Map)['backgroundColorA'],
+    ];
+    await finish(tester, desktop.showQuick());
+    expect(backgroundAlphas(), [0]);
+    await desktop.hide();
+    windowCalls.clear();
+    await finish(tester, desktop.showQuick());
+    expect(backgroundAlphas(), [0]);
+    windowCalls.clear();
+    await finish(tester, desktop.showMain());
+    expect(backgroundAlphas(), [255]);
+    windowCalls.clear();
+    await finish(tester, desktop.showQuick());
+    expect(backgroundAlphas(), [0]);
+  });
+
   testWidgets('失焦不关闭管理窗口，返回历史后也不会被旧 blur 事件隐藏', (tester) async {
     useNativeDpi(tester);
     desktop.onWindowBlur();
@@ -367,6 +425,19 @@ void main() {
       closeTo(Platform.isWindows ? 2518 : 2512, 0.01),
     );
     expect(physicalBounds().top, closeTo(Platform.isWindows ? 318 : 312, 0.01));
+  });
+
+  test('DWM 属性写入失败时保持原状，不影响快捷面板', () {
+    var calls = 0;
+    final frame = QuickWindowFrame(
+      setAttribute: (handle, attribute, value) {
+        calls++;
+        throw StateError('unsupported attribute');
+      },
+    );
+    expect(() => frame.applyQuick(7), returnsNormally);
+    expect(() => frame.applyMain(7), returnsNormally);
+    expect(calls, 6);
   });
 
   testWidgets('托盘左击进入全部历史并清空旧搜索和今日筛选', (tester) async {

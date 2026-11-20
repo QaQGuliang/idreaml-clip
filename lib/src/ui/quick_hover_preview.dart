@@ -19,6 +19,9 @@ class QuickHoverPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     if (item.isImage) {
+      // 图片预览只画图片本身：预览区域就是图片等比贴合后的窗口区域，任何
+      // 底色、边框或模糊都会像给图片套了一层卡片（窗口级效果见
+      // DesktopService 的快捷窗口配置）。
       return ClipboardImage(item: item);
     }
     return Padding(
