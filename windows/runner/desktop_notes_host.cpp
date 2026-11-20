@@ -9,13 +9,10 @@
 #include <dwmapi.h>
 #include <shellscalingapi.h>
 #include <windowsx.h>
-#include <commctrl.h>
-#include <commdlg.h>
 #include <optional>
 #include <algorithm>
 #include <cmath>
 #include <cwchar>
-#include <iterator>
 #include <map>
 #include <string>
 #include <vector>
@@ -62,11 +59,6 @@ std::string Utf8(const std::wstring& text) {
   int count = WideCharToMultiByte(CP_UTF8,0,text.data(),static_cast<int>(text.size()),nullptr,0,nullptr,nullptr);
   std::string out(count,0);
   WideCharToMultiByte(CP_UTF8,0,text.data(),static_cast<int>(text.size()),out.data(),count,nullptr,nullptr); return out;
-}
-std::string EditText(HWND edit) {
-  std::wstring text(GetWindowTextLengthW(edit)+1,0);
-  const int count = GetWindowTextW(edit,text.data(),static_cast<int>(text.size()));
-  text.resize(count); return Utf8(text);
 }
 // Each face is measured and painted at the destination monitor's DPI.
 struct DeskFonts {
@@ -132,7 +124,6 @@ HWND BottomApplication() {
 void Register(const wchar_t* name, WNDPROC proc, HBRUSH brush = nullptr) {
   WNDCLASSEXW wc{}; wc.cbSize=sizeof(wc); wc.hInstance=GetModuleHandle(nullptr);
   wc.lpfnWndProc=proc; wc.lpszClassName=name; wc.hCursor=LoadCursor(nullptr,IDC_ARROW); wc.hbrBackground=brush;
-  if (wcscmp(name,L"IdreamlDeskCompose")==0) wc.style=CS_DROPSHADOW;
   RegisterClassExW(&wc);
 }
 void RoundPath(Gdiplus::GraphicsPath& path, Gdiplus::RectF r, float radius) {
@@ -162,24 +153,17 @@ struct DesktopNotesHost::Impl {
   std::unique_ptr<flutter::MethodChannel<V>> channel;
   std::function<bool()> blocked;
   std::shared_ptr<bool> alive=std::make_shared<bool>(true);
-  HWND host=nullptr, composer=nullptr, title=nullptr, body=nullptr, status=nullptr, save=nullptr;
-  HWND selector=nullptr, previous=nullptr, color_button=nullptr;
-  V compose_color, compose_family, compose_size;
-  bool choosing_color=false;
+  HWND host=nullptr;
+  HWND selector=nullptr;
   HFONT font=nullptr;
-  HFONT compose_font=nullptr;
-  HFONT compose_small_font=nullptr;
-  HBRUSH compose_input_brush=CreateSolidBrush(RGB(248,248,251));
-  int compose_width=410, compose_height=448;
-  float compose_scale=1.0f;
   ULONG_PTR graphics=0;
   std::unique_ptr<DesktopBackdrop> desktop_backdrop;
   HWINEVENTHOOK foreground_hook=nullptr;
   Rail note{this,"note"}, todo{this,"todo"};
-  std::string compose_kind, select_kind;
+  std::string select_kind;
   Monitor select_monitor;
   POINT anchor{}, cursor{};
-  bool selecting=false, suspended=false, registered=false, pending=false, closing=false;
+  bool selecting=false, suspended=false, registered=false;
   bool flutter_editing=false;
   bool inspect_windows=false;
   DWORD ignored_clipboard=0;
@@ -193,7 +177,6 @@ struct DesktopNotesHost::Impl {
     desktop_backdrop->Refresh();
     Register(L"IdreamlDeskHost",HostProc);
     Register(L"IdreamlDeskRail",RailProc);
-    Register(L"IdreamlDeskCompose",ComposeProc);
     Register(L"IdreamlDeskSelector",SelectProc);
     host=CreateWindowExW(WS_EX_TOOLWINDOW,L"IdreamlDeskHost",L"",WS_POPUP,0,0,0,0,nullptr,nullptr,GetModuleHandle(nullptr),this);
     font=CreateFontW(-15,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Microsoft YaHei UI");
@@ -214,17 +197,12 @@ struct DesktopNotesHost::Impl {
     if (foreground_hook) { desktop_hooks.erase(foreground_hook); UnhookWinEvent(foreground_hook); }
     Shutdown(); if (host) DestroyWindow(host);
     if (font) DeleteObject(font);
-    if (compose_font) DeleteObject(compose_font);
-    if (compose_small_font) DeleteObject(compose_small_font);
-    DeleteObject(compose_input_brush);
     note.backdrop.reset(); todo.backdrop.reset(); desktop_backdrop.reset();
     Gdiplus::GdiplusShutdown(graphics);
   }
-  Rail& GetRail(const std::string& kind) { return kind=="todo" ? todo : note; }
   bool DeskClipboardOwner() {
     HWND owner=GetClipboardOwner();
     if (!owner) return false;
-    if (composer && (owner==composer || IsChild(composer,owner))) return true;
     DWORD process=0; GetWindowThreadProcessId(owner,&process);
     return flutter_editing && process==GetCurrentProcessId();
   }
@@ -237,7 +215,6 @@ struct DesktopNotesHost::Impl {
   void Shutdown() {
     KillTimer(host,kDouble); KillTimer(host,kRefresh); KillTimer(host,kReveal);
     if (registered) { UnregisterHotKey(host,kHotkey); registered=false; }
-    CloseComposer(1,false);
     FinishSelection(false);
     for (Rail* rail : {&note,&todo}) {
       rail->enabled=false; if (IsWindow(rail->window)) DestroyWindow(rail->window);
@@ -283,7 +260,6 @@ struct DesktopNotesHost::Impl {
         rail->config=*map; rail->enabled=B(*map,"enabled"); rail->rows.clear(); rail->dirty=true;
         if (const auto* rows=Field(*map,"rows")) if (const auto* list=std::get_if<L>(rows))
           for (const auto& row : *list) if (const auto* item=std::get_if<M>(&row)) rail->rows.push_back(*item);
-        if (!rail->enabled && composer && compose_kind==rail->kind) CloseComposer(1,false);
         Refresh(*rail);
       }
       auto error=UpdateHotkey();
@@ -314,11 +290,8 @@ struct DesktopNotesHost::Impl {
         {V("workWidth"),V(static_cast<double>(monitor.work.right-monitor.work.left))},
         {V("workHeight"),V(static_cast<double>(monitor.work.bottom-monitor.work.top))}});
       result->Success(V(values));
-    } else if (method=="compose" && args) {
-      if (!composer && !selector && !suspended && !blocked()) OpenComposer(*args);
-      result->Success();
     } else if (method=="selectRegion" && args) {
-      if (selector || composer || blocked()) { result->Error("busy","请先结束当前截图或新增操作"); return; }
+      if (selector || blocked()) { result->Error("busy","请先结束当前截图操作"); return; }
       select_kind=S(*args,"kind"); select_monitor=SelectMonitor(S(*args,"monitor"));
       selection_result=std::move(result); selecting=false;
       const auto r=select_monitor.work;
@@ -670,233 +643,6 @@ struct DesktopNotesHost::Impl {
     if (original_scroll!=rail.scroll) PaintRail(rail);
   }
 
-  void PaintComposer(HWND window,HDC dc) {
-    using namespace Gdiplus;
-    RECT client{}; GetClientRect(window,&client);
-    HDC buffer=CreateCompatibleDC(dc); HBITMAP bitmap=CreateCompatibleBitmap(dc,client.right,client.bottom);
-    auto old=SelectObject(buffer,bitmap);
-    {
-      Graphics g(buffer); g.SetSmoothingMode(SmoothingModeAntiAlias); g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
-      g.Clear(Color(255,255,255)); g.ScaleTransform(compose_scale,compose_scale);
-      GraphicsPath outline; RoundPath(outline,RectF(.5f,.5f,compose_width-1.0f,compose_height-1.0f),18);
-      Pen edge(Color(255,233,231,239)); g.DrawPath(&edge,&outline);
-      FontFamily family(L"Microsoft YaHei UI");
-      Font caption_font(&family,11,FontStyleRegular,UnitPixel), label(&family,12,FontStyleRegular,UnitPixel), heading(&family,16,FontStyleBold,UnitPixel);
-      SolidBrush ink(Color(255,37,35,44)), muted(Color(255,137,133,147)), purple(Color(255,108,87,229));
-      StringFormat format; format.SetTrimming(StringTrimmingEllipsisCharacter);
-      g.DrawString(L"快速记录",-1,&caption_font,RectF(24,23,220,18),&format,&purple);
-      g.DrawString(compose_kind=="note" ? L"新建便签" : L"新建待办",-1,&heading,RectF(23,44,280,31),&format,&ink);
-      const auto field=[&](HWND edit,float top,float height) {
-        GraphicsPath shape; RoundPath(shape,RectF(24,top,compose_width-48.0f,height),12);
-        SolidBrush fill(Color(255,248,248,251)); g.FillPath(&fill,&shape);
-        const bool focused=edit && GetFocus()==edit;
-        Pen border(focused ? Color(255,108,87,229) : Color(255,233,231,239),focused ? 1.4f : 1.0f);
-        g.DrawPath(&border,&shape);
-      };
-      if (compose_kind=="note") {
-        g.DrawString(L"标题（可选）",-1,&label,RectF(24,94,250,20),&format,&muted);
-        field(title,116,42);
-      }
-      const float top=compose_kind=="note" ? 198.0f : 116.0f;
-      g.DrawString(compose_kind=="note" ? L"内容" : L"事项内容",-1,&label,RectF(24,top-24,250,20),&format,&muted);
-      field(body,top,140);
-      g.DrawString(L"文字颜色",-1,&label,RectF(24,top+156,78,20),&format,&muted);
-      g.DrawString(L"Esc 取消",-1,&caption_font,RectF(24,compose_height-50.0f,130,22),&format,&muted);
-    }
-    BitBlt(dc,0,0,client.right,client.bottom,buffer,0,0,SRCCOPY);
-    SelectObject(buffer,old); DeleteObject(bitmap); DeleteDC(buffer);
-  }
-  void PaintComposeButton(const DRAWITEMSTRUCT& item) {
-    using namespace Gdiplus;
-    Graphics g(item.hDC); g.SetSmoothingMode(SmoothingModeAntiAlias); g.SetTextRenderingHint(TextRenderingHintAntiAliasGridFit);
-    g.Clear(Color(255,255,255)); g.ScaleTransform(compose_scale,compose_scale);
-    const float w=(item.rcItem.right-item.rcItem.left)/compose_scale,h=(item.rcItem.bottom-item.rcItem.top)/compose_scale;
-    const bool primary=item.CtlID==104, close=item.CtlID==105, colour=item.CtlID==106, disabled=(item.itemState&ODS_DISABLED)!=0;
-    POINT pointer{}; GetCursorPos(&pointer); ScreenToClient(item.hwndItem,&pointer);
-    const bool hover=PtInRect(&item.rcItem,pointer)!=FALSE;
-    Color fill=primary ? (disabled ? Color(255,190,181,241) : Color(255,108,87,229)) : Color(255,255,255);
-    if (!disabled && (hover || (item.itemState&ODS_SELECTED))) fill=primary ? Color(255,123,103,237) : Color(255,240,237,255);
-    GraphicsPath shape; RoundPath(shape,RectF(.75f,.75f,w-1.5f,h-1.5f),close ? 9.0f : 12.0f);
-    SolidBrush bg(fill); g.FillPath(&bg,&shape);
-    if (!primary && !close) { Pen line(Color(255,233,231,239)); g.DrawPath(&line,&shape); }
-    if (item.itemState&ODS_FOCUS) { Pen focus(Color(255,108,87,229)); g.DrawRectangle(&focus,4.0f,4.0f,w-8,h-8); }
-    if (close) {
-      Pen pen(Color(255,137,133,147),1.5f); g.DrawLine(&pen,w/2-4,h/2-4,w/2+4,h/2+4); g.DrawLine(&pen,w/2+4,h/2-4,w/2-4,h/2+4);
-    } else if (colour) {
-      const auto selected=ComposerTextColor();
-      const Color swatch=selected ? Color(*selected) : Color(255,108,87,229);
-      GraphicsPath chip; RoundPath(chip,RectF(12,(h-16)/2,16,16),4);
-      SolidBrush chip_fill(swatch); g.FillPath(&chip_fill,&chip);
-      Pen chip_edge(Color(255,220,217,230)); g.DrawPath(&chip_edge,&chip);
-      wchar_t label[48]=L"跟随列表";
-      if (selected) swprintf_s(label,L"#%06X",static_cast<unsigned>(*selected&0xffffffU));
-      FontFamily family(L"Microsoft YaHei UI"); Font button_font(&family,12,FontStyleRegular,UnitPixel);
-      SolidBrush ink(Color(255,37,35,44)); StringFormat format; format.SetLineAlignment(StringAlignmentCenter);
-      g.DrawString(label,-1,&button_font,RectF(37,0,w-61,h),&format,&ink);
-      Pen arrow(Color(255,137,133,147),1.4f);
-      g.DrawLine(&arrow,w-20,h/2-2,w-16,h/2+2); g.DrawLine(&arrow,w-16,h/2+2,w-12,h/2-2);
-    } else {
-      FontFamily family(L"Microsoft YaHei UI"); Font button_font(&family,13,FontStyleRegular,UnitPixel);
-      SolidBrush ink(primary ? Color(255,255,255) : Color(255,37,35,44));
-      StringFormat format; format.SetAlignment(StringAlignmentCenter); format.SetLineAlignment(StringAlignmentCenter);
-      g.DrawString(primary ? (pending ? L"保存中…" : L"保存") : L"取消",-1,&button_font,RectF(0,0,w,h),&format,&ink);
-    }
-  }
-  static LRESULT CALLBACK ComposeControlProc(HWND window,UINT message,WPARAM wp,LPARAM lp,UINT_PTR id,DWORD_PTR data) {
-    auto* self=reinterpret_cast<Impl*>(data);
-    if (message==WM_MOUSEMOVE) {
-      TRACKMOUSEEVENT tracking{sizeof(tracking),TME_LEAVE,window,0}; TrackMouseEvent(&tracking);
-      if (id>=103) InvalidateRect(window,nullptr,FALSE);
-    }
-    if (message==WM_MOUSELEAVE && id>=103) InvalidateRect(window,nullptr,FALSE);
-    if (message==WM_SETFOCUS || message==WM_KILLFOCUS) InvalidateRect(GetParent(window),nullptr,FALSE);
-    if (message==WM_NCDESTROY) RemoveWindowSubclass(window,ComposeControlProc,id);
-    const auto result=DefSubclassProc(window,message,wp,lp);
-    // Multiline EDIT does not support EM_SETCUEBANNER. Keep its native IME,
-    // selection and undo handling, painting only an empty-field placeholder.
-    if (message==WM_PAINT && (id==101 || id==102) && GetWindowTextLengthW(window)==0) {
-      HDC dc=GetDC(window); auto old=SelectObject(dc,self->compose_font);
-      SetBkMode(dc,TRANSPARENT); SetTextColor(dc,RGB(160,155,171)); RECT r{}; GetClientRect(window,&r);
-      const wchar_t* hint=id==101 ? L"这一刻，想记下什么？" : self->compose_kind=="note" ? L"写下来，让思绪轻一点…" : L"接下来，想完成什么？";
-      DrawTextW(dc,hint,-1,&r,DT_LEFT|DT_TOP|DT_WORDBREAK|DT_NOPREFIX);
-      SelectObject(dc,old); ReleaseDC(window,dc);
-    }
-    return result;
-  }
-  HWND Control(const wchar_t* type,const wchar_t* caption,DWORD style,int x,int y,int w,int h,int id) {
-    HWND child=CreateWindowExW(0,type,caption,WS_CHILD|WS_VISIBLE|style,
-      static_cast<int>(x*compose_scale),static_cast<int>(y*compose_scale),static_cast<int>(w*compose_scale),static_cast<int>(h*compose_scale),
-      composer,reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),GetModuleHandle(nullptr),nullptr);
-    SendMessageW(child,WM_SETFONT,reinterpret_cast<WPARAM>(compose_font),TRUE);
-    if (id>=101) SetWindowSubclass(child,ComposeControlProc,id,reinterpret_cast<DWORD_PTR>(this));
-    return child;
-  }
-  std::optional<UINT32> ComposerTextColor() const {
-    return TextColor(M{{V("textColor"),compose_color}});
-  }
-  void UpdateComposerColorLabel() {
-    if (!color_button) return;
-    const auto selected=ComposerTextColor();
-    wchar_t label[64]=L"文字颜色：跟随列表";
-    if (selected) swprintf_s(label,L"文字颜色：#%06X",static_cast<unsigned>(*selected&0xffffffU));
-    SetWindowTextW(color_button,label); InvalidateRect(color_button,nullptr,FALSE);
-  }
-  void ChooseComposerColor() {
-    if (!composer || pending || choosing_color) return;
-    const HWND owner=composer;
-    HWND focused=GetFocus(); if (!focused || focused==color_button) focused=body;
-    choosing_color=true;
-    struct Swatch { const wchar_t* label; UINT32 argb; };
-    static constexpr Swatch swatches[]{
-      {L"墨色  #302B3C",0xff302b3cU},{L"紫色  #6C57E5",0xff6c57e5U},
-      {L"红色  #D84461",0xffd84461U},{L"橙色  #BA6518",0xffba6518U},
-      {L"绿色  #268064",0xff268064U},{L"蓝色  #347AC4",0xff347ac4U},
-      {L"白色  #FFFFFF",0xffffffffU},
-    };
-    const auto selected=ComposerTextColor();
-    HMENU menu=CreatePopupMenu();
-    if (!menu) { choosing_color=false; return; }
-    AppendMenuW(menu,MF_STRING|(!selected ? MF_CHECKED : 0),1,L"跟随列表");
-    AppendMenuW(menu,MF_SEPARATOR,0,nullptr);
-    for (size_t i=0;i<std::size(swatches);i++) {
-      AppendMenuW(menu,MF_STRING|(selected && *selected==swatches[i].argb ? MF_CHECKED : 0),10+i,swatches[i].label);
-    }
-    AppendMenuW(menu,MF_SEPARATOR,0,nullptr);
-    AppendMenuW(menu,MF_STRING,100,L"自定义颜色…");
-    RECT rect{}; GetWindowRect(color_button,&rect);
-    const UINT chosen=TrackPopupMenuEx(menu,TPM_RETURNCMD|TPM_NONOTIFY|TPM_LEFTALIGN|TPM_TOPALIGN,
-      rect.left,rect.bottom,owner,nullptr);
-    DestroyMenu(menu);
-    if (!IsWindow(owner) || composer!=owner) { choosing_color=false; return; }
-    if (chosen==1) compose_color=V();
-    else if (chosen>=10 && chosen<10+std::size(swatches)) compose_color=V(static_cast<int64_t>(swatches[chosen-10].argb));
-    else if (chosen==100) {
-      static COLORREF custom[16]{};
-      const auto initial=selected.value_or(TextColor(GetRail(compose_kind).config).value_or(0xff302b3cU));
-      CHOOSECOLORW picker{}; picker.lStructSize=sizeof(picker); picker.hwndOwner=owner;
-      picker.rgbResult=RGB((initial>>16)&255,(initial>>8)&255,initial&255);
-      picker.lpCustColors=custom; picker.Flags=CC_FULLOPEN|CC_RGBINIT;
-      if (ChooseColorW(&picker)) {
-        compose_color=V(static_cast<int64_t>(0xff000000U|(GetRValue(picker.rgbResult)<<16)|(GetGValue(picker.rgbResult)<<8)|GetBValue(picker.rgbResult)));
-      }
-    }
-    choosing_color=false;
-    if (!IsWindow(owner) || composer!=owner) return;
-    UpdateComposerColorLabel();
-    // A menu dismissed by clicking another app should preserve a draft without
-    // stealing focus. Modal colour dialogs return focus to their owner normally.
-    if (GetForegroundWindow()==owner) SetFocus(IsWindow(focused) ? focused : body);
-    else PostMessage(owner,WM_APP+3,0,0);
-  }
-  void OpenComposer(const M& args) {
-    compose_kind=S(args,"kind","note"); Rail& rail=GetRail(compose_kind);
-    if (!rail.enabled) return;
-    compose_color=Field(args,"textColor") ? *Field(args,"textColor") : V();
-    compose_family=Field(args,"fontFamily") ? *Field(args,"fontFamily") : V();
-    compose_size=Field(args,"fontSize") ? *Field(args,"fontSize") : V();
-    choosing_color=false;
-    previous=GetForegroundWindow();
-    if (B(args,"hotkey")) { rail.raised=true; Refresh(rail); }
-    const auto monitor=SelectMonitor(S(rail.config,"monitor")); auto work=monitor.work; compose_scale=monitor.scale;
-    if (compose_font) DeleteObject(compose_font);
-    compose_font=CreateFontW(-static_cast<int>(13*compose_scale),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Microsoft YaHei UI");
-    if (compose_small_font) DeleteObject(compose_small_font);
-    compose_small_font=CreateFontW(-static_cast<int>(11*compose_scale),0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Microsoft YaHei UI");
-    const int width=std::min(410,static_cast<int>((work.right-work.left)/compose_scale)),height=compose_kind=="note" ? 496 : 414;
-    compose_width=width; compose_height=height;
-    const int physical_width=static_cast<int>(width*compose_scale),physical_height=static_cast<int>(height*compose_scale);
-    composer=CreateWindowExW(inspect_windows ? WS_EX_APPWINDOW : WS_EX_TOOLWINDOW,L"IdreamlDeskCompose",compose_kind=="note" ? L"新建便签" : L"新建待办",WS_POPUP|WS_CLIPCHILDREN,
-      work.left+(work.right-work.left-physical_width)/2,work.top+(work.bottom-work.top-physical_height)/2,physical_width,physical_height,nullptr,nullptr,GetModuleHandle(nullptr),this);
-    if (!composer) { rail.raised=false; Refresh(rail); return; }
-    SetWindowRgn(composer,CreateRoundRectRgn(0,0,physical_width+1,physical_height+1,static_cast<int>(36*compose_scale),static_cast<int>(36*compose_scale)),FALSE);
-    int top=116;
-    title=nullptr;
-    if (compose_kind=="note") {
-      title=Control(L"EDIT",Wide(S(args,"title")).c_str(),WS_TABSTOP|ES_AUTOHSCROLL,38,128,width-76,21,101);
-      SendMessage(title,EM_SETLIMITTEXT,200,0);
-      top+=82;
-    }
-    body=Control(L"EDIT",Wide(S(args,"body")).c_str(),WS_TABSTOP|ES_MULTILINE|ES_AUTOVSCROLL|ES_WANTRETURN,38,top+12,width-76,116,102);
-    SendMessage(body,EM_SETLIMITTEXT,20000,0);
-    color_button=Control(L"BUTTON",L"文字颜色：跟随列表",BS_OWNERDRAW|WS_TABSTOP,102,top+150,width-126,32,106);
-    UpdateComposerColorLabel();
-    status=Control(L"STATIC",L"离开窗口保留草稿 · Ctrl+Enter 保存",0,24,top+194,width-48,21,0);
-    SendMessageW(status,WM_SETFONT,reinterpret_cast<WPARAM>(compose_small_font),TRUE);
-    Control(L"BUTTON",L"取消",BS_OWNERDRAW|WS_TABSTOP,width-184,height-60,76,36,103);
-    save=Control(L"BUTTON",L"保存",BS_OWNERDRAW|WS_TABSTOP,width-100,height-60,76,36,104);
-    Control(L"BUTTON",L"关闭",BS_OWNERDRAW|WS_TABSTOP,width-57,26,32,32,105);
-    ShowWindow(composer,SW_SHOW); SetForegroundWindow(composer); SetFocus(body);
-  }
-  void CloseComposer(int reason,bool restore) {
-    if (!composer || closing) return;
-    closing=true;
-    RememberClipboard();
-    M data{{V("kind"),V(compose_kind)}};
-    if (reason==1) {
-      data[V("title")]=V(title ? EditText(title) : ""); data[V("body")]=V(EditText(body));
-      data[V("textColor")]=compose_color; data[V("fontFamily")]=compose_family; data[V("fontSize")]=compose_size;
-      Emit("draft",data);
-    } else if (reason==2) Emit("cancel",data);
-    HWND window=composer; composer=nullptr; DestroyWindow(window);
-    Rail& rail=GetRail(compose_kind); rail.raised=false; Refresh(rail);
-    pending=false; closing=false;
-    if (restore && IsWindow(previous)) SetForegroundWindow(previous);
-  }
-  void SaveComposer() {
-    if (!composer || pending) return;
-    auto text=EditText(body);
-    if (text.find_first_not_of(" \r\n\t")==std::string::npos) { SetWindowTextW(status,L"请先填写内容"); return; }
-    pending=true; EnableWindow(save,FALSE);
-    M args{{V("kind"),V(compose_kind)},{V("title"),V(title ? EditText(title) : "")},{V("body"),V(text)},
-      {V("textColor"),compose_color},{V("fontFamily"),compose_family},{V("fontSize"),compose_size}};
-    auto live=alive;
-    channel->InvokeMethod("save",std::make_unique<V>(args),std::make_unique<flutter::MethodResultFunctions<V>>(
-      [this,live](const V*) { if (*live) CloseComposer(0,GetForegroundWindow()==composer); },
-      [this,live](const std::string&,const std::string& message,const V*) {
-        if (!*live || !composer) return; pending=false; EnableWindow(save,TRUE);
-        SetWindowTextW(status,Wide(message).c_str());
-      },[this,live]() { if (*live && composer) { pending=false; EnableWindow(save,TRUE); SetWindowTextW(status,L"保存未完成，请重试"); } }));
-  }
   void FinishSelection(bool accept) {
     if (!selection_result) return;
     auto result=std::move(selection_result);
@@ -911,13 +657,6 @@ struct DesktopNotesHost::Impl {
   }
   bool HandleMessage(const MSG& msg) {
     if (selector && msg.message==WM_KEYDOWN && msg.wParam==VK_ESCAPE) { FinishSelection(false); return true; }
-    if (composer && !choosing_color && (msg.hwnd==composer || IsChild(composer,msg.hwnd))) {
-      if (msg.message==WM_KEYDOWN && msg.wParam==VK_ESCAPE && !pending) { CloseComposer(1,true); return true; }
-      if (msg.message==WM_KEYDOWN && msg.wParam==VK_RETURN && (GetKeyState(VK_CONTROL)&0x8000)) { SaveComposer(); return true; }
-      if (msg.message==WM_KEYDOWN && msg.wParam==VK_TAB) {
-        SetFocus(GetNextDlgTabItem(composer,GetFocus(),(GetKeyState(VK_SHIFT)&0x8000)!=0)); return true;
-      }
-    }
     return false;
   }
   static LRESULT CALLBACK HostProc(HWND window,UINT message,WPARAM wp,LPARAM lp) {
@@ -932,7 +671,7 @@ struct DesktopNotesHost::Impl {
       }
       if (message==WM_CLIPBOARDUPDATE) { self->RememberClipboard(); return 0; }
       if (message==WM_HOTKEY && wp==kHotkey) {
-        if (self->suspended || self->selector || self->composer || self->blocked()) { KillTimer(window,kDouble); self->waiting=false; return 0; }
+        if (self->suspended || self->selector || self->blocked()) { KillTimer(window,kDouble); self->waiting=false; return 0; }
         if (self->note.enabled && !self->todo.enabled) self->Emit("hotkey",{{V("kind"),V("note")}});
         else if (self->waiting) { KillTimer(window,kDouble); self->waiting=false; if (self->todo.enabled) self->Emit("hotkey",{{V("kind"),V("todo")}}); }
         else { self->waiting=true; SetTimer(window,kDouble,330,nullptr); }
@@ -940,7 +679,7 @@ struct DesktopNotesHost::Impl {
       }
       if (message==WM_TIMER && wp==kDouble) {
         KillTimer(window,kDouble); self->waiting=false;
-        if (self->note.enabled && !self->composer && !self->selector && !self->suspended && !self->blocked()) self->Emit("hotkey",{{V("kind"),V("note")}});
+        if (self->note.enabled && !self->selector && !self->suspended && !self->blocked()) self->Emit("hotkey",{{V("kind"),V("note")}});
         return 0;
       }
       if (message==WM_TIMER && (wp==kRefresh || wp==kReveal)) {
@@ -984,43 +723,6 @@ struct DesktopNotesHost::Impl {
         return 0;
       }
       if (message==WM_DESTROY) { rail->window=nullptr; return 0; }
-    }
-    return DefWindowProc(window,message,wp,lp);
-  }
-  static LRESULT CALLBACK ComposeProc(HWND window,UINT message,WPARAM wp,LPARAM lp) {
-    auto* self=reinterpret_cast<Impl*>(GetWindowLongPtr(window,GWLP_USERDATA));
-    if (message==WM_NCCREATE) { self=static_cast<Impl*>(reinterpret_cast<CREATESTRUCT*>(lp)->lpCreateParams); SetWindowLongPtr(window,GWLP_USERDATA,reinterpret_cast<LONG_PTR>(self)); }
-    if (self) {
-      if (message==WM_ERASEBKGND) return 1;
-      if (message==WM_PAINT) {
-        PAINTSTRUCT ps{}; HDC dc=BeginPaint(window,&ps); self->PaintComposer(window,dc); EndPaint(window,&ps); return 0;
-      }
-      if (message==WM_DRAWITEM) { self->PaintComposeButton(*reinterpret_cast<DRAWITEMSTRUCT*>(lp)); return TRUE; }
-      if (message==WM_CTLCOLOREDIT) {
-        const auto dc=reinterpret_cast<HDC>(wp); SetTextColor(dc,RGB(37,35,44)); SetBkColor(dc,RGB(248,248,251));
-        return reinterpret_cast<LRESULT>(self->compose_input_brush);
-      }
-      if (message==WM_CTLCOLORSTATIC) {
-        const auto dc=reinterpret_cast<HDC>(wp); SetTextColor(dc,RGB(137,133,147)); SetBkColor(dc,RGB(255,255,255));
-        return reinterpret_cast<LRESULT>(GetStockObject(WHITE_BRUSH));
-      }
-      if (message==WM_COMMAND) {
-        if (LOWORD(wp)==104 && HIWORD(wp)==BN_CLICKED) self->SaveComposer();
-        else if (LOWORD(wp)==106 && HIWORD(wp)==BN_CLICKED && !self->pending) self->ChooseComposerColor();
-        else if (LOWORD(wp)==103 && HIWORD(wp)==BN_CLICKED && !self->pending) self->CloseComposer(2,true);
-        else if (LOWORD(wp)==105 && HIWORD(wp)==BN_CLICKED && !self->pending) self->CloseComposer(1,true);
-        else if (HIWORD(wp)==EN_CHANGE) InvalidateRect(reinterpret_cast<HWND>(lp),nullptr,FALSE);
-        return 0;
-      }
-      if (message==WM_ACTIVATE && LOWORD(wp)==WA_INACTIVE && !self->pending && !self->closing && !self->choosing_color) {
-        // Defer destruction until the focus transition finishes.
-        PostMessage(window,WM_APP+3,0,0); return 0;
-      }
-      if (message==WM_APP+3) {
-        if (GetForegroundWindow()!=window && !self->pending && !self->choosing_color) self->CloseComposer(1,false);
-        return 0;
-      }
-      if (message==WM_CLOSE) { if (!self->pending) self->CloseComposer(1,true); return 0; }
     }
     return DefWindowProc(window,message,wp,lp);
   }

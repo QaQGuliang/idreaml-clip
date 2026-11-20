@@ -21,6 +21,9 @@ class DesktopNotes extends ChangeNotifier {
   int? ignoredClipboardSequence;
   bool _native = false, _disposed = false;
   Future<void> Function(DeskKind, String)? openManager;
+
+  /// 打开 Flutter 快速新增页面；由 [DesktopService] 在 Windows 上接线。
+  Future<void> Function(DeskKind kind, {bool hotkey})? openComposer;
   Future<void>? _publishing;
   int _revision = 0;
   final _settingsGate = AsyncGate();
@@ -176,12 +179,9 @@ class DesktopNotes extends ChangeNotifier {
   );
 
   Future<void> compose(DeskKind kind, {bool hotkey = false}) async {
-    if (!enabled(kind) || !_native) return;
-    await channel.invokeMethod<void>('compose', {
-      'kind': kind.name,
-      'hotkey': hotkey,
-      ...await draft(kind),
-    });
+    if (!enabled(kind)) return;
+    // 快速新增已改为 Flutter 页面，由桌面服务切换到浮层窗口模式。
+    await openComposer?.call(kind, hotkey: hotkey);
   }
 
   Future<List<Map<String, dynamic>>> monitors() async =>

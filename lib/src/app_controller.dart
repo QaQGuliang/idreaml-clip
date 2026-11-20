@@ -169,6 +169,13 @@ class AppController extends ChangeNotifier {
   AppPage page = AppPage.history;
   bool quickMode = false;
   int quickSession = 0;
+
+  /// 快速新增是同一窗口的第三种模式：与快捷面板互斥，结束后恢复进入前的窗口。
+  DeskKind? composerKind;
+  Map<String, dynamic> composerDraft = const {};
+  bool composerHotkey = false;
+  int composerSession = 0;
+  bool get composerMode => composerKind != null;
   bool launchAtStartupEnabled = false;
   bool launchAtStartupChanging = false;
   String? launchAtStartupMessage;
@@ -743,6 +750,26 @@ class AppController extends ChangeNotifier {
 
   void leaveQuickMode() {
     quickMode = false;
+    notifyListeners();
+  }
+
+  void enterComposerMode(
+    DeskKind kind, {
+    bool hotkey = false,
+    Map<String, dynamic> draft = const {},
+  }) {
+    composerKind = kind;
+    composerHotkey = hotkey;
+    composerDraft = draft;
+    composerSession++;
+    notifyListeners();
+  }
+
+  void leaveComposerMode() {
+    if (composerKind == null) return;
+    composerKind = null;
+    composerDraft = const {};
+    composerHotkey = false;
     notifyListeners();
   }
 

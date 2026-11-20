@@ -7,12 +7,18 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:hotkey_manager/hotkey_manager.dart';
 import 'package:idreaml_clip/src/app.dart';
 import 'package:idreaml_clip/src/app_controller.dart';
+import 'package:idreaml_clip/src/desk/desk_models.dart';
+import 'package:idreaml_clip/src/desk/desk_repository.dart';
+import 'package:idreaml_clip/src/desk/desktop_notes.dart';
 import 'package:idreaml_clip/src/models/quick_shortcut.dart';
 import 'package:idreaml_clip/src/services/desktop_service.dart';
 import 'package:idreaml_clip/src/services/screenshot_service.dart';
 import 'package:idreaml_clip/src/services/quick_paste_service.dart';
 import 'package:idreaml_clip/src/services/startup_service.dart';
 import 'package:idreaml_clip/src/services/administrator_launch_service.dart';
+import 'package:idreaml_clip/src/ui/desk_composer.dart';
+import 'package:path/path.dart' as p;
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:tray_manager/tray_manager.dart';
 import 'package:window_manager/window_manager.dart';
 
@@ -102,6 +108,7 @@ void main() {
   final platform = _HotKeyPlatform();
   final originalPlatform = HotKeyManagerPlatform.instance;
   setUpAll(() {
+    sqfliteFfiInit();
     HotKeyManagerPlatform.instance = platform;
     // Create the singleton outside any individual widget test's FakeAsync zone.
     expect(hotKeyManager.registeredHotKeyList, isEmpty);
@@ -425,6 +432,135 @@ void main() {
       closeTo(Platform.isWindows ? 2518 : 2512, 0.01),
     );
     expect(physicalBounds().top, closeTo(Platform.isWindows ? 318 : 312, 0.01));
+  });
+
+  /// 快速新增会读取草稿（真实数据库），需要让真实事件循环推进后继续泵帧。
+  Future<void> finishDb(WidgetTester tester, Future<void> work) async {
+    var finished = false;
+    final tracked = work.whenComplete(() => finished = true);
+    for (var i = 0; i < 200 && !finished; i++) {
+      await tester.pump(const Duration(milliseconds: 16));
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 5)),
+      );
+    }
+    expect(finished, isTrue, reason: 'Window transition did not complete');
+    await tracked;
+  }
+
+  Future<DesktopNotes> enabledNotes(WidgetTester tester, DeskKind kind) async =>
+      (await tester.runAsync(() async {
+        final root = await Directory.systemTemp.createTemp(
+          'idreaml-desk-composer-',
+        );
+        addTearDown(() => root.delete(recursive: true));
+        final notes = DesktopNotes(
+          DeskRepository(
+            deviceId: 'composer-service',
+            testPath: p.join(root.path, 'desktop.db'),
+            factory: databaseFactoryFfiNoIsolate,
+          ),
+        );
+        await notes.initialize();
+        await notes.updateSettings(kind, {
+          'enabled': true,
+          'monitor': 'secondary',
+        });
+        return notes;
+      }))!;
+
+  testWidgets('快速新增按轨道显示器居中打开，结束后恢复主窗口', (tester) async {
+    useNativeDpi(tester);
+    controller.desktopNotes = await enabledNotes(tester, DeskKind.note);
+    displays.add(
+      display(
+        'secondary',
+        const Rect.fromLTWH(1920, 0, 2560, 1400),
+        scale: 1.5,
+      ),
+    );
+    await finish(tester, desktop.showMain());
+    windowCalls.clear();
+
+    await finishDb(tester, desktop.showComposer(DeskKind.note));
+    expect(controller.composerKind, DeskKind.note);
+    expect(
+      windowCalls.map((call) => call.method),
+      containsAll([
+        'setAsFrameless',
+        'setAlwaysOnTop',
+        'setSkipTaskbar',
+        'show',
+      ]),
+    );
+    expect(
+      (windowCalls
+              .singleWhere((call) => call.method == 'setBackgroundColor')
+              .arguments
+          as Map)['backgroundColorA'],
+      0,
+    );
+    if (Platform.isWindows) {
+      final bounds = physicalBounds();
+      // 410 × 496 的逻辑尺寸按目标屏 1.5 缩放后在可用区域内居中。
+      expect(bounds.width, closeTo(615, .01));
+      expect(bounds.height, closeTo(744, .01));
+      expect(bounds.left, closeTo(2892.5, .01));
+      expect(bounds.top, closeTo(328, .01));
+    }
+
+    await finish(tester, desktop.finishComposer(DeskComposerResult.saved));
+    expect(controller.composerMode, isFalse);
+    expect(bounds.size, const Size(1180, 760));
+    expect(windowCalls.map((call) => call.method), contains('setAlwaysOnTop'));
+    expect(
+      windowCalls
+          .lastWhere((call) => call.method == 'setAlwaysOnTop')
+          .arguments,
+      {'isAlwaysOnTop': false},
+    );
+  });
+
+  testWidgets('快捷面板打开时按 F3 不叠加快速新增，避免共用窗口互相覆盖', (tester) async {
+    useNativeDpi(tester);
+    controller.desktopNotes = await enabledNotes(tester, DeskKind.note);
+    await finish(tester, desktop.showQuick());
+    windowCalls.clear();
+
+    await finish(tester, desktop.showComposer(DeskKind.note));
+    expect(controller.composerMode, isFalse);
+    expect(controller.quickMode, isTrue);
+    expect(windowCalls, isEmpty);
+  });
+
+  testWidgets('快捷面板的新建按钮先收起面板再打开快速新增', (tester) async {
+    useNativeDpi(tester);
+    controller.desktopNotes = await enabledNotes(tester, DeskKind.note);
+    await finish(tester, desktop.showQuick());
+    await desktop.hide();
+    await tester.pump();
+    windowCalls.clear();
+
+    await finishDb(tester, desktop.showComposer(DeskKind.note));
+    expect(controller.composerKind, DeskKind.note);
+    // 快捷面板的会话状态随之结束，避免收起后又在隐藏窗口里重建面板。
+    expect(controller.quickMode, isFalse);
+    expect(windowCalls.map((call) => call.method), contains('show'));
+  });
+
+  testWidgets('快速新增期间打开主窗口或历史会先结束新增会话', (tester) async {
+    useNativeDpi(tester);
+    controller.desktopNotes = await enabledNotes(tester, DeskKind.todo);
+    await finish(tester, desktop.showMain());
+    windowCalls.clear();
+
+    await finishDb(tester, desktop.showComposer(DeskKind.todo));
+    expect(controller.composerKind, DeskKind.todo);
+    await finishDb(tester, desktop.showHistory());
+    expect(controller.composerMode, isFalse);
+    expect(controller.page, AppPage.history);
+    expect(windowCalls.map((call) => call.method), contains('show'));
+    expect(bounds.size, const Size(1180, 760));
   });
 
   test('DWM 属性写入失败时保持原状，不影响快捷面板', () {

@@ -2,6 +2,7 @@ import 'dart:async';
 // `Size` comes from dart:ui here; dart:ffi only provides the native types.
 import 'dart:ffi' hide Size;
 import 'dart:io';
+import 'dart:math' as math;
 
 import 'package:ffi/ffi.dart';
 import 'package:flutter/widgets.dart';
@@ -15,6 +16,7 @@ import '../app_controller.dart';
 import '../desk/desk_models.dart';
 import '../models/clipboard_item.dart';
 import '../models/quick_shortcut.dart';
+import '../ui/desk_composer.dart';
 import 'quick_panel_placement.dart';
 import 'quick_preview_placement.dart';
 import 'quick_paste_service.dart';
@@ -34,6 +36,10 @@ const _dwmncrpEnabled = 2;
 /// DWMWA_COLOR_NONE/DWMWA_COLOR_DEFAULT for [DWMWA_BORDER_COLOR].
 const _dwmColorNone = 0xFFFFFFFE;
 const _dwmColorDefault = 0xFFFFFFFF;
+
+/// 快速新增窗口的逻辑尺寸：便签额外带可选标题，因此比待办略高。
+Size deskComposerSize(DeskKind kind) =>
+    Size(410, kind == DeskKind.note ? 496 : 414);
 
 int _setDwmAttribute(int handle, int attribute, int value) {
   final data = calloc<Uint32>();
@@ -144,7 +150,16 @@ class DesktopService with TrayListener, WindowListener {
   bool _savingShortcut = false;
   bool _exiting = false;
   bool _changingMode = false;
-  bool _quickWindowConfigured = false;
+
+  /// 快捷面板与快速新增共用同一套浮层窗口样式，进入任一模式后只需配置一次。
+  bool _popupWindowConfigured = false;
+  bool _mainVisible = false;
+  bool _composerVisible = false;
+  bool _composerReturnMain = true;
+  bool _composerRestore = true;
+  bool _composerDismissing = false;
+  int? _foregroundBeforeComposer;
+  DeskComposerDismiss? _composerDismiss;
   bool get _quickVisible => quickVisibility.value;
   set _quickVisible(bool value) => quickVisibility.value = value;
 
@@ -167,6 +182,7 @@ class DesktopService with TrayListener, WindowListener {
       await windowManager.show();
       await windowManager.focus();
     });
+    _mainVisible = true;
   }
 
   Future<void> initialize() async {
@@ -203,6 +219,8 @@ class DesktopService with TrayListener, WindowListener {
       controller.setPage(kind == DeskKind.note ? AppPage.notes : AppPage.todos);
     };
     await controller.desktopNotes?.attachNative();
+    controller.desktopNotes?.openComposer = (kind, {hotkey = false}) =>
+        showComposer(kind, hotkey: hotkey);
     await administrator.initialize(requestRestart: false);
     _publishAdministrator();
     try {
@@ -233,6 +251,10 @@ class DesktopService with TrayListener, WindowListener {
     if (_changingMode || _exiting || screenshots.active || _recordingShortcut) {
       return;
     }
+    if (controller.composerMode || _composerVisible) {
+      await _dismissComposer(restore: false);
+    }
+    if (_changingMode) return;
     _changingMode = true;
     final previousTarget = _quickVisible ? _quickPasteTarget : null;
     _quickEpoch++;
@@ -256,34 +278,17 @@ class DesktopService with TrayListener, WindowListener {
         workAreas: [area],
         scale: targetScale,
       );
-      if (!_quickWindowConfigured) {
+      if (!_popupWindowConfigured) {
         await windowManager.hide();
         if (await windowManager.isMinimized()) await windowManager.restore();
         if (await windowManager.isMaximized()) await windowManager.unmaximize();
       }
       await controller.enterQuickMode();
       await windowManager.setMinimumSize(Size.zero);
-      if (!_quickWindowConfigured) {
-        await windowManager.setResizable(false);
-        if (Platform.isWindows) {
-          await windowManager.setAsFrameless();
-          await windowManager.setHasShadow(true);
-        }
-        await windowManager.setAlwaysOnTop(true);
-        await windowManager.setSkipTaskbar(true);
-        _quickWindowConfigured = true;
-      }
-      // Declared on every wake: the main window uses an opaque light backdrop,
-      // and a leftover one turns the area an expanded image preview leaves
-      // empty into a light block.
-      await windowManager.setBackgroundColor(const Color(0x00000000));
-      if (Platform.isWindows) {
-        // Windows still frames this window as a caption window, so the picture
-        // preview would sit inside that shadow, border and rounded corners.
-        _windowFrame.applyQuick(await windowManager.getId());
-      }
+      await _configurePopupWindow();
       await windowManager.setBounds(_toWindowCoordinates(bounds));
       await windowManager.show();
+      _mainVisible = false;
       if (initialScale != targetScale) {
         // Windows may adjust the bounds when changing DPI. A suspended
         // renderer must not hold the window transition lock indefinitely.
@@ -335,45 +340,228 @@ class DesktopService with TrayListener, WindowListener {
     );
   }
 
-  Future<void> showMain() async {
-    if (_changingMode || _exiting) return;
+  /// 打开快速新增浮层：复用同一 Flutter 窗口，居中显示在便签/待办轨道所在
+  /// 显示器，结束后回到进入前的窗口状态（可见的主窗口或托盘隐藏）。
+  Future<void> showComposer(DeskKind kind, {bool hotkey = false}) async {
+    if (_changingMode || _exiting || screenshots.active || _recordingShortcut) {
+      return;
+    }
+    if (_composerVisible || controller.composerMode) return;
+    // 快捷面板仍显示时不叠加第二个浮层；面板已收起（如快捷面板的新建按钮）
+    // 则继续打开快速新增，并结束快捷面板的会话状态。
+    if (_quickVisible) return;
+    final notes = controller.desktopNotes;
+    if (notes == null || !notes.enabled(kind)) return;
     _changingMode = true;
-    _quickWindowConfigured = false;
-    _quickEpoch++;
-    _quickPasteTarget = null;
-    _quickVisible = false;
+    _composerDismiss = null;
     try {
-      if (_previewTransition != null) await _previewTransition;
-      _previewPlacement = null;
+      final draft = await notes.draft(kind);
+      final display = _composerDisplay(
+        await _getDisplays(),
+        notes.config(kind),
+      );
+      final scale = _displayScale(display);
+      final area = _workArea(display);
+      final logical = deskComposerSize(kind);
+      final width = math.min(logical.width, area.width / scale);
+      final height = math.min(logical.height, area.height / scale);
+      final bounds = Rect.fromLTWH(
+        area.left + (area.width - width * scale) / 2,
+        area.top + (area.height - height * scale) / 2,
+        width * scale,
+        height * scale,
+      );
+      _composerReturnMain = _mainVisible;
+      _foregroundBeforeComposer = Platform.isWindows
+          ? await _foregroundOtherThanSelf()
+          : null;
+      _quickEpoch++;
+      _quickPasteTarget = null;
+      _quickVisible = false;
+      if (controller.quickMode) controller.leaveQuickMode();
+      // Read the current scale before the window leaves the main monitor.
+      final initialScale = _windowCoordinateScale;
       await windowManager.hide();
       if (await windowManager.isMinimized()) await windowManager.restore();
       if (await windowManager.isMaximized()) await windowManager.unmaximize();
-      await windowManager.setAlwaysOnTop(false);
-      await windowManager.setSkipTaskbar(false);
-      await windowManager.setResizable(true);
-      if (Platform.isWindows) {
-        await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
-      }
-      await windowManager.setBackgroundColor(const Color(0xFFF4F3F8));
-      if (Platform.isWindows) {
-        // Restore the system frame the quick panel switched off.
-        _windowFrame.applyMain(await windowManager.getId());
-      }
-      await windowManager.setSize(const Size(1180, 760));
-      await windowManager.setMinimumSize(const Size(900, 620));
-      await windowManager.center();
-      controller.leaveQuickMode();
+      await windowManager.setMinimumSize(Size.zero);
+      await _configurePopupWindow();
+      await windowManager.setBounds(_toWindowCoordinates(bounds));
+      // 与 Flutter 管理页编辑一致：编辑期间本进程复制的内容不进入历史。
+      // 该通道失败不应阻断快速新增本身。
+      try {
+        await notes.editing(true);
+      } catch (_) {}
+      controller.enterComposerMode(kind, hotkey: hotkey, draft: draft);
       await windowManager.show();
+      if (initialScale != scale) {
+        await WidgetsBinding.instance.endOfFrame.timeout(
+          const Duration(milliseconds: 100),
+          onTimeout: () {},
+        );
+        await windowManager.setBounds(_toWindowCoordinates(bounds));
+      }
+      await windowManager.setMinimumSize(_toWindowCoordinates(bounds).size);
       await windowManager.focus();
+      _composerVisible = true;
     } finally {
       _changingMode = false;
     }
+  }
+
+  /// 快速新增页面完成草稿处理后调用：隐藏浮层并回到进入前的窗口状态。
+  Future<void> finishComposer(DeskComposerResult result) async {
+    if (!_composerVisible) return;
+    _composerVisible = false;
+    _composerDismiss = null;
+    _changingMode = true;
+    try {
+      await windowManager.hide();
+      controller.leaveComposerMode();
+      try {
+        await controller.desktopNotes?.editing(false);
+      } catch (_) {}
+      if (_exiting || !_composerRestore) return;
+      if (_composerReturnMain) {
+        await _applyMainWindow();
+      } else {
+        _restoreForegroundBeforeComposer();
+      }
+    } finally {
+      _composerRestore = true;
+      _changingMode = false;
+    }
+  }
+
+  /// 页面把「失焦/系统关闭时保存草稿并退出」的入口交给窗口模式。
+  void attachComposerDismiss(DeskComposerDismiss? dismiss) {
+    _composerDismiss = dismiss;
+  }
+
+  Future<void> _dismissComposer({required bool restore}) async {
+    if (_composerDismissing) return;
+    _composerDismissing = true;
+    _composerRestore = restore;
+    try {
+      final dismiss = _composerDismiss;
+      if (dismiss != null) {
+        await dismiss(clearDraft: false);
+      } else if (_composerVisible) {
+        await finishComposer(DeskComposerResult.dismissed);
+      }
+    } finally {
+      _composerDismissing = false;
+      if (_composerVisible) _composerRestore = true;
+    }
+  }
+
+  /// 浮层样式与快捷面板一致：无边框、置顶、跳过任务栏、透明底色。
+  Future<void> _configurePopupWindow() async {
+    if (!_popupWindowConfigured) {
+      await windowManager.setResizable(false);
+      if (Platform.isWindows) {
+        await windowManager.setAsFrameless();
+        await windowManager.setHasShadow(true);
+      }
+      await windowManager.setAlwaysOnTop(true);
+      await windowManager.setSkipTaskbar(true);
+      _popupWindowConfigured = true;
+    }
+    // Declared on every wake: the main window uses an opaque light backdrop,
+    // and a leftover one turns the area an expanded image preview leaves
+    // empty into a light block.
+    await windowManager.setBackgroundColor(const Color(0x00000000));
+    if (Platform.isWindows) {
+      // Windows still frames this window as a caption window, so the picture
+      // preview would sit inside that shadow, border and rounded corners.
+      _windowFrame.applyQuick(await windowManager.getId());
+    }
+  }
+
+  Display _composerDisplay(List<Display> displays, DeskSettings settings) {
+    final wanted = settings.monitor;
+    if (wanted.isNotEmpty) {
+      for (final display in displays) {
+        if (display.id == wanted || display.name == wanted) return display;
+      }
+    }
+    return displays.first;
+  }
+
+  /// 记录进入快速新增前的前台窗口；本应用自己的窗口不作为恢复目标。
+  Future<int?> _foregroundOtherThanSelf() async {
+    try {
+      final foreground = GetForegroundWindow();
+      if (foreground == 0 || foreground == await windowManager.getId()) {
+        return null;
+      }
+      return foreground;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  void _restoreForegroundBeforeComposer() {
+    final handle = _foregroundBeforeComposer;
+    _foregroundBeforeComposer = null;
+    if (!Platform.isWindows || handle == null || handle == 0) return;
+    try {
+      // 主窗口不在屏幕上时回到此前的前台应用，而不是弹出主窗口。
+      if (GetForegroundWindow() != handle) SetForegroundWindow(handle);
+    } catch (_) {
+      // Windows 可能拒绝跨进程恢复前台，焦点会留在系统默认窗口。
+    }
+  }
+
+  Future<void> showMain() async {
+    if (_changingMode || _exiting) return;
+    if (controller.composerMode || _composerVisible) {
+      await _dismissComposer(restore: false);
+    }
+    if (_changingMode) return;
+    _changingMode = true;
+    try {
+      await _applyMainWindow();
+    } finally {
+      _changingMode = false;
+    }
+  }
+
+  Future<void> _applyMainWindow() async {
+    _popupWindowConfigured = false;
+    _quickEpoch++;
+    _quickPasteTarget = null;
+    _quickVisible = false;
+    if (_previewTransition != null) await _previewTransition;
+    _previewPlacement = null;
+    await windowManager.hide();
+    if (await windowManager.isMinimized()) await windowManager.restore();
+    if (await windowManager.isMaximized()) await windowManager.unmaximize();
+    await windowManager.setAlwaysOnTop(false);
+    await windowManager.setSkipTaskbar(false);
+    await windowManager.setResizable(true);
+    if (Platform.isWindows) {
+      await windowManager.setTitleBarStyle(TitleBarStyle.hidden);
+    }
+    await windowManager.setBackgroundColor(const Color(0xFFF4F3F8));
+    if (Platform.isWindows) {
+      // Restore the system frame the quick panel switched off.
+      _windowFrame.applyMain(await windowManager.getId());
+    }
+    await windowManager.setSize(const Size(1180, 760));
+    await windowManager.setMinimumSize(const Size(900, 620));
+    await windowManager.center();
+    controller.leaveQuickMode();
+    await windowManager.show();
+    await windowManager.focus();
+    _mainVisible = true;
   }
 
   Future<void> hide() async {
     _quickEpoch++;
     _quickPasteTarget = null;
     _quickVisible = false;
+    _mainVisible = false;
     await windowManager.hide();
   }
 
@@ -681,6 +869,7 @@ class DesktopService with TrayListener, WindowListener {
   }
 
   Future<void> _exitApp() async {
+    if (controller.composerMode) await _dismissComposer(restore: false);
     _exiting = true;
     _quickVisible = false;
     _quickPasteTarget = null;
@@ -799,7 +988,13 @@ class DesktopService with TrayListener, WindowListener {
 
   @override
   void onWindowClose() {
-    if (!_exiting) hide();
+    if (_exiting) return;
+    if (controller.composerMode) {
+      // 系统关闭等同于关闭按钮：保留草稿后回到进入前的窗口。
+      unawaited(_dismissComposer(restore: true));
+      return;
+    }
+    hide();
   }
 
   @override
@@ -809,12 +1004,13 @@ class DesktopService with TrayListener, WindowListener {
 
   @override
   void onWindowBlur() {
-    if (controller.quickMode &&
-        _quickVisible &&
-        !_changingMode &&
-        !screenshots.active) {
-      unawaited(hide());
+    if (_changingMode || screenshots.active) return;
+    if (controller.composerMode) {
+      // 离开快速新增保留草稿，与原生窗口的失焦语义一致。
+      if (_composerVisible) unawaited(_dismissComposer(restore: true));
+      return;
     }
+    if (controller.quickMode && _quickVisible) unawaited(hide());
   }
 
   @override

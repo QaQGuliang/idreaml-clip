@@ -161,7 +161,7 @@ void main() {
     expect((await b.load()).single.fontFamily, blue.fontFamily);
   });
 
-  test('原生新增的选色随草稿恢复并保存，取消后不影响下一条默认样式', () async {
+  test('快速新增改由 Flutter 页面打开，草稿与保存的通道语义保持不变', () async {
     if (!Platform.isWindows) return;
     const channel = MethodChannel('test/desk_typography');
     const codec = StandardMethodCodec();
@@ -196,6 +196,10 @@ void main() {
       expect(error, isNull);
     }
 
+    final opened = <(DeskKind, bool)>[];
+    notes.openComposer = (kind, {hotkey = false}) async {
+      opened.add((kind, hotkey));
+    };
     final draft = <String, Object?>{
       'kind': 'note',
       'title': '选色草稿',
@@ -205,11 +209,12 @@ void main() {
       'textColor': 0xffe35a6b,
     };
     await incoming('draft', draft);
-    await notes.compose(DeskKind.note);
-    final compose =
-        calls.lastWhere((call) => call.method == 'compose').arguments as Map;
-    expect(compose['textColor'], 0xffe35a6b);
-    expect(compose['fontSize'], 20.0);
+    await notes.compose(DeskKind.note, hotkey: true);
+    // 快速新增已完全由 Flutter 页面负责，不再向原生窗口发消息。
+    expect(opened, [(DeskKind.note, true)]);
+    expect(calls.where((call) => call.method == 'compose'), isEmpty);
+    expect((await notes.draft(DeskKind.note))['textColor'], 0xffe35a6b);
+
     await incoming('save', draft);
     expect(notes.items(DeskKind.note).single.textColor, 0xffe35a6b);
     final published =
@@ -220,6 +225,11 @@ void main() {
     await incoming('draft', draft);
     await incoming('cancel', {'kind': 'note'});
     expect((await notes.draft(DeskKind.note))['textColor'], isNull);
+
+    // 模块关闭后不再打开快速新增。
+    await notes.updateSettings(DeskKind.note, {'enabled': false});
+    await notes.compose(DeskKind.note);
+    expect(opened, hasLength(1));
     notes.dispose();
     await Future<void>.delayed(Duration.zero);
     messenger.setMockMethodCallHandler(channel, null);
