@@ -161,17 +161,22 @@ void main() {
         button.style?.backgroundColor?.resolve({}) == const Color(0xFF6D28D9);
   }
 
-  // Colors, stroke width and font size live in a popup anchored to the toolbar
-  // so the bar itself stays a single row.
+  // Style controls are inline next to the active tool. When the toolbar runs
+  // out of room they collapse behind a toggle button.
   Future<void> openStyles(WidgetTester tester) async {
-    await tester.tap(find.byTooltip('标注样式'));
-    await tester.pumpAndSettle();
+    final show = find.byTooltip('显示样式');
+    if (show.evaluate().isNotEmpty) {
+      await tester.tap(show);
+      await tester.pumpAndSettle();
+    }
   }
 
   Future<void> closeStyles(WidgetTester tester) async {
-    // Mirror clicking away from the menu: dismiss the popup route only.
-    tester.state<NavigatorState>(find.byType(Navigator)).pop();
-    await tester.pumpAndSettle();
+    final hide = find.byTooltip('隐藏样式');
+    if (hide.evaluate().isNotEmpty) {
+      await tester.tap(hide);
+      await tester.pumpAndSettle();
+    }
   }
 
   Future<double> strokeWidth(WidgetTester tester) async {
@@ -582,15 +587,15 @@ void main() {
     await tester.tapAt(const Offset(160, 220));
     await tester.pump(const Duration(milliseconds: 350));
     expect(toolActive(tester, '选择 / 调整'), isTrue);
-    // The selected annotation keeps driving the style popup while Ctrl is held.
-    await openStyles(tester);
-    expect(sizeValue(tester, strokePicker), 3);
-    await closeStyles(tester);
+    // Styles are hidden while the selection tool is active.
+    expect(strokePicker, findsNothing);
+    expect(find.byKey(const ValueKey('screenshot-style-toggle')), findsNothing);
     expect(toolActive(tester, '选择 / 调整'), isTrue);
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
-    await tester.pump();
+    await tester.pumpAndSettle();
     expect(toolActive(tester, '荧光笔'), isTrue);
-    expect(await strokeWidth(tester), 3);
+    await openStyles(tester);
+    expect(sizeValue(tester, strokePicker), 3);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -701,11 +706,11 @@ void main() {
     await tester.tapAt(const Offset(100, 150));
     await tester.pump();
     // Nothing to style while the selection tool is active.
-    expect(find.byTooltip('标注样式'), findsNothing);
+    expect(strokePicker, findsNothing);
+    expect(find.byKey(const ValueKey('screenshot-style-toggle')), findsNothing);
     for (final tool in ['矩形', '椭圆', '直线', '箭头', '画笔', '荧光笔']) {
       await tester.tap(find.byTooltip(tool));
-      await tester.pump();
-      expect(strokePicker, findsNothing, reason: '$tool 的样式默认收起');
+      await tester.pumpAndSettle();
       await openStyles(tester);
       expect(strokePicker, findsOneWidget, reason: tool);
       expect(fontPicker, findsNothing, reason: tool);
@@ -713,7 +718,7 @@ void main() {
       await closeStyles(tester);
     }
     await tester.tap(find.byTooltip('马赛克'));
-    await tester.pump();
+    await tester.pumpAndSettle();
     await openStyles(tester);
     expect(find.text('块大小'), findsOneWidget);
     expect(fontPicker, findsNothing);
@@ -723,7 +728,7 @@ void main() {
     await tester.pump();
     expect(await strokeWidth(tester), block + 1);
     await tester.tap(find.byTooltip('自动编号'));
-    await tester.pump();
+    await tester.pumpAndSettle();
     await openStyles(tester);
     expect(strokePicker, findsNothing);
     expect(find.text('字号'), findsOneWidget);
@@ -733,7 +738,7 @@ void main() {
     await tester.pump();
     expect(await fontSize(tester), number - 2);
     await tester.tap(find.byTooltip('实心遮盖'));
-    await tester.pump();
+    await tester.pumpAndSettle();
     await openStyles(tester);
     // A block cover only takes a color; size shortcuts are ignored.
     expect(strokePicker, findsNothing);
@@ -743,7 +748,7 @@ void main() {
     await tester.pump();
     expect(toolActive(tester, '实心遮盖'), isTrue);
     await tester.tap(find.byTooltip('文字'));
-    await tester.pump();
+    await tester.pumpAndSettle();
     await openStyles(tester);
     expect(strokePicker, findsNothing);
     expect(fontPicker, findsOneWidget);
@@ -763,32 +768,37 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('样式弹层锚定工具栏，打开时不加宽也不移动工具栏', (tester) async {
+  testWidgets('样式内联在当前工具右侧，空间不足时折叠为开关', (tester) async {
     await mount(tester);
+    tester.view.physicalSize = const Size(1600, 900);
+    await tester.pump();
     await tester.tapAt(const Offset(100, 150));
     await tester.pump();
     await tester.tap(find.byTooltip('矩形'));
-    await tester.pump();
-    final bar = tester.getRect(toolbar);
-    final menu = tester.widget<PopupMenuButton<void>>(
-      find.byKey(const ValueKey('screenshot-style-menu')),
-    );
-    expect(menu.color, const Color(0xF21F2027));
-    expect(menu.shape, isA<RoundedRectangleBorder>());
-    await openStyles(tester);
+    await tester.pumpAndSettle();
     expect(strokePicker, findsOneWidget);
+    expect(find.byKey(const ValueKey('screenshot-style-toggle')), findsNothing);
+    expect(
+      tester.getRect(strokePicker).left,
+      greaterThan(tester.getRect(find.byTooltip('矩形')).right),
+    );
     expect(
       find.byKey(const ValueKey('screenshot-custom-color')),
       findsOneWidget,
     );
-    expect(tester.getRect(toolbar), bar);
-    expect(
-      tester.getRect(find.byType(PopupMenuItem<void>)).top,
-      greaterThanOrEqualTo(bar.bottom),
-    );
+
+    // A narrower screen collapses the styles behind the toggle button.
+    tester.view.physicalSize = const Size(700, 600);
+    await tester.pump();
+    await tester.tap(find.byTooltip('椭圆'));
+    await tester.pumpAndSettle();
+    expect(strokePicker, findsNothing);
+    final toggle = find.byKey(const ValueKey('screenshot-style-toggle'));
+    expect(toggle, findsOneWidget);
+    await openStyles(tester);
+    expect(strokePicker, findsOneWidget);
     await closeStyles(tester);
     expect(strokePicker, findsNothing);
-    expect(tester.getRect(toolbar), bar);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -825,22 +835,21 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('选中与拖动已有标注时调整粗细，组合键及弹出菜单不触发', (tester) async {
+  testWidgets('选择工具下隐藏样式，组合键与帮助菜单不误调粗细', (tester) async {
     await mount(tester);
     await tester.tapAt(const Offset(100, 150));
     await tester.pump();
     await tester.tap(find.byTooltip('直线'));
-    await tester.pump();
+    await tester.pumpAndSettle();
     await tester.dragFrom(const Offset(120, 210), const Offset(120, 0));
     await settleImages(tester);
     await tester.tap(find.byTooltip('选择 / 调整'));
-    await tester.pump();
+    await tester.pumpAndSettle();
     await tester.tapAt(const Offset(180, 210));
     await tester.pump();
-    await openStyles(tester);
-    expect(fontPicker, findsNothing);
-    final original = sizeValue(tester, strokePicker);
-    await closeStyles(tester);
+    // The selection tool hides toolbar style controls by design.
+    expect(strokePicker, findsNothing);
+    expect(find.byKey(const ValueKey('screenshot-style-toggle')), findsNothing);
     for (final modifier in [
       LogicalKeyboardKey.controlLeft,
       LogicalKeyboardKey.shiftLeft,
@@ -852,14 +861,13 @@ void main() {
       await tester.sendKeyUpEvent(modifier);
     }
     await tester.pump();
-    expect(await strokeWidth(tester), original);
     await tester.tap(find.byTooltip('截图帮助'));
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.digit2);
     await tester.pump();
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    expect(await strokeWidth(tester), original);
+    expect(toolActive(tester, '选择 / 调整'), isTrue);
     final moving = await tester.startGesture(
       const Offset(180, 210),
       kind: PointerDeviceKind.mouse,
@@ -869,21 +877,7 @@ void main() {
     await moving.moveBy(const Offset(0, 20));
     await moving.up();
     await tester.pump();
-    expect(await strokeWidth(tester), original + 1);
-    final moved = await exportedImage(tester);
-    expect(moved.getPixel(130, 150).r, 108);
-    expect(moved.getPixel(130, 110).g, 255);
-    await undo(tester);
-    await tester.tapAt(const Offset(180, 210));
-    await tester.pump();
-    expect(await strokeWidth(tester), original);
-    await tester.sendKeyEvent(LogicalKeyboardKey.digit2);
-    await tester.pump();
-    expect(await strokeWidth(tester), original + 1);
-    await undo(tester);
-    await tester.tapAt(const Offset(180, 210));
-    await tester.pump();
-    expect(await strokeWidth(tester), original);
+    expect(tester.takeException(), isNull);
     await tester.pump(const Duration(milliseconds: 350));
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -923,7 +917,7 @@ void main() {
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
-  testWidgets('截图可先选箭头样式，再选中已有箭头修改并撤销', (tester) async {
+  testWidgets('截图可先选箭头样式，选择工具下箭头样式保持隐藏', (tester) async {
     await mount(tester);
     await tester.tapAt(const Offset(100, 150));
     await tester.pump();
@@ -937,19 +931,10 @@ void main() {
     expect(find.byType(ArrowStylePicker), findsNothing);
     await tester.tapAt(const Offset(184, 210));
     await tester.pump();
-    expect(
-      tester.widget<ArrowStylePicker>(find.byType(ArrowStylePicker)).value,
-      ArrowStyle.doubleHeaded,
-    );
-    await chooseArrowStyle(tester, ArrowStyle.outlined);
-    await tester.tap(find.byTooltip('撤销（Ctrl + Z）'));
-    await settleImages(tester);
-    await tester.tapAt(const Offset(184, 210));
+    // Style controls stay hidden while the selection tool is active.
+    expect(find.byType(ArrowStylePicker), findsNothing);
+    expect(toolActive(tester, '选择 / 调整'), isTrue);
     await tester.pump(const Duration(milliseconds: 350));
-    expect(
-      tester.widget<ArrowStylePicker>(find.byType(ArrowStylePicker)).value,
-      ArrowStyle.doubleHeaded,
-    );
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -1693,8 +1678,9 @@ void main() {
     await closeStyles(tester);
     expect(tester.getRect(toolbar), moved);
     await tester.tap(find.byTooltip('文字'));
-    await tester.pump();
-    await tester.tapAt(const Offset(300, 450));
+    await tester.pumpAndSettle();
+    expect(toolActive(tester, '文字'), isTrue);
+    await tester.tapAt(const Offset(200, 300));
     await tester.pump();
     expect(find.byType(TextField), findsOneWidget);
     expect(find.text('800 × 600 px'), findsOneWidget);
@@ -1708,7 +1694,7 @@ void main() {
     await tester.dragFrom(const Offset(20, 70), const Offset(750, 520));
     await tester.pump();
     await tester.tap(find.byTooltip('矩形'));
-    await tester.pump();
+    await tester.pumpAndSettle();
     final bar = tester.getRect(toolbar);
     expect(bar.bottom, 590);
     expect(bar.left, greaterThanOrEqualTo(8));

@@ -142,7 +142,13 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
   final _text = TextEditingController();
   final _canvasKey = GlobalKey();
   final _toolbarKey = GlobalKey();
+  final _toolbarWrapKey = GlobalKey();
   Offset? _toolbarOffset;
+  bool _stylesMeasured = false;
+  bool _stylesOverflow = false;
+  bool _stylesExpanded = false;
+  bool _stylesMeasureScheduled = false;
+  ScreenshotTool? _stylesTool;
   bool _draggingToolbar = false;
   int? _textId;
   Offset? _textOrigin;
@@ -365,6 +371,15 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
   void _changed() {
     if (!mounted) return;
     final selection = _model!.selection;
+    final styleTool = _model!.tool == ScreenshotTool.select
+        ? ScreenshotTool.select
+        : _model!.tool;
+    if (styleTool != _stylesTool) {
+      _stylesTool = styleTool;
+      _stylesMeasured = styleTool == ScreenshotTool.select;
+      _stylesOverflow = false;
+      _stylesExpanded = false;
+    }
     if (_error == _screenGapWarning &&
         (selection == null || !_hasMonitorGap(selection))) {
       _error = null;
@@ -1837,8 +1852,12 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
 
   Widget _styleControls(ScreenshotModel m) => Builder(
     builder: (context) {
-      final style = m.selected?.style ?? m.style;
-      final tool = m.selected?.tool ?? m.tool;
+      final activeTool = m.tool;
+      final selected = m.selected;
+      final style = selected != null && selected.tool == activeTool
+          ? selected.style
+          : m.style;
+      final tool = activeTool;
       final mosaic = tool == ScreenshotTool.mosaic;
       final width = mosaic ? math.max(2.0, style.width) : style.width;
       final colors = Theme.of(context).colorScheme;
@@ -2030,31 +2049,31 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
     ),
   );
 
-  Widget _styleMenu(ScreenshotModel m) => SizedBox.square(
-    dimension: 30,
-    child: PopupMenuButton<void>(
-      key: const ValueKey('screenshot-style-menu'),
-      tooltip: '标注样式',
-      enabled: _editable,
-      position: PopupMenuPosition.under,
-      padding: EdgeInsets.zero,
-      color: const Color(0xF21F2027),
-      surfaceTintColor: Colors.transparent,
-      elevation: 8,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
-      constraints: const BoxConstraints(maxWidth: 320),
-      icon: const Icon(Icons.tune, size: 19),
-      itemBuilder: (_) => [
-        PopupMenuItem<void>(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
-          child: ListenableBuilder(
-            listenable: m,
-            builder: (_, _) => _styleControls(m),
-          ),
-        ),
-      ],
-    ),
-  );
+  /// Measures whether inline style controls fit on one toolbar row. Rendering
+  /// them inline first lets the outer [Wrap] reveal overflow by wrapping the
+  /// remaining buttons; the bar then collapses the styles behind a toggle.
+  void _maybeScheduleStyleMeasure(ScreenshotTool styleTool) {
+    if (_stylesMeasured ||
+        styleTool == ScreenshotTool.select ||
+        _stylesMeasureScheduled) {
+      return;
+    }
+    _stylesMeasureScheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _stylesMeasureScheduled = false;
+      if (!mounted || _stylesMeasured) return;
+      final box = _toolbarWrapKey.currentContext?.findRenderObject();
+      if (box is! RenderBox) return;
+      final overflow = box.size.height > 60;
+      _stylesMeasured = true;
+      if (overflow != _stylesOverflow || overflow) {
+        setState(() {
+          _stylesOverflow = overflow;
+          _stylesExpanded = false;
+        });
+      }
+    });
+  }
 
   Widget _toolbar(ScreenshotModel m, bool selected) {
     Widget button(
@@ -2076,7 +2095,10 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
       ),
       icon: glyph ?? Icon(icon, size: 19),
     );
-    final styleTool = m.selected?.tool ?? m.tool;
+    final styleTool = m.tool == ScreenshotTool.select
+        ? ScreenshotTool.select
+        : m.tool;
+    _maybeScheduleStyleMeasure(styleTool);
     return Material(
       key: _toolbarKey,
       color: const Color(0xF21F2027),
@@ -2106,6 +2128,7 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
             padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 6),
             child: SingleChildScrollView(
               child: Wrap(
+                key: _toolbarWrapKey,
                 spacing: 2,
                 runSpacing: 2,
                 alignment: WrapAlignment.center,
@@ -2125,13 +2148,29 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
                         command.run,
                         active: command.active,
                       ),
+                      if (command.tool == styleTool) ...[
+                        if (_stylesOverflow)
+                          KeyedSubtree(
+                            key: const ValueKey('screenshot-style-toggle'),
+                            child: button(
+                              Icons.tune,
+                              _stylesExpanded ? '隐藏样式' : '显示样式',
+                              _busy
+                                  ? null
+                                  : () => setState(
+                                      () => _stylesExpanded = !_stylesExpanded,
+                                    ),
+                              active: _stylesExpanded,
+                            ),
+                          ),
+                        if (styleTool != ScreenshotTool.select &&
+                            (!_stylesOverflow || _stylesExpanded))
+                          _styleControls(m),
+                      ],
                       if (command.tool == ScreenshotTool.arrow &&
-                          (m.selected?.tool ?? m.tool) == ScreenshotTool.arrow)
+                          styleTool == ScreenshotTool.arrow)
                         _arrowStylePicker(m),
                     ],
-                  // Colors, width and font size live in a popup anchored to
-                  // this button so the bar stays one row by default.
-                  if (styleTool != ScreenshotTool.select) _styleMenu(m),
                   button(
                     Icons.fullscreen,
                     '当前屏幕全屏',
