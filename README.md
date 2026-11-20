@@ -9,7 +9,7 @@
 <p align="center">
   <a href="/idreaml/idreaml-clip/src/branch/main/website/guide.md"><strong>完整图文介绍与使用指南 ↗</strong></a>
   &nbsp;·&nbsp;
-  <a href="/idreaml/idreaml-clip/releases/tag/v1.1.9">下载 Windows 版</a>
+  <a href="/idreaml/idreaml-clip/releases/tag/v1.2.0">下载 Windows 版</a>
   &nbsp;·&nbsp;
   <a href="/idreaml/idreaml-clip/src/branch/main/docs/user-guide.md">详细使用说明</a>
 </p>
@@ -22,18 +22,18 @@
 
 ## 下载
 
-当前版本 **1.1.9+9**，支持 **Windows 10 / 11 x64**。本次仅发布 Windows 版本。
+当前版本 **1.2.0**，支持 **Windows 10 / 11 x64**。本次仅发布 Windows 版本。
 
 本版为待办增加可选的时间与提醒，同步记录改为折叠摘要并可打开明细页；截图编辑器默认使用“选择 / 调整”工具，工具栏收拢为单行优先并避免遮挡选区；便签、待办与设置统一使用 18 色色板和 HEX 自定义颜色。
 
 | 安装方式 | 下载与使用 |
 | --- | --- |
-| 安装版 | [下载 EXE 安装包](/idreaml/idreaml-clip/releases/download/v1.1.9/Idreaml-Clip-1.1.9%2B9-windows-x64-setup.exe)，按向导完成安装 |
-| 便携版 | [下载 ZIP](/idreaml/idreaml-clip/releases/download/v1.1.9/Idreaml-Clip-1.1.9%2B9-windows-x64.zip)，完整解压后运行 `idreaml_clip.exe` |
+| 安装版 | [下载 EXE 安装包](/idreaml/idreaml-clip/releases/download/v1.2.0/Idreaml-Clip-1.2.0%2B1-windows-x64-setup.exe)，按向导完成安装 |
+| 便携版 | [下载 ZIP](/idreaml/idreaml-clip/releases/download/v1.2.0/Idreaml-Clip-1.2.0%2B1-windows-x64.zip)，完整解压后运行 `idreaml_clip.exe` |
 
 运行所需组件随包提供，无需额外安装 Flutter、Dart 或 Git。便携版请保留旁边的 DLL 和 `data` 目录；升级前从托盘退出旧版并保留原数据目录。当前安装器尚未进行发布者代码签名。
 
-[完整发布说明与 SHA-256 校验文件](/idreaml/idreaml-clip/releases/tag/v1.1.9) · [本版更新记录](assets/release-info.json)
+[完整发布说明与 SHA-256 校验文件](/idreaml/idreaml-clip/releases/tag/v1.2.0) · [本版更新记录](assets/release-info.json)
 
 ## 能做什么
 

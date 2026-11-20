@@ -2,7 +2,7 @@
 
 <img src="/idreaml/idreaml-clip/raw/branch/main/website/assets/logo.png" alt="理梦剪藏标志" width="76" height="76">
 
-**Windows 10 / 11 x64 · 1.1.9+9**
+**Windows 10 / 11 x64 · 1.2.0**
 
 [返回项目首页](/idreaml/idreaml-clip) · [详细功能与操作边界](../docs/user-guide.md)
 
@@ -16,12 +16,12 @@
 
 ## 下载安装
 
-本次发布为 Windows 1.1.9+9。本版为待办增加可选的时间与提醒，同步记录改为折叠摘要并可打开明细页；截图编辑器默认使用“选择 / 调整”工具，工具栏收拢为单行优先并避免遮挡选区；便签、待办与设置统一使用 18 色色板和 HEX 自定义颜色。运行所需组件已随包提供，无需另外安装 Flutter、Dart 或 Git。
+本次发布为 Windows 1.2.0。本版新增待办时间与提醒、列表时间展示与逾期排序；快速新增改为 Flutter 浮层并跟随桌面列表所在显示器，添加期间列表临时置顶，保存或取消不再弹出主窗口；截图工具栏默认选区左下角，当前工具样式内联并可折叠；同步记录折叠并可打开独立明细页；图片预览直接显示图片。运行所需组件已随包提供，无需另外安装 Flutter、Dart 或 Git。
 
 | 版本 | 安装方式 |
 | --- | --- |
-| [Windows 安装版 EXE][setup] · 约 15.5 MB | 跟随安装向导选择目录和快捷方式。适合首次安装或覆盖升级。 |
-| [Windows 便携 ZIP][portable] · 约 17.5 MB | 完整解压到固定目录，再运行 `idreaml_clip.exe`。保留旁边的 DLL 和 `data` 目录。 |
+| [Windows 安装版 EXE][setup] · 约 15.6 MB | 跟随安装向导选择目录和快捷方式。适合首次安装或覆盖升级。 |
+| [Windows 便携 ZIP][portable] · 约 17.8 MB | 完整解压到固定目录，再运行 `idreaml_clip.exe`。保留旁边的 DLL 和 `data` 目录。 |
 
 [完整发布说明][release] · [安装版 SHA-256][setup-checksum] · [便携版 SHA-256][portable-checksum]
 
@@ -165,12 +165,12 @@
 
 ### 这次也有 macOS 和 Linux 安装包吗？
 
-1.1.9+9 本次仅发布 Windows x64 版本，便签与待办首期也在 Windows 上实现和验证。其他平台以后再适配；本页的操作步骤以当前 Windows 版为准。
+1.2.0 本次仅发布 Windows x64 版本，便签与待办首期也在 Windows 上实现和验证。其他平台以后再适配；本页的操作步骤以当前 Windows 版为准。
 
 [下载 Windows 版并查看完整发布说明][release]
 
-[release]: /idreaml/idreaml-clip/releases/tag/v1.1.9
-[setup]: /idreaml/idreaml-clip/releases/download/v1.1.9/Idreaml-Clip-1.1.9%2B9-windows-x64-setup.exe
-[portable]: /idreaml/idreaml-clip/releases/download/v1.1.9/Idreaml-Clip-1.1.9%2B9-windows-x64.zip
-[setup-checksum]: /idreaml/idreaml-clip/releases/download/v1.1.9/Idreaml-Clip-1.1.9%2B9-windows-x64-setup.exe.sha256
-[portable-checksum]: /idreaml/idreaml-clip/releases/download/v1.1.9/Idreaml-Clip-1.1.9%2B9-windows-x64.zip.sha256
+[release]: /idreaml/idreaml-clip/releases/tag/v1.2.0
+[setup]: /idreaml/idreaml-clip/releases/download/v1.2.0/Idreaml-Clip-1.2.0%2B1-windows-x64-setup.exe
+[portable]: /idreaml/idreaml-clip/releases/download/v1.2.0/Idreaml-Clip-1.2.0%2B1-windows-x64.zip
+[setup-checksum]: /idreaml/idreaml-clip/releases/download/v1.2.0/Idreaml-Clip-1.2.0%2B1-windows-x64-setup.exe.sha256
+[portable-checksum]: /idreaml/idreaml-clip/releases/download/v1.2.0/Idreaml-Clip-1.2.0%2B1-windows-x64.zip.sha256
