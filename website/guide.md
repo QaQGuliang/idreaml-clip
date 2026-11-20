@@ -1,14 +1,14 @@
 # Idreaml Clip · 理梦剪藏应用介绍与使用指南
 
-<img src="/idreaml/idreaml-clip/raw/branch/main/website/assets/logo.png" alt="理梦剪藏标志" width="76" height="76">
+<img src="assets/logo.png" alt="理梦剪藏标志" width="76" height="76">
 
 **Windows 10 / 11 x64 · 1.2.0**
 
-[返回项目首页](/idreaml/idreaml-clip) · [详细功能与操作边界](../docs/user-guide.md)
+[返回项目首页](https://github.com/QaQGuliang/idreaml-clip) · [详细功能与操作边界](../docs/user-guide.md)
 
 用快捷剪切板找回文字和图片，用截图与贴图整理信息，再把灵感和计划放到桌面。应用无需注册，未配置云同步也能使用。需要在多台电脑上共享内容时，可以连接自己的 Git 仓库。
 
-<img src="/idreaml/idreaml-clip/raw/branch/main/website/assets/main-history.png" alt="理梦剪藏全部历史界面：左侧导航、中间剪切板历史、右侧内容详情">
+<img src="assets/main-history.png" alt="理梦剪藏全部历史界面：左侧导航、中间剪切板历史、右侧内容详情">
 
 *全部历史 · 搜索、收藏和预览。界面图使用示例内容。*
 
@@ -43,13 +43,13 @@
 2. 输入关键词筛选，或切到“收藏”。悬停图片和 JSON 可查看预览；图片预览直接显示图片本身，没有卡片底色、边框或投影。
 3. 单击记录，或用 `↑`、`↓` 选中后按 `Enter` 使用。按 `Esc` 收起面板。
 
-<img src="/idreaml/idreaml-clip/raw/branch/main/website/assets/quick-panel.png" alt="快捷剪切板：顶部便签、待办与截图入口，下方提供搜索、最近和收藏">
+<img src="assets/quick-panel.png" alt="快捷剪切板：顶部便签、待办与截图入口，下方提供搜索、最近和收藏">
 
 给常用回复、链接和代码片段加星收藏。复制相同内容时会合并记录，并保留使用次数和最近使用时间。若目标应用限制自动粘贴，可以按 `Ctrl + V` 手动粘贴。
 
 ## 截图与贴图
 
-<img src="/idreaml/idreaml-clip/raw/branch/main/website/assets/capture-toolbar.png" alt="截图工具栏：选择、标注、长截图、撤销重做、贴图和完成">
+<img src="assets/capture-toolbar.png" alt="截图工具栏：选择、标注、长截图、撤销重做、贴图和完成">
 
 - **截图与标注。** 按 `F1` 或点击快捷面板顶部的截图图标。选择区域、窗口或全屏，添加箭头、文字、马赛克等标注，点击“完成”复制图片并保存历史。
 - **调整选区与工具栏。** 进入截图默认使用“选择 / 调整”工具，可先拖动选区或边缘手柄调整范围。工具栏优先排成一行（最多两行），当前工具的颜色、粗细和字号等样式直接显示在工具右侧，后续按钮依次右移；选择工具下隐藏样式，一行放不下时收起为展开/隐藏按钮。默认放在选区左下角（无选区时为屏幕左下角），可能与选区内容重叠，按住空白处可拖到任意位置，本次截图内保持该位置。
@@ -62,7 +62,7 @@
 
 框选一个连续滚动区域，点击“长截图”。手动向下滚动，或在设置中选用自动滚动。自动滚动到底后会停在预览。点击“完成”进入编辑，编辑后再次点击“完成”复制入库。
 
-<img src="/idreaml/idreaml-clip/raw/branch/main/website/assets/long-editor.png" alt="长图编辑工具栏：标注、缩放、贴图、保存和完成">
+<img src="assets/long-editor.png" alt="长图编辑工具栏：标注、缩放、贴图、保存和完成">
 
 长图编辑窗口支持跨屏拖动、缩放和多种箭头样式。两个独立滚动的窗格请分别框选。遇到无法响应自动滚动的页面，可在预览中切换为手动滚动。
 
@@ -72,14 +72,14 @@
 
 | 便签 | 待办 |
 | --- | --- |
-| <img src="/idreaml/idreaml-clip/raw/branch/main/website/assets/desk-notes.png" alt="便签管理界面"> | <img src="/idreaml/idreaml-clip/raw/branch/main/website/assets/desk-todos.png" alt="待办管理界面"> |
+| <img src="assets/desk-notes.png" alt="便签管理界面"> | <img src="assets/desk-todos.png" alt="待办管理界面"> |
 | 支持标题与多行正文，集中搜索、查看和编辑。 | 勾选完成后从桌面收起，在管理页查看和恢复。 |
 
 1. **开启模块。** 在“设置 → 便签与待办”分别开启功能。对应的导航入口、快捷按钮和桌面列表随后显示。
 2. **选择区域。** 分别为两个列表选择显示器和展示区域。每个列表出现在一台显示器上，可在设置中修改位置、大小和外观。
 3. **管理记录。** 在管理页搜索、编辑或删除。关闭功能会隐藏入口和列表，已有内容继续保留。
 
-<img src="/idreaml/idreaml-clip/raw/branch/main/website/assets/desk-settings.png" alt="便签与待办设置：模块开关、预览、显示器与展示区域">
+<img src="assets/desk-settings.png" alt="便签与待办设置：模块开关、预览、显示器与展示区域">
 
 普通应用可以遮住列表。按 `Win + D` 显示桌面后仍可查看。快捷键添加时，对应列表临时显示在其他应用之上，新增窗口出现在列表所在显示器；结束后列表回到底层。快速新增时按 `Ctrl + Enter` 保存；按 `Esc` 或直接离开窗口会保留本机草稿，点击“取消”才会清除。保存或取消都不会弹出主窗口，焦点回到之前的应用。
 
@@ -87,13 +87,13 @@
 
 便签和待办可分别设置默认字体、10–32 字号及文字颜色。单条内容可自定义这些设置，或恢复“跟随列表”。快速新增同样支持选色。选色使用应用内 18 色色板，也可输入 6 位 HEX 值。卡片支持调整毛玻璃底色、渐变和透明度，文字保持不透明。毛玻璃基于静态壁纸。
 
-<img src="/idreaml/idreaml-clip/raw/branch/main/website/assets/desk-settings-style.png" alt="文字样式与卡片外观设置：字体、字号、背景色和透明度">
+<img src="assets/desk-settings-style.png" alt="文字样式与卡片外观设置：字体、字号、背景色和透明度">
 
 ## 图片与 JSON
 
 选中记录后，右侧显示内容详情。
 
-<img src="/idreaml/idreaml-clip/raw/branch/main/website/assets/json-preview.png" alt="JSON 内容详情：左侧原文、右侧格式化与层级折叠">
+<img src="assets/json-preview.png" alt="JSON 内容详情：左侧原文、右侧格式化与层级折叠">
 
 - **图片。** 历史详情按原比例显示预览并支持缩放，快捷面板也可悬停查看。
 - **JSON。** “复制内容”保留原始文本，“复制格式化 JSON”复制完整的格式化结果。可以折叠节点，或拖动分隔线调整阅读宽度。
@@ -106,7 +106,7 @@
 2. 在“云同步”选择平台，填写仓库 HTTPS 地址、用户名、令牌和分支，保存连接。
 3. 点击“立即同步”。另一台设备使用同一仓库和分支。可选 5、10 或 30 分钟的自动同步间隔。
 
-<img src="/idreaml/idreaml-clip/raw/branch/main/website/assets/cloud-sync.png" alt="云同步页面：平台选择和本地与云端状态">
+<img src="assets/cloud-sync.png" alt="云同步页面：平台选择和本地与云端状态">
 
 便签与待办分别开启同步，覆盖内容、时间与提醒、单条文字样式、完成和删除状态。模块关闭时暂停该模块同步。多设备同时修改会保留双方版本，可在管理页处理。显示器、展示位置、列表默认主题、草稿和已提醒状态保存在各台电脑上。同步记录默认折叠显示最近结果，点击“查看全部”可按天查看，并筛选成功或失败记录。
 
@@ -169,8 +169,8 @@
 
 [下载 Windows 版并查看完整发布说明][release]
 
-[release]: /idreaml/idreaml-clip/releases/tag/v1.2.0
-[setup]: /idreaml/idreaml-clip/releases/download/v1.2.0/Idreaml-Clip-1.2.0%2B1-windows-x64-setup.exe
-[portable]: /idreaml/idreaml-clip/releases/download/v1.2.0/Idreaml-Clip-1.2.0%2B1-windows-x64.zip
-[setup-checksum]: /idreaml/idreaml-clip/releases/download/v1.2.0/Idreaml-Clip-1.2.0%2B1-windows-x64-setup.exe.sha256
-[portable-checksum]: /idreaml/idreaml-clip/releases/download/v1.2.0/Idreaml-Clip-1.2.0%2B1-windows-x64.zip.sha256
+[release]: https://github.com/QaQGuliang/idreaml-clip/releases/tag/v1.2.0
+[setup]: https://github.com/QaQGuliang/idreaml-clip/releases/download/v1.2.0/Idreaml-Clip-1.2.0%2B1-windows-x64-setup.exe
+[portable]: https://github.com/QaQGuliang/idreaml-clip/releases/download/v1.2.0/Idreaml-Clip-1.2.0%2B1-windows-x64.zip
+[setup-checksum]: https://github.com/QaQGuliang/idreaml-clip/releases/download/v1.2.0/Idreaml-Clip-1.2.0%2B1-windows-x64-setup.exe.sha256
+[portable-checksum]: https://github.com/QaQGuliang/idreaml-clip/releases/download/v1.2.0/Idreaml-Clip-1.2.0%2B1-windows-x64.zip.sha256

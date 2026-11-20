@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="/idreaml/idreaml-clip/raw/branch/main/website/assets/logo.png" width="76" height="76" alt="理梦剪藏 Logo">
+  <img src="https://qaqguliang.github.io/idreaml-clip/assets/logo.png" width="76" height="76" alt="理梦剪藏 Logo">
 </p>
 
 <h1 align="center">Idreaml Clip · 理梦剪藏</h1>
@@ -7,18 +7,18 @@
 <p align="center">找回复制过的内容，把灵感和计划留在桌面。</p>
 
 <p align="center">
-  <a href="/idreaml/idreaml-clip/src/branch/main/website/guide.md"><strong>完整图文介绍与使用指南 ↗</strong></a>
+  <a href="https://qaqguliang.github.io/idreaml-clip/"><strong>完整图文介绍与使用指南 ↗</strong></a>
   &nbsp;·&nbsp;
-  <a href="/idreaml/idreaml-clip/releases/tag/v1.2.0">下载 Windows 版</a>
+  <a href="https://github.com/QaQGuliang/idreaml-clip/releases/tag/v1.2.0">下载 Windows 版</a>
   &nbsp;·&nbsp;
-  <a href="/idreaml/idreaml-clip/src/branch/main/docs/user-guide.md">详细使用说明</a>
+  <a href="https://github.com/QaQGuliang/idreaml-clip/blob/main/docs/user-guide.md">详细使用说明</a>
 </p>
 
 理梦剪藏是一款本地优先的桌面工具，提供剪切板历史、快捷粘贴、截图与贴图，以及独立的桌面便签和待办。无需注册账号，未配置云同步也能使用。
 
-<a href="/idreaml/idreaml-clip/src/branch/main/website/guide.md"><img src="/idreaml/idreaml-clip/raw/branch/main/website/assets/main-history.png" alt="全部历史：搜索、收藏与内容预览"></a>
+<a href="https://qaqguliang.github.io/idreaml-clip/"><img src="https://qaqguliang.github.io/idreaml-clip/assets/main-history.png" alt="全部历史：搜索、收藏与内容预览"></a>
 
-> **[打开完整图文指南 →](website/guide.md)** 通过界面截图、操作步骤和快捷键说明，了解每项功能。
+> **[打开完整图文指南 →](https://qaqguliang.github.io/idreaml-clip/)** 通过界面截图、操作步骤和快捷键说明，了解每项功能。
 
 ## 下载
 
@@ -28,12 +28,12 @@
 
 | 安装方式 | 下载与使用 |
 | --- | --- |
-| 安装版 | [下载 EXE 安装包](/idreaml/idreaml-clip/releases/download/v1.2.0/Idreaml-Clip-1.2.0%2B1-windows-x64-setup.exe)，按向导完成安装 |
-| 便携版 | [下载 ZIP](/idreaml/idreaml-clip/releases/download/v1.2.0/Idreaml-Clip-1.2.0%2B1-windows-x64.zip)，完整解压后运行 `idreaml_clip.exe` |
+| 安装版 | [下载 EXE 安装包](https://github.com/QaQGuliang/idreaml-clip/releases/download/v1.2.0/Idreaml-Clip-1.2.0%2B1-windows-x64-setup.exe)，按向导完成安装 |
+| 便携版 | [下载 ZIP](https://github.com/QaQGuliang/idreaml-clip/releases/download/v1.2.0/Idreaml-Clip-1.2.0%2B1-windows-x64.zip)，完整解压后运行 `idreaml_clip.exe` |
 
 运行所需组件随包提供，无需额外安装 Flutter、Dart 或 Git。便携版请保留旁边的 DLL 和 `data` 目录；升级前从托盘退出旧版并保留原数据目录。当前安装器尚未进行发布者代码签名。
 
-[完整发布说明与 SHA-256 校验文件](/idreaml/idreaml-clip/releases/tag/v1.2.0) · [本版更新记录](assets/release-info.json)
+[完整发布说明与 SHA-256 校验文件](https://github.com/QaQGuliang/idreaml-clip/releases/tag/v1.2.0) · [本版更新记录](assets/release-info.json)
 
 ## 能做什么
 
@@ -49,9 +49,9 @@
 <details>
 <summary>查看快捷剪切板与 JSON 预览</summary>
 
-<p align="center"><img src="/idreaml/idreaml-clip/raw/branch/main/website/assets/quick-panel.png" width="347" alt="快捷剪切板：搜索、收藏与便签待办快捷入口"></p>
+<p align="center"><img src="https://qaqguliang.github.io/idreaml-clip/assets/quick-panel.png" width="347" alt="快捷剪切板：搜索、收藏与便签待办快捷入口"></p>
 
-<img src="/idreaml/idreaml-clip/raw/branch/main/website/assets/json-preview.png" alt="JSON 详情：左侧原文，右侧格式化与层级折叠">
+<img src="https://qaqguliang.github.io/idreaml-clip/assets/json-preview.png" alt="JSON 详情：左侧原文，右侧格式化与层级折叠">
 
 </details>
 
@@ -83,7 +83,7 @@
 
 | 便签 | 待办 |
 | --- | --- |
-| <img src="/idreaml/idreaml-clip/raw/branch/main/website/assets/desk-notes.png" alt="便签管理界面"> | <img src="/idreaml/idreaml-clip/raw/branch/main/website/assets/desk-todos.png" alt="待办管理界面"> |
+| <img src="https://qaqguliang.github.io/idreaml-clip/assets/desk-notes.png" alt="便签管理界面"> | <img src="https://qaqguliang.github.io/idreaml-clip/assets/desk-todos.png" alt="待办管理界面"> |
 | 记录标题与多行正文，集中搜索、编辑和删除 | 勾选完成后从桌面隐藏，在管理页查看和恢复 |
 
 两个模块分别支持默认字体、10–32 字号和文字颜色；管理页新增或编辑可设置单条样式，也可恢复“跟随列表”。快速新增支持选色；按 `Esc` 或直接离开窗口会保留本机草稿，点击“取消”才会清除。快速新增会显示在对应桌面列表所在的显示器，添加期间列表临时置顶；保存或取消后不弹出主窗口，焦点回到之前的应用。
