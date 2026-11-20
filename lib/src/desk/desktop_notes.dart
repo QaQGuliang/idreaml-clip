@@ -84,6 +84,8 @@ class DesktopNotes extends ChangeNotifier {
         await publish();
       });
 
+  /// 保存一条便签/待办。时间与提醒为可空的整体覆盖：未传即清空，
+  /// 编辑既有条目时调用方需回传原值（[toggle] 已按此处理）。
   Future<void> save(
     DeskKind kind, {
     String? id,
@@ -94,6 +96,10 @@ class DesktopNotes extends ChangeNotifier {
     String? fontFamily,
     double? fontSize,
     int? textColor,
+    int? startAt,
+    int? endAt,
+    int? remindAt,
+    int? remindBeforeMinutes,
     Set<String>? expected,
   }) async {
     if (!enabled(kind)) throw StateError('${kind.label}功能未开启');
@@ -107,11 +113,16 @@ class DesktopNotes extends ChangeNotifier {
       fontFamily: fontFamily,
       fontSize: fontSize,
       textColor: textColor,
+      startAt: startAt,
+      endAt: endAt,
+      remindAt: remindAt,
+      remindBeforeMinutes: remindBeforeMinutes,
       expected: expected,
     );
     await reload();
   }
 
+  // 勾选完成只改变完成状态，其余字段（含时间与提醒）原样回写。
   Future<void> toggle(DeskEntry entry) => save(
     entry.kind,
     id: entry.id,
@@ -121,13 +132,23 @@ class DesktopNotes extends ChangeNotifier {
     fontFamily: entry.fontFamily,
     fontSize: entry.fontSize,
     textColor: entry.textColor,
+    startAt: entry.startAt,
+    endAt: entry.endAt,
+    remindAt: entry.remindAt,
+    remindBeforeMinutes: entry.remindBeforeMinutes,
     expected: {entry.revision},
   );
+  // 删除会把时间与提醒一并回传；仓库对 deleted 版本统一清空字段，
+  // 与标题、正文和文字样式的墓碑行为一致。
   Future<void> remove(DeskEntry entry) => save(
     entry.kind,
     id: entry.id,
     body: '',
     deleted: true,
+    startAt: entry.startAt,
+    endAt: entry.endAt,
+    remindAt: entry.remindAt,
+    remindBeforeMinutes: entry.remindBeforeMinutes,
     expected: {entry.revision},
   );
 

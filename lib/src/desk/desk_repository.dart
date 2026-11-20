@@ -90,19 +90,31 @@ class DeskRepository {
     String? fontFamily,
     double? fontSize,
     int? textColor,
+    int? startAt,
+    int? endAt,
+    int? remindAt,
+    int? remindBeforeMinutes,
     Set<String>? expected,
   }) => _access(
     (db) => db.transaction((tx) async {
-      if (title.length > 120 ||
-          body.length > 20000 ||
+      if (title.length > deskTitleMaxLength ||
+          body.length > deskBodyMaxLength ||
           (!deleted && body.trim().isEmpty)) {
-        throw const FormatException('请填写内容，标题最多 120 字，正文最多 20000 字');
+        throw const FormatException(
+          '请填写内容，标题最多 $deskTitleMaxLength 字，正文最多 $deskBodyMaxLength 字',
+        );
       }
       if (!validDeskFontFamily(fontFamily) ||
           !validDeskFontSize(fontSize) ||
           !validDeskTextColor(textColor)) {
         throw const FormatException('文字样式无效：字号须为 10–32，颜色须为不透明颜色');
       }
+      validateDeskSchedule(
+        startAt: startAt,
+        endAt: endAt,
+        remindAt: remindAt,
+        remindBeforeMinutes: remindBeforeMinutes,
+      );
       final itemId = id ?? const Uuid().v4();
       final previous =
           (await tx.query(
@@ -142,6 +154,10 @@ class DeskRepository {
             : fontFamily!.trim(),
         fontSize: deleted ? null : fontSize,
         textColor: deleted ? null : textColor,
+        startAt: deleted ? null : startAt,
+        endAt: deleted ? null : endAt,
+        remindAt: deleted ? null : remindAt,
+        remindBeforeMinutes: deleted ? null : remindBeforeMinutes,
         created: previous.isEmpty ? now : previous.first.created,
         updated: now,
         clock: clock,
