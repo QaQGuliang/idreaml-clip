@@ -276,7 +276,7 @@ void main() {
         windowCalls
             .singleWhere((call) => call.method == 'setHasShadow')
             .arguments,
-        {'hasShadow': false},
+        {'hasShadow': true},
       );
     } else {
       expect(
@@ -284,7 +284,7 @@ void main() {
         isNot(contains('setAsFrameless')),
       );
     }
-    expect(physicalBounds(), const Rect.fromLTWH(512, 312, 347, 427));
+    expect(physicalBounds(), const Rect.fromLTWH(512, 312, 430, 570));
     expect(controller.quickMode, isTrue);
     final hides = windowCalls.where((call) => call.method == 'hide').length;
     desktop.onWindowBlur();
@@ -353,11 +353,14 @@ void main() {
       ),
     );
     await finish(tester, desktop.showQuick());
+    final quickBounds = physicalBounds();
     expect(
-      physicalBounds().size,
-      Platform.isWindows
-          ? const Size(347 * 1.5, 427 * 1.5)
-          : const Size(347, 427),
+      quickBounds.width,
+      closeTo(Platform.isWindows ? 430 * 1.5 : 430, 0.01),
+    );
+    expect(
+      quickBounds.height,
+      closeTo(Platform.isWindows ? 570 * 1.5 : 570, 0.01),
     );
     expect(
       physicalBounds().left,

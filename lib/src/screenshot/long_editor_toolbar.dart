@@ -46,7 +46,7 @@ extension _EditorToolbar on _ScreenshotEditorState {
     ),
     _EditorCommand(
       Icons.redo,
-      '重做（Ctrl + Y）',
+      '重做（Ctrl + Shift + Z）',
       _editable && m.canRedo ? m.redo : null,
     ),
     if (m.selected != null)
@@ -129,6 +129,12 @@ extension _EditorToolbar on _ScreenshotEditorState {
                 _commitText();
                 m.selectAll(m.screen);
               },
+      ),
+      _EditorCommand(
+        Icons.colorize,
+        '取色器（F2）',
+        _canPickColor ? _togglePicker : null,
+        active: _showColorPicker,
       ),
       ...history.skip(showHistory ? 2 : 0),
     ];

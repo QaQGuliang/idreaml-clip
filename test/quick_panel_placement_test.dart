@@ -12,7 +12,7 @@ void main() {
       workAreas: [primary],
     );
     expect(bounds.topLeft, const Offset(512, 312));
-    expect(bounds.size, const Size(347, 427));
+    expect(bounds.size, const Size(430, 570));
   });
 
   test('靠近右下角时翻转到左上方并避开任务栏', () {

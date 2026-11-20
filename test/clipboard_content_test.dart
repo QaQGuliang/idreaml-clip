@@ -7,10 +7,11 @@ import 'package:idreaml_clip/src/services/clipboard_image_codec.dart';
 
 void main() {
   test('列表摘要折叠换行并截断长条目，保留完整的复制内容', () {
-    final prefix = 'a' * 255;
+    final prefix = 'a' * 149;
     final text = '$prefix😀\n结尾';
     final payload = ClipboardContent.text(text);
     expect(payload.summary, '$prefix…');
+    expect(payload.summary.length, 150);
     expect(payload.content, text);
     expect(const ClipboardContent.text('a\r\nb').summary, 'a b');
   });

@@ -635,4 +635,116 @@ void main() {
       await otherDb.close();
     }
   });
+
+  test('探测目录区分空目录、当前版本、旧版数据库与未知内容', () async {
+    final empty = Directory(p.join(sandbox.path, 'empty'));
+    await empty.create();
+    expect(
+      (await storage.probeDestination(empty.path)).kind,
+      StorageKind.empty,
+    );
+
+    final current = Directory(p.join(sandbox.path, 'current'));
+    await Directory(p.join(current.path, 'database')).create(recursive: true);
+    await Directory(p.join(current.path, 'config')).create(recursive: true);
+    await File(p.join(current.path, DataStorage.markerName))
+        .writeAsString('identity');
+    final currentDb = await databaseFactoryFfi.openDatabase(
+      p.join(current.path, 'database', 'clipboard.db'),
+      options: OpenDatabaseOptions(
+        version: 3,
+        onCreate: (db, _) async =>
+            db.execute('CREATE TABLE sample (id INTEGER)'),
+      ),
+    );
+    await currentDb.close();
+    final currentSettings = await databaseFactoryFfi.openDatabase(
+      p.join(current.path, 'config', 'settings.db'),
+      options: OpenDatabaseOptions(
+        version: 1,
+        onCreate: (db, _) async =>
+            db.execute('CREATE TABLE sample (id INTEGER)'),
+      ),
+    );
+    await currentSettings.close();
+    final currentProbe = await storage.probeDestination(current.path);
+    expect(currentProbe.kind, StorageKind.current);
+    expect(currentProbe.detail, contains('v3'));
+
+    final legacy = Directory(p.join(sandbox.path, 'legacy'));
+    await Directory(p.join(legacy.path, 'database')).create(recursive: true);
+    final legacyDb = await databaseFactoryFfi.openDatabase(
+      p.join(legacy.path, 'database', 'clipboard.db'),
+      options: OpenDatabaseOptions(version: 2, onCreate: (db, _) async {}),
+    );
+    await legacyDb.close();
+    expect(
+      (await storage.probeDestination(legacy.path)).kind,
+      StorageKind.legacy,
+    );
+
+    final future = Directory(p.join(sandbox.path, 'future'));
+    await Directory(p.join(future.path, 'database')).create(recursive: true);
+    final futureDb = await databaseFactoryFfi.openDatabase(
+      p.join(future.path, 'database', 'clipboard.db'),
+      options: OpenDatabaseOptions(version: 99, onCreate: (db, _) async {}),
+    );
+    await futureDb.close();
+    final futureProbe = await storage.probeDestination(future.path);
+    expect(futureProbe.kind, StorageKind.unknown);
+    expect(futureProbe.detail, contains('v99'));
+
+    final junk = Directory(p.join(sandbox.path, 'junk'));
+    await junk.create();
+    await File(p.join(junk.path, 'notes.txt')).writeAsString('x');
+    final junkProbe = await storage.probeDestination(junk.path);
+    expect(junkProbe.kind, StorageKind.unknown);
+    expect(junkProbe.detail, contains('notes.txt'));
+
+    await expectLater(
+      repository.adoptStorage(junk.path),
+      throwsA(isA<StorageException>()),
+    );
+  });
+
+  test('接管现有数据目录后直接使用其中的历史，原目录保留', () async {
+    await repository.captureText('导入前的内容');
+    await database.database.execute('PRAGMA wal_checkpoint(TRUNCATE)');
+    final oldRoot = storage.root.path;
+    final destination = Directory(p.join(sandbox.path, 'imported'));
+    await _copyTree(storage.root, destination);
+
+    expect(
+      (await storage.probeDestination(destination.path)).kind,
+      StorageKind.current,
+    );
+    await storage.adoptTo(
+      destination.path,
+      close: database.close,
+      open: () => database.open(verify: true),
+    );
+    expect(storage.samePath(storage.root.path, destination.path), isTrue);
+    expect(
+      (await repository.list()).map((item) => item.content),
+      contains('导入前的内容'),
+    );
+    expect(await Directory(oldRoot).exists(), isTrue);
+    final locator = jsonDecode(await File(storage.locatorPath).readAsString());
+    expect(
+      storage.samePath(locator['path'] as String, destination.path),
+      isTrue,
+    );
+  });
+}
+
+Future<void> _copyTree(Directory source, Directory target) async {
+  await target.create(recursive: true);
+  await for (final entity in source.list(followLinks: false)) {
+    final path = p.join(target.path, p.basename(entity.path));
+    if (entity is Directory) {
+      await _copyTree(entity, Directory(path));
+    } else if (entity is File) {
+      await entity.copy(path);
+    }
+  }
 }

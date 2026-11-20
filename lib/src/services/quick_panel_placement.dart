@@ -1,7 +1,7 @@
 import 'dart:math' as math;
 import 'dart:ui';
 
-const quickPanelSize = Size(347, 427);
+const quickPanelSize = Size(430, 570);
 
 Rect nearestWorkArea(Offset pointer, List<Rect> workAreas) {
   if (workAreas.isEmpty) {

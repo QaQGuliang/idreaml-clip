@@ -118,13 +118,26 @@ void main() {
     await openMenu(tester, '剪切板内容 1');
     expect(copiedText, isNull);
     expect(find.widgetWithText(MenuItemButton, '复制'), findsOneWidget);
+    expect(find.widgetWithText(MenuItemButton, '收藏'), findsOneWidget);
     expect(find.widgetWithText(MenuItemButton, '删除'), findsOneWidget);
+    expect(find.widgetWithText(MenuItemButton, '贴图'), findsNothing);
     await tester.tap(find.widgetWithText(MenuItemButton, '复制'));
     await tester.pumpAndSettle();
     expect(copiedText, '剪切板内容 1');
     expect(desktop.hides, 1);
     expect(repository.deletedIds, isEmpty);
     expect(desktop.quickUsePasteRequests, [false]);
+  });
+
+  testWidgets('右键收藏作用于目标条目并保持面板打开', (tester) async {
+    await mount(tester);
+    await openMenu(tester, '剪切板内容 1');
+    await tester.tap(find.widgetWithText(MenuItemButton, '收藏'));
+    await tester.pumpAndSettle();
+    expect(repository.favoriteIds, ['item-1']);
+    expect(desktop.hides, 0);
+    expect(copiedText, isNull);
+    expect(find.text('已收藏'), findsOneWidget);
   });
 
   testWidgets('右键删除只删除目标条目，保持面板打开', (tester) async {
@@ -167,9 +180,14 @@ void main() {
     expect(desktop.hides, 0);
   });
 
-  testWidgets('菜单打开时 Esc 关闭整个面板', (tester) async {
+  testWidgets('菜单打开时 Esc 先关菜单，再次 Esc 关闭整个面板', (tester) async {
     await mount(tester);
     await openMenu(tester, '剪切板内容 1');
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await tester.pumpAndSettle();
+    expect(find.byType(MenuItemButton), findsNothing);
+    expect(desktop.hides, 0);
+    expect(copiedText, isNull);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
     expect(desktop.hides, 1);

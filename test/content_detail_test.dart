@@ -11,6 +11,7 @@ import 'package:idreaml_clip/src/models/clipboard_content.dart';
 import 'package:idreaml_clip/src/models/clipboard_item.dart';
 import 'package:idreaml_clip/src/models/quick_shortcut.dart';
 import 'package:idreaml_clip/src/ui/clipboard_image.dart';
+import 'package:idreaml_clip/src/ui/common.dart';
 import 'package:idreaml_clip/src/ui/shortcut_dialog.dart';
 import 'package:idreaml_clip/src/ui/json_split_preview.dart';
 import 'package:idreaml_clip/src/ui/json_tree_view.dart';
@@ -58,6 +59,13 @@ void main() {
     await controller.reload();
   });
   tearDown(() => controller.dispose());
+
+  test('deviceLabel 区分本机与远程设备', () {
+    final remote = item('remote', const ClipboardContent.text('x'));
+    expect(deviceLabel(remote, localDeviceId: 'test'), '本机 · test');
+    expect(deviceLabel(remote, localDeviceId: 'other-device'), '设备 · test');
+    expect(deviceLabel(remote), '本机 · test');
+  });
 
   Future<void> mount(
     WidgetTester tester, {
@@ -144,6 +152,11 @@ void main() {
     await tester.pumpAndSettle();
     expect(copied, raw);
     expect(repository.items.first.content, raw);
+    await tester.tap(find.byTooltip('复制格式化 JSON'));
+    await tester.pumpAndSettle();
+    expect(copied, formatted);
+    expect(repository.usedIds, contains('nested'));
+    expect(find.text('已复制到系统剪切板'), findsOneWidget);
     controller.selectHistory('array');
     await tester.pumpAndSettle();
     expect(tester.widget<SelectableText>(rawFinder).data, array);

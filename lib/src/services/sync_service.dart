@@ -225,6 +225,11 @@ class SyncService extends ChangeNotifier {
         }
       });
 
+  Future<Directory?> currentWorktree() async {
+    final current = config;
+    return current == null ? null : await _worktree(current);
+  }
+
   Future<Directory> _worktree(SyncConfig current, {String suffix = ''}) async {
     final root =
         _repository.storage?.sync ??

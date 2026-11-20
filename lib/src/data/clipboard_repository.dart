@@ -35,6 +35,9 @@ class ClipboardRepository {
   Future<T> access<T>(Future<T> Function() action) => _database.access(action);
   Future<StorageMoveResult> moveStorage(String path) => _database.moveTo(path);
 
+  Future<StorageMoveResult> adoptStorage(String path) =>
+      _database.adoptTo(path);
+
   // The SQLite binding's UTF-8 decoder removes a leading BOM. Read those
   // values with a prefix so the original clipboard text survives a round trip.
   static const _contentColumns = [
@@ -85,6 +88,8 @@ class ClipboardRepository {
     if (value == null) throw StateError('Device has not been initialized.');
     return value;
   }
+
+  String? get localDeviceId => _deviceId;
 
   String get deviceName =>
       Platform.environment['COMPUTERNAME'] ??
@@ -240,27 +245,12 @@ class ClipboardRepository {
     });
   });
 
-  Future<List<ClipboardItem>> list({
-    String query = '',
+  static (List<String>, List<Object?>) _listFilter({
     bool favoritesOnly = false,
     bool todayOnly = false,
-    int? limit,
-    int offset = 0,
-    bool loadImages = true,
-  }) => access(() async {
+  }) {
     final where = <String>[favoritesOnly ? 'favorite = 1' : 'deleted = 0'];
     final args = <Object?>[];
-    if (query.trim().isNotEmpty) {
-      where.add(
-        "((type NOT LIKE 'image/%' AND instr(lower(content), lower(?)) > 0) "
-        "OR (type LIKE 'image/%' AND (instr(lower(type), lower(?)) > 0 OR ? = '图片'))) ",
-      );
-      args.addAll([
-        query.trim(),
-        query.trim().toLowerCase() == 'jpg' ? 'jpeg' : query.trim(),
-        query.trim(),
-      ]);
-    }
     if (todayOnly) {
       final now = DateTime.now();
       final start = DateTime(
@@ -271,16 +261,91 @@ class ClipboardRepository {
       where.add('last_used_at >= ?');
       args.add(start);
     }
+    return (where, args);
+  }
+
+  static final _whitespace = RegExp(r'\s+');
+
+  static bool _matchesQuery(ClipboardItem item, String query) {
+    final lower = query.toLowerCase();
+    if (item.isImage) {
+      final typeQuery = lower == 'jpg' ? 'jpeg' : lower;
+      return item.type.toLowerCase().contains(typeQuery) || query == '图片';
+    }
+    return item.content
+        .replaceAll(_whitespace, ' ')
+        .toLowerCase()
+        .contains(lower);
+  }
+
+  Future<int> count({
+    String query = '',
+    bool favoritesOnly = false,
+    bool todayOnly = false,
+  }) => access(() async {
+    final (where, args) = _listFilter(
+      favoritesOnly: favoritesOnly,
+      todayOnly: todayOnly,
+    );
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) {
+      final rows = await _db.rawQuery(
+        'SELECT COUNT(*) AS c FROM clipboard_item WHERE ${where.join(' AND ')}',
+        args,
+      );
+      return (rows.first['c'] as int?) ?? 0;
+    }
+    final rows = await _db.query(
+      'clipboard_item',
+      columns: _contentColumns,
+      where: where.join(' AND '),
+      whereArgs: args,
+    );
+    return (await _items(
+      rows,
+      loadImages: false,
+    )).where((item) => _matchesQuery(item, trimmed)).length;
+  });
+
+  Future<List<ClipboardItem>> list({
+    String query = '',
+    bool favoritesOnly = false,
+    bool todayOnly = false,
+    int? limit,
+    int offset = 0,
+    bool loadImages = true,
+  }) => access(() async {
+    final (where, args) = _listFilter(
+      favoritesOnly: favoritesOnly,
+      todayOnly: todayOnly,
+    );
+    final trimmed = query.trim();
+    if (trimmed.isEmpty) {
+      final rows = await _db.query(
+        'clipboard_item',
+        columns: _contentColumns,
+        where: where.join(' AND '),
+        whereArgs: args,
+        orderBy: 'last_used_at DESC, rowid ASC',
+        limit: limit ?? (offset == 0 ? null : -1),
+        offset: offset == 0 ? null : offset,
+      );
+      return _items(rows, loadImages: loadImages);
+    }
+    // Whitespace-normalized matching cannot run in SQL; filter in Dart so
+    // phrases spanning line breaks still match, then paginate the result.
     final rows = await _db.query(
       'clipboard_item',
       columns: _contentColumns,
       where: where.join(' AND '),
       whereArgs: args,
       orderBy: 'last_used_at DESC, rowid ASC',
-      limit: limit ?? (offset == 0 ? null : -1),
-      offset: offset == 0 ? null : offset,
     );
-    return _items(rows, loadImages: loadImages);
+    final matched = (await _items(
+      rows,
+      loadImages: loadImages,
+    )).where((item) => _matchesQuery(item, trimmed)).toList();
+    return matched.skip(offset).take(limit ?? matched.length).toList();
   });
 
   Future<ClipboardContent> readPayload(ClipboardItem item) => access(() async {

@@ -76,7 +76,7 @@ void main() {
       LogicalKeyboardKey.keyQ,
     ]);
     expect(label(tester), Platform.isMacOS ? 'Option + Q' : 'Alt + Q');
-    await tester.tap(find.text('保存'));
+    await tester.tap(find.text('保存快捷键'));
     await tester.pumpAndSettle();
     expect(desktop.saves, 1);
     expect(controller.quickShortcut.label('windows'), 'Alt + Q');
@@ -152,7 +152,7 @@ void main() {
     expect(label(tester), '请按下快捷键…');
     expect(
       tester
-          .widget<FilledButton>(find.widgetWithText(FilledButton, '保存'))
+          .widget<FilledButton>(find.widgetWithText(FilledButton, '保存快捷键'))
           .onPressed,
       isNull,
     );
@@ -182,7 +182,7 @@ void main() {
     await mount(tester);
     desktop.saveError = '该快捷键已被占用';
     await record(tester, [LogicalKeyboardKey.altLeft, LogicalKeyboardKey.keyQ]);
-    await tester.tap(find.text('保存'));
+    await tester.tap(find.text('保存快捷键'));
     await tester.pumpAndSettle();
     expect(find.text('该快捷键已被占用'), findsOneWidget);
     expect(
@@ -192,7 +192,7 @@ void main() {
     expect(label(tester), Platform.isMacOS ? 'Option + Q' : 'Alt + Q');
     desktop.saveError = null;
     await record(tester, [LogicalKeyboardKey.f8]);
-    await tester.tap(find.text('保存'));
+    await tester.tap(find.text('保存快捷键'));
     await tester.pumpAndSettle();
     expect(controller.quickShortcut.label('windows'), 'F8');
     expect(tester.takeException(), isNull);

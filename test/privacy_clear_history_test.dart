@@ -88,7 +88,7 @@ void main() {
 
     controller.addListener(onRefresh);
     try {
-      await tester.tap(find.text('确认清空'));
+      await tester.tap(find.text('清空全部历史'));
       await tester.pump();
       await tester.runAsync(() async {
         await refreshed.future.timeout(const Duration(seconds: 5));

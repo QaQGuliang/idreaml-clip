@@ -1,13 +1,15 @@
 import 'dart:convert';
 
 class WorkspaceLayout {
-  const WorkspaceLayout({this.sidebarWidth = 226, this.historyFraction = .65});
+  const WorkspaceLayout({this.sidebarWidth = 216, this.historyFraction = .62});
 
   static const minSidebarWidth = 72.0;
-  static const maxSidebarWidth = 320.0;
-  static const compactSidebarWidth = 176.0;
+  static const maxSidebarWidth = 300.0;
+  static const compactSidebarWidth = 150.0;
   static const minHistoryWidth = 300.0;
   static const minDetailWidth = 280.0;
+  static const minHistoryFraction = .35;
+  static const maxHistoryFraction = .75;
 
   final double sidebarWidth;
   final double historyFraction;
@@ -20,7 +22,12 @@ class WorkspaceLayout {
           minSidebarWidth,
           maxSidebarWidth,
         ),
-        historyFraction: _bounded(historyFraction, this.historyFraction, 0, 1),
+        historyFraction: _bounded(
+          historyFraction,
+          this.historyFraction,
+          minHistoryFraction,
+          maxHistoryFraction,
+        ),
       );
 
   String encode() => jsonEncode({

@@ -61,6 +61,19 @@ class ScreenshotService {
         await channel.invokeMethod<void>('setPinBorderDefault', border.name);
       });
 
+  Future<void> pinHistoryImage(Uint8List bytes) async {
+    if (!supported) throw StateError('当前平台不支持贴图');
+    await channel.invokeMethod<void>('pinHistoryImage', {'png': bytes});
+  }
+
+  Future<String?> chooseExportPath(String name, {String directory = ''}) async {
+    if (!supported) throw StateError('当前平台不支持文件另存为');
+    return channel.invokeMethod<String>('chooseExportPath', {
+      'name': name,
+      'directory': directory,
+    });
+  }
+
   Future<void> warmUp() async {
     if (!supported || _disposed) return;
     try {
@@ -200,7 +213,7 @@ class ScreenshotService {
             .first
             .replaceAll(':', '-');
         final path = await channel.invokeMethod<String>('chooseSavePath', {
-          'name': '截图-$now.png',
+          'name': 'Idreaml-${args['long'] == true ? '长截图' : '截图'}-$now.png',
           'directory': lastDirectory ?? '',
         });
         if (path == null) {
@@ -229,7 +242,12 @@ class ScreenshotService {
           /* The exported image remains valid. */
         }
       }
-      await controller.commitScreenshot(_session!, image);
+      // Saving to a file keeps the history entry but leaves the clipboard alone.
+      if (_saveMode) {
+        await controller.recordScreenshot(_session!, image);
+      } else {
+        await controller.commitScreenshot(_session!, image);
+      }
       return {'success': true};
     } on Object catch (error) {
       final copied =

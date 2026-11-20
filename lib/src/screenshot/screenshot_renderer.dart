@@ -8,9 +8,11 @@ import 'screenshot_model.dart';
 
 void paintAnnotation(Canvas canvas, ScreenshotAnnotation object) {
   final style = object.style;
+  final highlighter = object.tool == ScreenshotTool.highlighter;
+  final strokeWidth = highlighter ? style.width * 5 : style.width;
   final paint = Paint()
     ..color = style.color
-    ..strokeWidth = style.width
+    ..strokeWidth = strokeWidth
     ..style = PaintingStyle.stroke
     ..strokeCap = StrokeCap.round
     ..strokeJoin = StrokeJoin.round;
@@ -33,8 +35,8 @@ void paintAnnotation(Canvas canvas, ScreenshotAnnotation object) {
       object.arrowGeometry.paint(canvas, paint);
     case ScreenshotTool.pen:
     case ScreenshotTool.highlighter:
-      if (object.tool == ScreenshotTool.highlighter) {
-        paint.color = style.color.withAlpha(85);
+      if (highlighter) {
+        paint.color = style.color.withValues(alpha: .3);
       }
       final path = Path()..moveTo(points.first.dx, points.first.dy);
       for (final point in points.skip(1)) {
@@ -43,7 +45,7 @@ void paintAnnotation(Canvas canvas, ScreenshotAnnotation object) {
       if (points.length == 1) {
         canvas.drawCircle(
           points.first,
-          style.width / 2,
+          strokeWidth / 2,
           paint..style = PaintingStyle.fill,
         );
       } else {
@@ -106,7 +108,7 @@ Future<ui.Image> renderScreenshot(
       }
       intermediates.clear();
       intermediates.add(previous);
-      final block = math.max(2.0, object.style.width);
+      final block = math.max(6.0, object.style.width * 4);
       final lowWidth = math.max(1, (rect.width / block).ceil());
       final lowHeight = math.max(1, (rect.height / block).ceil());
       final smallRecorder = ui.PictureRecorder();

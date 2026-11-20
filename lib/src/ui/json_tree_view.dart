@@ -18,8 +18,9 @@ const _indent = 18.0;
 const _gutter = 32.0;
 
 class JsonTreeView extends StatefulWidget {
-  const JsonTreeView({super.key, required this.document});
+  const JsonTreeView({super.key, required this.document, this.onCopy});
   final JsonDocument document;
+  final Future<bool> Function(String formatted)? onCopy;
 
   @override
   State<JsonTreeView> createState() => _JsonTreeViewState();
@@ -91,6 +92,14 @@ class _JsonTreeViewState extends State<JsonTreeView> {
   });
 
   Future<void> _copy() async {
+    final handler = widget.onCopy;
+    if (handler != null) {
+      final copied = await handler(widget.document.formatted);
+      if (mounted) {
+        showMessage(context, copied ? '已复制到系统剪切板' : '复制失败，请重试');
+      }
+      return;
+    }
     try {
       await Clipboard.setData(ClipboardData(text: widget.document.formatted));
       if (mounted) showMessage(context, '已复制格式化 JSON');

@@ -403,7 +403,7 @@ void main() {
       for (final label in [
         '渐变方式',
         '透明度',
-        '桌面效果预览',
+        kind.label,
         kind == DeskKind.note ? '单按 F3 新增便签' : '双按 F3 新增待办',
         '同步${kind.label}',
       ]) {

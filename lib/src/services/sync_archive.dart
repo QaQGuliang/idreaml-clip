@@ -32,6 +32,22 @@ class SyncArchive {
 
   static final _segment = RegExp(r'^[a-zA-Z0-9_.-]+$');
 
+  Future<List<String>> listFiles({int limit = 5000}) async {
+    if (!await root.exists()) return [];
+    final result = <String>[];
+    await for (final entity in root.list(recursive: true, followLinks: false)) {
+      if (entity is! File) continue;
+      final relative = p
+          .relative(entity.path, from: root.path)
+          .replaceAll('\\', '/');
+      if (relative.split('/').any((part) => part == '.git')) continue;
+      result.add(relative);
+      if (result.length >= limit) break;
+    }
+    result.sort();
+    return result;
+  }
+
   Future<List<File>> jsonFiles(String relative) async {
     final directory = Directory((await file(relative)).path);
     if (!await directory.exists()) return [];

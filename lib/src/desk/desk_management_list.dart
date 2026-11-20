@@ -38,6 +38,9 @@ class _DeskManagementListState extends State<DeskManagementList> {
   Future<void> _toggle(DeskEntry row) async {
     try {
       await widget.notes.toggle(row);
+      if (mounted) {
+        showMessage(context, row.done ? '已恢复为待完成' : '已完成，桌面列表已收起');
+      }
     } catch (error) {
       if (mounted) showMessage(context, '$error');
     }
@@ -277,7 +280,7 @@ class _DeskManagementListState extends State<DeskManagementList> {
       row,
       widget.notes.config(widget.kind),
     );
-    final date = DateTime.fromMillisecondsSinceEpoch(row.created).toLocal();
+    final date = DateTime.fromMillisecondsSinceEpoch(row.updated).toLocal();
     final time =
         '${date.month}月${date.day}日 · ${date.hour.toString().padLeft(2, '0')}:${date.minute.toString().padLeft(2, '0')}';
     final actions = Wrap(
@@ -343,6 +346,9 @@ class _DeskManagementListState extends State<DeskManagementList> {
                               fontWeight: todo || row.title.isNotEmpty
                                   ? FontWeight.w700
                                   : FontWeight.w400,
+                              color: row.done
+                                  ? const Color(0xFFA49DAF)
+                                  : typography.titleStyle.color,
                               decoration: row.done
                                   ? TextDecoration.lineThrough
                                   : null,
@@ -384,12 +390,42 @@ class _DeskManagementListState extends State<DeskManagementList> {
                       '同步冲突',
                       style: TextStyle(fontSize: 11, color: AppColors.warning),
                     ),
+                  if (row.textColor != null ||
+                      row.fontFamily != null ||
+                      row.fontSize != null)
+                    Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Container(
+                          width: 8,
+                          height: 8,
+                          decoration: BoxDecoration(
+                            color: Color(
+                              row.textColor ??
+                                  typography.customColor ??
+                                  AppColors.primary.toARGB32(),
+                            ),
+                            shape: BoxShape.circle,
+                            border: Border.all(color: AppColors.line),
+                          ),
+                        ),
+                        const SizedBox(width: 4),
+                        const Text(
+                          '自定义样式',
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: AppColors.muted,
+                          ),
+                        ),
+                      ],
+                    ),
                   InkWell(
                     onTap: () => showDeskEntry(
                       context,
                       widget.kind,
                       row,
                       settings: widget.notes.config(widget.kind),
+                      onEdit: () => widget.onEdit(row),
                     ),
                     borderRadius: BorderRadius.circular(6),
                     child: const Padding(
@@ -537,6 +573,7 @@ Future<void> showDeskEntry(
   DeskKind kind,
   DeskEntry entry, {
   DeskSettings settings = const DeskSettings(),
+  VoidCallback? onEdit,
 }) {
   final typography = DeskEntryTypography.fromEntry(entry, settings);
   return showDialog<void>(
@@ -549,36 +586,52 @@ Future<void> showDeskEntry(
         side: const BorderSide(color: AppColors.line),
       ),
       title: Text(
-        '${kind.label}全文',
+        kind == DeskKind.note
+            ? (entry.title.isNotEmpty ? entry.title : '便签全文')
+            : '待办详情',
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
         style: const TextStyle(fontSize: 16, fontWeight: FontWeight.w700),
       ),
       content: SizedBox(
         width: 510,
         child: SingleChildScrollView(
-          child: typography.surface(
-            Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                if (entry.title.isNotEmpty) ...[
-                  Text(
-                    entry.title,
-                    key: const ValueKey('desk-reading-title'),
-                    style: typography.titleStyle,
-                  ),
-                  const SizedBox(height: 12),
-                ],
-                Text(
-                  entry.body,
-                  key: const ValueKey('desk-reading-body'),
-                  style: kind == DeskKind.todo
-                      ? typography.titleStyle.copyWith(
-                          fontSize: typography.size + 1,
-                        )
-                      : typography.bodyStyle,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              typography.surface(
+                Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    if (entry.title.isNotEmpty) ...[
+                      Text(
+                        entry.title,
+                        key: const ValueKey('desk-reading-title'),
+                        style: typography.titleStyle,
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+                    Text(
+                      entry.body,
+                      key: const ValueKey('desk-reading-body'),
+                      style: kind == DeskKind.todo
+                          ? typography.titleStyle.copyWith(
+                              fontSize: typography.size + 1,
+                            )
+                          : typography.bodyStyle,
+                    ),
+                  ],
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                '修改于 ${relativeTime(DateTime.fromMillisecondsSinceEpoch(entry.updated))}',
+                key: const ValueKey('desk-reading-updated'),
+                style: const TextStyle(fontSize: 11, color: AppColors.muted),
+              ),
+            ],
           ),
         ),
       ),
@@ -587,6 +640,23 @@ Future<void> showDeskEntry(
           onPressed: () => Navigator.pop(context),
           child: const Text('关闭'),
         ),
+        if (onEdit != null)
+          FilledButton.icon(
+            key: const ValueKey('desk-reading-edit'),
+            style: FilledButton.styleFrom(
+              backgroundColor: AppColors.primary,
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(12),
+              ),
+            ),
+            onPressed: () {
+              Navigator.pop(context);
+              onEdit();
+            },
+            icon: const Icon(Icons.edit_outlined, size: 16),
+            label: const Text('编辑'),
+          ),
       ],
     ),
   );

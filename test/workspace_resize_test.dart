@@ -123,7 +123,7 @@ void main() {
     await tester.tap(find.byTooltip('隐私'));
     await tester.pumpAndSettle();
     expect(find.text('自动记录剪切板'), findsNothing);
-    expect(find.text('自动清理历史'), findsOneWidget);
+    expect(find.text('清空历史'), findsOneWidget);
     await tester.tap(find.byTooltip('全部历史'));
     await tester.pumpAndSettle();
     expect(tester.getSize(history).width, expectedWidth);
@@ -141,16 +141,16 @@ void main() {
     final restored = WorkspaceLayout.decode(layout.encode());
     expect(restored.sidebarWidth, 72);
     expect(restored.historyFraction, .4);
-    expect(WorkspaceLayout.decode('invalid').sidebarWidth, 226);
+    expect(WorkspaceLayout.decode('invalid').sidebarWidth, 216);
     expect(
       WorkspaceLayout.decode('{"sidebarWidth": "wide"}').sidebarWidth,
-      226,
+      216,
     );
     final bounded = WorkspaceLayout.decode(
       '{"sidebarWidth": -20, "historyFraction": 3}',
     );
-    expect(bounded.sidebarWidth, 72);
-    expect(bounded.historyFraction, 1);
+    expect(bounded.sidebarWidth, WorkspaceLayout.minSidebarWidth);
+    expect(bounded.historyFraction, WorkspaceLayout.maxHistoryFraction);
     expect(layout.copyWith(sidebarWidth: double.nan).sidebarWidth, 72);
   });
 }

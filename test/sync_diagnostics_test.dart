@@ -433,7 +433,12 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('自托管 Git'), findsOneWidget);
     final connect = find.widgetWithText(TextButton, '连接').last;
-    await tester.ensureVisible(connect);
+    await tester.dragUntilVisible(
+      connect,
+      find.byKey(const ValueKey('cloud-sync-page')),
+      const Offset(0, -120),
+    );
+    await tester.pumpAndSettle();
     await tester.tap(connect);
     await tester.pumpAndSettle();
     expect(find.text('自托管 Git 仓库连接'), findsOneWidget);
@@ -462,7 +467,7 @@ void main() {
     expect(find.textContaining('HTTP 会明文传输'), findsOneWidget);
     await tester.enterText(address, 'https://git.example.test/clip.git');
     await tester.pumpAndSettle();
-    expect(tester.widget<SwitchListTile>(certificateOption).value, isFalse);
+    expect(tester.widget<SwitchListTile>(certificateOption).value, isTrue);
     expect(
       tester
           .widgetList<TextField>(find.byType(TextField))

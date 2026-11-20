@@ -129,7 +129,7 @@ class _ShortcutDialogState extends State<ShortcutDialog> {
   Widget build(BuildContext context) => PopScope(
     canPop: !_saving,
     child: AlertDialog(
-      title: Text(widget.screenshot ? '截图快捷键' : '自定义快捷键'),
+      title: Text(widget.screenshot ? '修改截图快捷键' : '修改全局快捷键'),
       content: SizedBox(
         width: 420,
         child: Column(
@@ -237,7 +237,7 @@ class _ShortcutDialogState extends State<ShortcutDialog> {
         ),
         FilledButton(
           onPressed: _saving || _recording ? null : _save,
-          child: Text(_saving ? '保存中…' : '保存'),
+          child: Text(_saving ? '保存中…' : '保存快捷键'),
         ),
       ],
     ),

@@ -9,6 +9,7 @@ import 'package:window_manager/window_manager.dart';
 
 import '../app_controller.dart';
 import '../desk/desk_models.dart';
+import '../models/clipboard_item.dart';
 import '../models/quick_shortcut.dart';
 import 'quick_panel_placement.dart';
 import 'quick_preview_placement.dart';
@@ -197,7 +198,7 @@ class DesktopService with TrayListener, WindowListener {
         await windowManager.setResizable(false);
         if (Platform.isWindows) {
           await windowManager.setAsFrameless();
-          await windowManager.setHasShadow(false);
+          await windowManager.setHasShadow(true);
         }
         await windowManager.setAlwaysOnTop(true);
         await windowManager.setSkipTaskbar(true);
@@ -306,6 +307,12 @@ class DesktopService with TrayListener, WindowListener {
         // The clipboard remains usable if the target app rejects input.
       }
     }
+  }
+
+  Future<void> pinHistoryImage(ClipboardItem item) async {
+    final payload = await controller.repository.readPayload(item);
+    if (!payload.isImage) throw StateError('只有图片记录可以贴图');
+    await screenshots.pinHistoryImage(payload.imageBytes);
   }
 
   Future<T> _withPreviewTransition<T>(Future<T> Function() action) {
@@ -547,6 +554,15 @@ class DesktopService with TrayListener, WindowListener {
   }
 
   Future<void> exitApp() => _exitFuture ??= _exitApp();
+
+  /// Relaunches with the same data locator. The child waits for this process
+  /// so the single-instance lock and native resources are released first.
+  Future<void> restartApplication() async {
+    await Process.start(Platform.resolvedExecutable, [
+      '--administrator-parent-pid=$pid',
+    ], mode: ProcessStartMode.detached);
+    await exitApp();
+  }
 
   void _publishAdministrator({bool changing = false}) =>
       controller.setAdministratorState(

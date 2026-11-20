@@ -38,7 +38,7 @@ class ClipboardContent {
 
   String get summary {
     if (isImage) return '$typeLabel 图片';
-    const limit = 256;
+    const limit = 150;
     if (content.length <= limit) return content.replaceAll(_lineBreaks, ' ');
     // Rows display one line. Avoid shaping or normalizing the entire entry,
     // and keep the last visible Unicode character intact.

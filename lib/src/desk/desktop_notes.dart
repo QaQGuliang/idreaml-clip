@@ -245,6 +245,9 @@ class DesktopNotes extends ChangeNotifier {
           for (final kind in DeskKind.values)
             kind.name: {
               ...config(kind).toJson(),
+              'doneCount': kind == DeskKind.todo
+                  ? items(kind).where((e) => e.done).length
+                  : 0,
               'rows': items(kind)
                   .where((e) => !e.done || kind == DeskKind.note)
                   .map(

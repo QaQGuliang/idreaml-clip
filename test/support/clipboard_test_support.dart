@@ -30,6 +30,8 @@ class MemoryClipboardRepository extends ClipboardRepository {
   final List<String> usedIds = [];
   final List<String> listQueries = [];
   final List<String> deletedIds = [];
+  final List<String> favoriteIds = [];
+  final List<DeviceInfo> devices = [];
   final Map<String, String> settings = {};
   bool failSettingWrite = false;
 
@@ -69,16 +71,31 @@ class MemoryClipboardRepository extends ClipboardRepository {
   }
 
   @override
+  Future<int> count({
+    String query = '',
+    bool favoritesOnly = false,
+    bool todayOnly = false,
+  }) async => items
+      .where(
+        (item) =>
+            item.content.contains(query) && (!favoritesOnly || item.favorite),
+      )
+      .length;
+
+  @override
   Future<ClipboardStats> stats() async => ClipboardStats(
     history: items.length,
     favorites: items.where((item) => item.favorite).length,
   );
 
   @override
-  Future<List<DeviceInfo>> listDevices() async => [];
+  Future<List<DeviceInfo>> listDevices() async => devices;
 
   @override
   Future<void> markUsed(String id) async => usedIds.add(id);
+
+  @override
+  Future<void> toggleFavorite(String id) async => favoriteIds.add(id);
 
   @override
   Future<void> softDelete(String id) async {

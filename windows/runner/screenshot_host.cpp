@@ -211,6 +211,30 @@ void ScreenshotHost::HandleMain(const flutter::MethodCall<Value>& call,
                  SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE);
     pinned_ = true;
     result->Success();
+  } else if (method == "pinHistoryImage") {
+    const auto* value = args ? Field(*args, "png") : nullptr;
+    const auto* png = value ? std::get_if<std::vector<uint8_t>>(value) : nullptr;
+    if (!png || png->empty()) { result->Error("region", "贴图内容无效"); return; }
+    POINT origin{};
+    int64_t x, y;
+    if (args && Integer(args, "x", &x) && Integer(args, "y", &y)) {
+      origin = {static_cast<LONG>(x), static_cast<LONG>(y)};
+    } else {
+      GetCursorPos(&origin);
+    }
+    const auto copy = [this](HWND window, const std::vector<uint8_t>& image) {
+      InvokePinAction(window, "copyPinnedImage", Value(image), L"无法复制贴图，请重试。");
+    };
+    const auto save_border = [this](HWND window, const std::string& border) {
+      InvokePinAction(window, "savePinBorderDefault", Value(border), L"无法保存默认贴图边框，请重试。");
+    };
+    MONITORINFO pin_monitor{};
+    pin_monitor.cbSize = sizeof(pin_monitor);
+    if (!GetMonitorInfo(MonitorFromPoint(origin, MONITOR_DEFAULTTONEAREST), &pin_monitor) ||
+        !pins_.Show(*png, origin, pin_monitor.rcWork, copy, save_border)) {
+      result->Error("window", "无法显示贴图，请重试"); return;
+    }
+    result->Success();
   } else if (method == "chooseSavePath") {
     if (!active_) { result->Error("state", "截图窗口已关闭"); return; }
     wchar_t filename[32768] = {};
@@ -230,6 +254,47 @@ void ScreenshotHost::HandleMain(const flutter::MethodCall<Value>& call,
     dialog.nMaxFile = static_cast<DWORD>(std::size(filename));
     dialog.lpstrDefExt = L"png";
     dialog.lpstrTitle = L"截图另存为";
+    dialog.lpstrInitialDir = initial.empty() ? nullptr : initial.c_str();
+    dialog.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
+    if (GetSaveFileNameW(&dialog)) result->Success(Value(Utf8(filename)));
+    else if (CommDlgExtendedError() != 0) result->Error("dialog", "无法打开另存为对话框");
+    else result->Success();
+  } else if (method == "chooseExportPath") {
+    wchar_t filename[32768] = {};
+    std::wstring initial;
+    std::string name;
+    if (args) {
+      if (auto value = Field(*args, "name")) {
+        name = std::get<std::string>(*value);
+        const auto wide = Wide(name);
+        wcsncpy_s(filename, wide.c_str(), _TRUNCATE);
+      }
+      if (auto value = Field(*args, "directory")) initial = Wide(std::get<std::string>(*value));
+    }
+    std::wstring extension = L"*";
+    std::wstring default_extension;
+    const auto dot = name.find_last_of('.');
+    if (dot != std::string::npos && dot + 1 < name.size()) {
+      default_extension = Wide(name.substr(dot + 1));
+      extension = L"*." + default_extension;
+    }
+    std::wstring filter = L"匹配文件";
+    filter.push_back(L'\0');
+    filter += extension;
+    filter.push_back(L'\0');
+    filter += L"所有文件";
+    filter.push_back(L'\0');
+    filter += L"*.*";
+    filter.push_back(L'\0');
+    filter.push_back(L'\0');
+    OPENFILENAMEW dialog{};
+    dialog.lStructSize = sizeof(dialog);
+    dialog.hwndOwner = owner_;
+    dialog.lpstrFilter = filter.c_str();
+    dialog.lpstrFile = filename;
+    dialog.nMaxFile = static_cast<DWORD>(std::size(filename));
+    dialog.lpstrDefExt = default_extension.empty() ? nullptr : default_extension.c_str();
+    dialog.lpstrTitle = L"下载仓库文件";
     dialog.lpstrInitialDir = initial.empty() ? nullptr : initial.c_str();
     dialog.Flags = OFN_OVERWRITEPROMPT | OFN_PATHMUSTEXIST | OFN_NOCHANGEDIR;
     if (GetSaveFileNameW(&dialog)) result->Success(Value(Utf8(filename)));

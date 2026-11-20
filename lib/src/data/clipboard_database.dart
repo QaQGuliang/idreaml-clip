@@ -133,6 +133,12 @@ class ClipboardDatabase {
     return current.moveTo(path, close: close, open: () => open(verify: true));
   }
 
+  Future<StorageMoveResult> adoptTo(String path) {
+    final current = storage;
+    if (current == null) throw StateError('No managed storage');
+    return current.adoptTo(path, close: close, open: () => open(verify: true));
+  }
+
   Future<void> _separateLegacyData() async {
     final legacySettings = await database.query('app_setting');
     await settings.transaction((txn) async {

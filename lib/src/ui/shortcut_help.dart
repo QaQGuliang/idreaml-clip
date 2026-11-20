@@ -40,7 +40,7 @@ class ScreenshotHelpContent extends StatelessWidget {
           _HelpEntry('按住 Ctrl', '临时切换到选择工具，松开恢复原工具；如果正在拖动或绘制，会在本次操作结束后切换'),
           _HelpEntry(
             '1 / 2',
-            '1 变细、2 加粗，支持长按和数字小键盘。矩形、椭圆、直线、箭头、画笔和荧光笔调整线宽；马赛克调整块大小；自动编号调整大小',
+            '1 变细、2 加粗，支持长按和数字小键盘。矩形、椭圆、直线、箭头、画笔和荧光笔调整线宽；马赛克调整块大小；自动编号调整大小；文字调整字号',
           ),
           _HelpEntry('Ctrl + Z', '撤销；正在拖动或绘制时先取消当前操作'),
           _HelpEntry('Ctrl + Y / Ctrl + Shift + Z', '重做；正在拖动或绘制时先取消当前操作'),
@@ -51,10 +51,11 @@ class ScreenshotHelpContent extends StatelessWidget {
       ),
       const SizedBox(height: 16),
       const _HelpSection(
-        title: '取色器（普通截图）',
+        title: '取色器',
+        description: '普通截图和长图编辑中均可使用，采样包含已绘制的标注。',
         entries: [
           _HelpEntry('F2', '显示或隐藏取色器'),
-          _HelpEntry('C', '取色器显示时，复制鼠标位置的 HEX 色值并退出截图'),
+          _HelpEntry('C', '复制鼠标位置的 HEX 色值并退出截图，取色器隐藏时也可用'),
         ],
       ),
     ],
@@ -186,6 +187,18 @@ class AllShortcutHelpDialog extends StatelessWidget {
                             _HelpEntry('Ctrl + C', '复制贴图'),
                             _HelpEntry('Esc', '关闭贴图'),
                             _HelpEntry('右键', '打开贴图操作菜单'),
+                          ],
+                        ),
+                      ],
+                      if (controller.desktopNotes != null) ...[
+                        const SizedBox(height: 16),
+                        const _HelpSection(
+                          title: '便签与待办',
+                          description: '开启对应功能后，可在任何应用上方快速记录。',
+                          entries: [
+                            _HelpEntry('F3', '单按新建便签，快速双按新建待办'),
+                            _HelpEntry('Ctrl + Enter', '在桌面新建窗口中保存当前内容'),
+                            _HelpEntry('Esc', '关闭桌面新建窗口，内容保留为草稿'),
                           ],
                         ),
                       ],

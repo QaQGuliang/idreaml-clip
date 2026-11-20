@@ -181,17 +181,20 @@ void main() {
       (ScreenshotTool.rectangle, 1.0, 40.0),
       (ScreenshotTool.mosaic, 2.0, 40.0),
       (ScreenshotTool.number, 12.0, 96.0),
+      (ScreenshotTool.text, 12.0, 96.0),
     ]) {
-      final numbered = tool == ScreenshotTool.number;
+      final sized =
+          tool == ScreenshotTool.number || tool == ScreenshotTool.text;
       for (final (size, direction) in [(minimum, -1), (maximum, 1)]) {
-        final model = ScreenshotModel(const Size(200, 200));
+        final model = ScreenshotModel(const Size(200, 200))
+          ..chooseTool(ScreenshotTool.select);
         final object = ScreenshotAnnotation(
           id: 1,
           tool: tool,
           points: const [Offset(30, 30), Offset(60, 60)],
           style: ToolStyle(
-            width: numbered ? 3 : size,
-            fontSize: numbered ? size : 24,
+            width: sized ? 3 : size,
+            fontSize: sized ? size : 24,
           ),
           number: 7,
         );
@@ -203,12 +206,12 @@ void main() {
         expect(model.adjustSize(-direction), isTrue);
         final changed = model.annotations.single;
         expect(
-          numbered ? changed.style.fontSize : changed.style.width,
-          size - direction * (numbered ? 2 : 1),
+          sized ? changed.style.fontSize : changed.style.width,
+          size - direction * (sized ? 2 : 1),
         );
         expect(changed.points, object.points);
         expect(changed.number, 7);
-        if (numbered) expect(changed.bounds.size, isNot(object.bounds.size));
+        if (sized) expect(changed.bounds.size, isNot(object.bounds.size));
         model.undo();
         expect(model.annotations.single, same(object));
         expect(model.canUndo, isFalse);
@@ -219,7 +222,7 @@ void main() {
     }
   });
 
-  test('旧马赛克粗细按实际块大小调整，文字和遮盖不会响应尺寸快捷键', () {
+  test('旧马赛克粗细按实际块大小调整，文字调字号而遮盖不响应尺寸快捷键', () {
     final model = ScreenshotModel(
       const Size(100, 100),
       styles: '{"mosaic":{"width":1,"fontSize":56}}',
@@ -229,11 +232,12 @@ void main() {
     expect(model.adjustSize(1), isTrue);
     expect(model.style.width, 3);
     expect(model.style.fontSize, 56);
-    for (final tool in [
-      ScreenshotTool.select,
-      ScreenshotTool.text,
-      ScreenshotTool.cover,
-    ]) {
+    model.chooseTool(ScreenshotTool.text);
+    expect(model.adjustSize(1), isTrue);
+    expect(model.style.fontSize, 26);
+    expect(model.adjustSize(-1), isTrue);
+    expect(model.style.fontSize, 24);
+    for (final tool in [ScreenshotTool.select, ScreenshotTool.cover]) {
       model.chooseTool(tool);
       final before = model.encodeStyles();
       expect(model.adjustSize(1), isFalse);

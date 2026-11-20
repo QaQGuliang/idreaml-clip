@@ -5,6 +5,8 @@ import '../ui/app_theme.dart';
 const Map<String, String> deskFontFamilies = {
   '': '系统默认',
   'Microsoft YaHei UI': '微软雅黑',
+  'Segoe UI': 'Segoe UI',
+  'Noto Sans CJK SC': 'Noto Sans CJK SC',
   'SimSun': '宋体',
   'SimHei': '黑体',
   'KaiTi': '楷体',

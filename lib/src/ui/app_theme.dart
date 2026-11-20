@@ -34,8 +34,30 @@ ThemeData buildAppTheme() {
       bodySmall: TextStyle(color: AppColors.muted, fontSize: 11),
       titleMedium: TextStyle(
         color: AppColors.text,
-        fontSize: 16,
+        fontSize: 17,
         fontWeight: FontWeight.w700,
+      ),
+    ),
+    filledButtonTheme: FilledButtonThemeData(
+      style: FilledButton.styleFrom(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+      ),
+    ),
+    outlinedButtonTheme: OutlinedButtonThemeData(
+      style: OutlinedButton.styleFrom(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+      ),
+    ),
+    textButtonTheme: TextButtonThemeData(
+      style: TextButton.styleFrom(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(11)),
+      ),
+    ),
+    scrollbarTheme: ScrollbarThemeData(
+      thickness: const WidgetStatePropertyAll(6),
+      radius: const Radius.circular(3),
+      thumbColor: WidgetStatePropertyAll(
+        AppColors.muted.withValues(alpha: .45),
       ),
     ),
     inputDecorationTheme: InputDecorationTheme(
@@ -55,7 +77,7 @@ ThemeData buildAppTheme() {
       ),
       focusedBorder: OutlineInputBorder(
         borderRadius: BorderRadius.circular(12),
-        borderSide: const BorderSide(color: AppColors.primary, width: 1.3),
+        borderSide: const BorderSide(color: Color(0x596C57E5), width: 3),
       ),
     ),
     snackBarTheme: SnackBarThemeData(

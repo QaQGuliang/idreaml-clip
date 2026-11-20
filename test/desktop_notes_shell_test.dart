@@ -101,7 +101,10 @@ void main() {
     await tester.tap(find.byTooltip('设置'));
     await tester.pumpAndSettle();
     expect(controller.page, AppPage.settings);
-    expect(find.widgetWithText(ListTile, '便签与待办'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('settings-card-desktop')),
+      findsOneWidget,
+    );
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });

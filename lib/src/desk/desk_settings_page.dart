@@ -1,6 +1,8 @@
+import 'dart:math' as math;
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
+import 'package:window_manager/window_manager.dart';
 
 import '../ui/app_theme.dart';
 import '../ui/common.dart';
@@ -54,6 +56,170 @@ class _DeskSettingsPageState extends State<DeskSettingsPage> {
 
   Future<void> _set(DeskKind kind, Map<String, Object?> changes) =>
       _attempt(() => widget.notes.updateSettings(kind, changes));
+
+  Map<String, dynamic>? _monitorFor(DeskSettings config) {
+    if (_monitors.isEmpty) return null;
+    if (config.monitor.isNotEmpty) {
+      for (final monitor in _monitors) {
+        if (monitor['id'] == config.monitor) return monitor;
+      }
+    }
+    for (final monitor in _monitors) {
+      if (monitor['primary'] == true) return monitor;
+    }
+    return _monitors.first;
+  }
+
+  String _monitorLabel(DeskSettings config) {
+    if (config.monitor.isEmpty) return '主显示器';
+    final index = _monitors.indexWhere((m) => m['id'] == config.monitor);
+    return index < 0 ? '原显示器' : '显示器 ${index + 1}';
+  }
+
+  String _countLabel(DeskKind kind) {
+    final items = widget.notes.items(kind);
+    final count = kind == DeskKind.todo
+        ? items.where((e) => !e.done).length
+        : items.length;
+    return kind == DeskKind.note ? '$count 条' : '$count 项待完成';
+  }
+
+  Future<void> _editRegionPercent(DeskKind kind, DeskSettings config) async {
+    final monitor = _monitorFor(config);
+    final workWidth = (monitor?['workWidth'] as num?)?.toDouble() ?? 0;
+    final workHeight = (monitor?['workHeight'] as num?)?.toDouble() ?? 0;
+    if (monitor == null || workWidth <= 0 || workHeight <= 0) {
+      showMessage(context, '无法获取显示器尺寸，请刷新显示器后重试');
+      return;
+    }
+    final workX = (monitor['workX'] as num?)?.toDouble() ?? 0;
+    final workY = (monitor['workY'] as num?)?.toDouble() ?? 0;
+    double percent(double value, double extent) =>
+        (value / extent * 100).clamp(0, 100).toDouble();
+    final hasRegion = config.height > 0 && config.x >= 0 && config.y >= 0;
+    final fields = <String, TextEditingController>{
+      for (final entry in {
+        'x': hasRegion ? percent(config.x - workX, workWidth) : 0.0,
+        'y': hasRegion ? percent(config.y - workY, workHeight) : 0.0,
+        'width': hasRegion
+            ? percent(config.width, workWidth)
+            : percent(320, workWidth),
+        'height': hasRegion ? percent(config.height, workHeight) : 100.0,
+      }.entries)
+        entry.key: TextEditingController(text: entry.value.round().toString()),
+    };
+    final saved = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        backgroundColor: AppColors.surface,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(18),
+          side: const BorderSide(color: AppColors.line),
+        ),
+        titleTextStyle: const TextStyle(
+          fontSize: 16,
+          fontWeight: FontWeight.w700,
+          color: AppColors.text,
+        ),
+        title: const Text('展示区域百分比'),
+        content: SizedBox(
+          width: 360,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              const Text(
+                '按所选显示器工作区的百分比设置区域，宽和高最小 10%。',
+                style: TextStyle(fontSize: 12, color: AppColors.muted),
+              ),
+              const SizedBox(height: 16),
+              Row(
+                children: [
+                  _percentField('X', fields['x']!),
+                  const SizedBox(width: 12),
+                  _percentField('Y', fields['y']!),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  _percentField('宽', fields['width']!),
+                  const SizedBox(width: 12),
+                  _percentField('高', fields['height']!),
+                ],
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context, false),
+            child: const Text('取消'),
+          ),
+          FilledButton(
+            key: const ValueKey('desk-region-percent-save'),
+            onPressed: () {
+              final values = <String, double>{};
+              for (final entry in fields.entries) {
+                final value = double.tryParse(entry.value.text.trim());
+                if (value == null) {
+                  showMessage(context, '请输入数字百分比');
+                  return;
+                }
+                values[entry.key] = value;
+              }
+              final x = values['x']!,
+                  y = values['y']!,
+                  w = values['width']!,
+                  h = values['height']!;
+              if (x < 0 || x > 100 || y < 0 || y > 100) {
+                showMessage(context, 'X 和 Y 需在 0–100 之间');
+                return;
+              }
+              if (w < 10 || w > 100 || h < 10 || h > 100) {
+                showMessage(context, '宽和高需在 10–100 之间');
+                return;
+              }
+              if (x + w > 100 || y + h > 100) {
+                showMessage(context, '区域需完整位于显示器工作区内');
+                return;
+              }
+              Navigator.pop(context, true);
+            },
+            child: const Text('保存展示区域'),
+          ),
+        ],
+      ),
+    );
+    if (saved == true && mounted) {
+      double value(String key) => double.parse(fields[key]!.text.trim());
+      await _set(kind, {
+        'monitor': config.monitor,
+        'x': workX + workWidth * value('x') / 100,
+        'y': workY + workHeight * value('y') / 100,
+        'width': workWidth * value('width') / 100,
+        'height': workHeight * value('height') / 100,
+      });
+    }
+    // Dialog route animation can still reference the controllers for a frame.
+    Future<void>.delayed(const Duration(milliseconds: 250), () {
+      for (final controller in fields.values) {
+        controller.dispose();
+      }
+    });
+  }
+
+  Widget _percentField(String label, TextEditingController controller) =>
+      Expanded(
+        child: TextField(
+          key: ValueKey('desk-region-percent-$label'),
+          controller: controller,
+          keyboardType: TextInputType.number,
+          style: const TextStyle(fontSize: 12),
+          decoration: InputDecoration(labelText: '$label %'),
+        ),
+      );
 
   @override
   Widget build(BuildContext context) => AnimatedBuilder(
@@ -144,7 +310,42 @@ class _DeskSettingsPageState extends State<DeskSettingsPage> {
               LayoutBuilder(
                 builder: (context, constraints) {
                   final fields = _appearance(kind, config, preview);
-                  final sample = _ThemePreview(kind: kind, config: preview);
+                  final sample = Column(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      _ThemePreview(
+                        kind: kind,
+                        config: preview,
+                        countLabel: _countLabel(kind),
+                        monitorLabel: _monitorLabel(config),
+                      ),
+                      const SizedBox(height: 13),
+                      Row(
+                        children: [
+                          OutlinedButton.icon(
+                            key: ValueKey('desk-preview-desktop-${kind.name}'),
+                            onPressed: () =>
+                                _attempt(() => windowManager.minimize()),
+                            icon: const Icon(
+                              Icons.desktop_windows_outlined,
+                              size: 16,
+                            ),
+                            label: const Text('查看桌面'),
+                          ),
+                          const Spacer(),
+                          FilledButton.icon(
+                            key: ValueKey('desk-preview-create-${kind.name}'),
+                            onPressed: config.enabled
+                                ? () =>
+                                      _attempt(() => widget.notes.compose(kind))
+                                : null,
+                            icon: const Icon(Icons.add, size: 16),
+                            label: Text('新建${kind.label}'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  );
                   if (constraints.maxWidth < 620) {
                     return Column(
                       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -458,6 +659,14 @@ class _DeskSettingsPageState extends State<DeskSettingsPage> {
               : () => _attempt(() => widget.notes.selectRegion(kind)),
           icon: const Icon(Icons.crop_free, size: 16),
           label: const Text('选取展示区域'),
+        ),
+        OutlinedButton.icon(
+          key: ValueKey('desk-region-percent-${kind.name}'),
+          onPressed: !config.enabled
+              ? null
+              : () => _editRegionPercent(kind, config),
+          icon: const Icon(Icons.percent, size: 16),
+          label: const Text('百分比输入'),
         ),
         IconButton(
           tooltip: '刷新显示器',
@@ -836,15 +1045,22 @@ class _DeskSettingsPageState extends State<DeskSettingsPage> {
 }
 
 class _ThemePreview extends StatelessWidget {
-  const _ThemePreview({required this.kind, required this.config});
+  const _ThemePreview({
+    required this.kind,
+    required this.config,
+    required this.countLabel,
+    required this.monitorLabel,
+  });
   final DeskKind kind;
   final DeskSettings config;
+  final String countLabel;
+  final String monitorLabel;
 
   @override
   Widget build(BuildContext context) {
     // The slider controls the tint, while a clear glass material retains its
     // backdrop blur and a small amount of colour even at 100% transparency.
-    final alpha = config.transparent ? .10 + .90 * config.opacity : 1.0;
+    final alpha = config.transparent ? math.max(.10, config.opacity) : 1.0;
     final color = Color(config.color), color2 = Color(config.color2);
     final colors = [
       color.withValues(alpha: alpha),
@@ -1036,9 +1252,44 @@ class _ThemePreview extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.center,
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: [
-                    const Text(
-                      '桌面效果预览',
-                      style: TextStyle(fontSize: 11, color: Color(0xFF6C6379)),
+                    Row(
+                      children: [
+                        Icon(
+                          kind == DeskKind.note
+                              ? Icons.sticky_note_2_outlined
+                              : Icons.checklist_outlined,
+                          size: 15,
+                          color: const Color(0xFF6C6379),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          kind.label,
+                          style: const TextStyle(
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                            color: Color(0xFF6C6379),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          decoration: BoxDecoration(
+                            color: AppColors.primarySoft,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Text(
+                            countLabel,
+                            style: const TextStyle(
+                              fontSize: 10,
+                              fontWeight: FontWeight.w600,
+                              color: AppColors.primary,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
                     const SizedBox(height: 13),
                     ClipRRect(
@@ -1053,7 +1304,7 @@ class _ThemePreview extends StatelessWidget {
                     ),
                     const SizedBox(height: 12),
                     Text(
-                      config.transparent ? '毛玻璃保留，文字始终清晰显示' : '实色背景，文字始终清晰显示',
+                      '显示器 $monitorLabel · 实时预览',
                       style: const TextStyle(
                         fontSize: 11,
                         color: Color(0xFF6C6379),

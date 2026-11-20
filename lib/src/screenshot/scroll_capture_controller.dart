@@ -94,6 +94,9 @@ class ScrollCaptureController extends ChangeNotifier {
   Map<String, dynamic>? _pendingPreview;
   bool _decodingPreview = false;
   bool get canTakeOver => _automatic && !starting && !finishing && !_limited;
+  bool get canResume =>
+      _automatic && !_collecting && !starting && !finishing && !_limited;
+  int get screens => math.max(1, (height / selection.height).ceil());
   bool _disposed = false, _collecting = false;
   bool starting = true, finishing = false;
   int height = 0;
@@ -209,6 +212,21 @@ class ScrollCaptureController extends ChangeNotifier {
     warning = false;
     message = '已切换为手动滚动，将鼠标移到选中的内容上即可继续';
     notifyListeners();
+  }
+
+  void resume() {
+    if (!canResume) return;
+    _collecting = true;
+    _needsStep = true;
+    _stepMoved = false;
+    _stillFrames = 0;
+    _unmatchedFrames = 0;
+    _observationsSinceProgress = 0;
+    _stepAttempts = 0;
+    warning = false;
+    message = '正在自动向下滚动，可随时点击完成';
+    notifyListeners();
+    if (_inFlight == null) _schedule(Duration.zero);
   }
 
   Future<void> _process(Map<String, dynamic>? frame) async {

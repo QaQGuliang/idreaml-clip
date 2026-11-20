@@ -64,6 +64,7 @@ void main() {
   late ScreenshotService service;
   late _Clipboard clipboard;
   late List<String> calls;
+  late List<Map<dynamic, dynamic>> saveRequests;
   late List<MethodCall> hotkeys;
   late Directory directory;
   String? exportPath;
@@ -106,6 +107,7 @@ void main() {
     );
     await controller.initialize(startMonitor: false);
     calls = [];
+    saveRequests = [];
     hotkeys = [];
     available = true;
     exportPath = null;
@@ -118,7 +120,11 @@ void main() {
     });
     messenger.setMockMethodCallHandler(ScreenshotService.channel, (call) async {
       calls.add(call.method);
-      return call.method == 'chooseSavePath' ? exportPath : null;
+      if (call.method == 'chooseSavePath') {
+        saveRequests.add(call.arguments as Map);
+        return exportPath;
+      }
+      return null;
     });
     service = ScreenshotService(
       controller,
@@ -275,20 +281,31 @@ void main() {
     expect(clipboard.content!.imageBytes, png);
   });
 
-  test('另存为成功同时复制及入库，普通完成不出现文件对话框', () async {
+  test('另存为成功只入库不复制，文件名带产品前缀，普通完成不出现文件对话框', () async {
     exportPath = '${directory.path}/副本.png';
+    clipboard.content = const ClipboardContent.text('原内容');
     await service.start();
     final result =
         await fromEditor('commit', {'png': png, 'saveAs': true}) as Map;
     expect(result['success'], isTrue);
     expect(await File(exportPath!).readAsBytes(), png);
     expect(controller.history.single.payload.imageBytes, png);
-    expect(clipboard.writes, 1);
+    expect(clipboard.writes, 0);
+    expect(clipboard.content!.content, '原内容');
+    expect(saveRequests.single['name'], startsWith('Idreaml-截图-'));
+    expect(saveRequests.single['name'], endsWith('.png'));
+    await fromEditor('closed');
+    calls.clear();
+    saveRequests.clear();
+    await service.start();
+    await fromEditor('commit', {'png': png, 'saveAs': true, 'long': true});
+    expect(saveRequests.single['name'], startsWith('Idreaml-长截图-'));
     await fromEditor('closed');
     calls.clear();
     await service.start();
     await fromEditor('commit', {'png': png, 'saveAs': false});
     expect(calls, isNot(contains('chooseSavePath')));
+    expect(clipboard.writes, 1);
   });
 
   test('取消另存为不复制不入库，保留会话供编辑', () async {
@@ -301,15 +318,18 @@ void main() {
     expect(controller.history, isEmpty);
   });
 
-  test('副本成功而复制失败，重试不重复另存并使用原最终图像', () async {
+  test('副本成功而入库失败，重试不重复另存并使用原最终图像', () async {
     exportPath = '${directory.path}/副本.png';
-    clipboard.fail = true;
     await service.start();
+    await database.database.execute('''
+      CREATE TRIGGER fail_receipt BEFORE INSERT ON screenshot_commit
+      BEGIN SELECT RAISE(ABORT, 'test'); END
+    ''');
     final failed =
         await fromEditor('commit', {'png': png, 'saveAs': true}) as Map;
     expect(failed['locked'], isTrue);
     expect(failed['error'], contains('副本已保存'));
-    clipboard.fail = false;
+    await database.database.execute('DROP TRIGGER fail_receipt');
     final result = await fromEditor('commit', {
       'png': img.encodePng(img.Image(width: 8, height: 8)),
       'saveAs': true,
@@ -318,6 +338,7 @@ void main() {
     expect(calls.where((c) => c == 'chooseSavePath'), hasLength(1));
     expect(controller.history.single.payload.imageBytes, png);
     expect(controller.history.single.copyCount, 1);
+    expect(clipboard.writes, 0);
   });
 
   test('快捷键冲突保留配置，录入期间停用截图并在退出时恢复', () async {

@@ -15,6 +15,14 @@ class _Storage extends DataStorage {
   _Storage() {
     root = Directory(p.absolute('old-data'));
   }
+  StorageKind kind = StorageKind.empty;
+  String detail = '';
+  @override
+  Future<StorageProbe> probeDestination(String input) async {
+    if (!p.isAbsolute(input)) throw const StorageException('请输入完整的绝对目录路径。');
+    return StorageProbe(p.normalize(input), kind, detail: detail);
+  }
+
   @override
   Future<String> validateDestination(String input) async {
     if (!p.isAbsolute(input)) throw const StorageException('请输入完整的绝对目录路径。');
@@ -26,6 +34,7 @@ class _Repository extends MemoryClipboardRepository {
   @override
   final _Storage storage = _Storage();
   int moves = 0;
+  int adopts = 0;
   Completer<void>? finish;
   bool fail = false;
   @override
@@ -33,6 +42,13 @@ class _Repository extends MemoryClipboardRepository {
     moves++;
     await finish?.future;
     if (fail) throw const StorageException('迁移失败，已保留原目录。');
+    storage.root = Directory(path);
+    return const StorageMoveResult();
+  }
+
+  @override
+  Future<StorageMoveResult> adoptStorage(String path) async {
+    adopts++;
     storage.root = Directory(path);
     return const StorageMoveResult();
   }
@@ -49,7 +65,11 @@ void main() {
         .setMockMethodCallHandler(DirectoryPicker.channel, null);
   });
 
-  Future<void> open(WidgetTester tester, _Repository repository) async {
+  Future<void> open(
+    WidgetTester tester,
+    _Repository repository, {
+    Future<void> Function()? onRestart,
+  }) async {
     final controller = testController(repository);
     addTearDown(controller.dispose);
     await tester.pumpWidget(
@@ -57,7 +77,10 @@ void main() {
         home: Scaffold(
           body: AnimatedBuilder(
             animation: controller,
-            builder: (_, _) => StorageDirectoryCard(controller: controller),
+            builder: (_, _) => StorageDirectoryCard(
+              controller: controller,
+              onRestart: onRestart,
+            ),
           ),
         ),
       ),
@@ -247,6 +270,119 @@ void main() {
           .onPressed,
       isNotNull,
     );
+    expect(repository.moves, 0);
+  });
+
+  testWidgets('目标目录已有当前版本数据时直接沿用并保留原目录', (tester) async {
+    final repository = _Repository();
+    repository.storage
+      ..kind = StorageKind.current
+      ..detail = '数据版本 v3';
+    final destination = p.absolute('existing-data');
+    await open(tester, repository);
+    await tester.enterText(
+      find.byKey(const ValueKey('storage-directory-input')),
+      destination,
+    );
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(find.text('使用该目录中的数据？'), findsOneWidget);
+    expect(find.textContaining('历史、收藏、设置和便签待办会直接沿用'), findsOneWidget);
+    expect(find.textContaining('保留在原处'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('confirm-adopt-storage')));
+    await tester.pumpAndSettle();
+    expect(repository.adopts, 1);
+    expect(repository.moves, 0);
+    expect(find.text('更改数据存储目录'), findsNothing);
+    expect(find.textContaining('重启后加载其中的设置'), findsOneWidget);
+    expect(repository.storage.root.path, destination);
+  });
+
+  testWidgets('接管数据后提示重启以加载其中的设置', (tester) async {
+    final repository = _Repository();
+    repository.storage
+      ..kind = StorageKind.current
+      ..detail = '数据版本 v3';
+    var restarts = 0;
+    await open(tester, repository, onRestart: () async => restarts++);
+    await tester.enterText(
+      find.byKey(const ValueKey('storage-directory-input')),
+      p.absolute('existing-data'),
+    );
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('confirm-adopt-storage')));
+    await tester.pumpAndSettle();
+    expect(find.text('数据已切换'), findsOneWidget);
+    expect(find.textContaining('云同步配置'), findsOneWidget);
+    expect(find.textContaining('便签与待办开关'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('restart-after-adopt')));
+    await tester.pumpAndSettle();
+    expect(restarts, 1);
+    expect(find.text('更改数据存储目录'), findsNothing);
+  });
+
+  testWidgets('接管数据后可稍后重启，切换仍然生效', (tester) async {
+    final repository = _Repository();
+    repository.storage
+      ..kind = StorageKind.current
+      ..detail = '数据版本 v3';
+    var restarts = 0;
+    await open(tester, repository, onRestart: () async => restarts++);
+    await tester.enterText(
+      find.byKey(const ValueKey('storage-directory-input')),
+      p.absolute('existing-data'),
+    );
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byKey(const ValueKey('confirm-adopt-storage')));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('稍后'));
+    await tester.pumpAndSettle();
+    expect(restarts, 0);
+    expect(repository.adopts, 1);
+    expect(find.text('更改数据存储目录'), findsNothing);
+    expect(find.textContaining('重启后加载其中的设置'), findsOneWidget);
+  });
+
+  testWidgets('较早版本的数据提示自动升级后沿用', (tester) async {
+    final repository = _Repository();
+    repository.storage
+      ..kind = StorageKind.legacy
+      ..detail = '较早版本的数据库 v2';
+    final destination = p.absolute('legacy-data');
+    await open(tester, repository);
+    await tester.enterText(
+      find.byKey(const ValueKey('storage-directory-input')),
+      destination,
+    );
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(find.text('使用该目录中的数据？'), findsOneWidget);
+    expect(find.textContaining('自动升级为当前版本格式'), findsOneWidget);
+    await tester.tap(find.byKey(const ValueKey('confirm-adopt-storage')));
+    await tester.pumpAndSettle();
+    expect(repository.adopts, 1);
+    expect(repository.moves, 0);
+    expect(repository.storage.root.path, destination);
+  });
+
+  testWidgets('无法识别的目录显示原因且不接管', (tester) async {
+    final repository = _Repository();
+    repository.storage
+      ..kind = StorageKind.unknown
+      ..detail = '发现无法识别的内容：notes.txt';
+    await open(tester, repository);
+    await tester.enterText(
+      find.byKey(const ValueKey('storage-directory-input')),
+      p.absolute('unknown-data'),
+    );
+    await tester.tap(find.text('保存'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('目标目录包含无法识别的数据'), findsOneWidget);
+    expect(find.textContaining('notes.txt'), findsOneWidget);
+    expect(find.text('更改数据存储目录'), findsOneWidget);
+    expect(repository.adopts, 0);
     expect(repository.moves, 0);
   });
 }

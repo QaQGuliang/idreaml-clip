@@ -26,6 +26,7 @@ import 'history_limit_picker.dart';
 import 'json_split_preview.dart';
 import 'release_info_card.dart';
 import 'storage_directory_card.dart';
+import 'sync_archive_browser.dart';
 
 class MainShell extends StatefulWidget {
   const MainShell({
@@ -43,7 +44,8 @@ class MainShell extends StatefulWidget {
 
 class _MainShellState extends State<MainShell> {
   _SettingsSection? _settingsSection;
-  double _sidebarDragStartWidth = 226;
+  double _sidebarDragStartWidth = 216;
+  late int _lastSettingsRequest = widget.controller.settingsSectionRequest;
   late final _searchController = TextEditingController(
     text: widget.controller.historySearch,
   );
@@ -52,6 +54,14 @@ class _MainShellState extends State<MainShell> {
   void didUpdateWidget(covariant MainShell oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.controller.page != AppPage.settings) _settingsSection = null;
+    final request = widget.controller.settingsSectionRequest;
+    if (request != _lastSettingsRequest) {
+      _lastSettingsRequest = request;
+      final section = widget.controller.requestedSettingsSection;
+      if (section != null) {
+        _settingsSection = _SettingsSection.values.byName(section);
+      }
+    }
     final search = widget.controller.historySearch;
     if (_searchController.text != search) {
       _searchController.value = TextEditingValue(
@@ -246,74 +256,84 @@ class _Sidebar extends StatelessWidget {
               ),
             ),
           ),
-        if (!compact) const _NavLabel('剪切板'),
-        _NavItem(
-          compact: compact,
-          icon: Icons.space_dashboard_outlined,
-          label: '全部历史',
-          selected: controller.page == AppPage.history,
-          onTap: () => onPage(AppPage.history),
-        ),
-        _NavItem(
-          compact: compact,
-          icon: Icons.star_outline_rounded,
-          label: '我的收藏',
-          trailing: '${controller.stats.favorites}',
-          selected: controller.page == AppPage.favorites,
-          onTap: () => onPage(AppPage.favorites),
-        ),
-        const SizedBox(height: 12),
-        if (!compact &&
-            DeskKind.values.any(
-              (kind) => controller.desktopNotes?.enabled(kind) == true,
-            ))
-          const _NavLabel('桌面'),
-        for (final kind in DeskKind.values)
-          if (controller.desktopNotes?.enabled(kind) == true)
-            _NavItem(
-              compact: compact,
-              icon: kind == DeskKind.note
-                  ? Icons.sticky_note_2_outlined
-                  : Icons.checklist_outlined,
-              label: kind.label,
-              trailing:
-                  '${controller.desktopNotes!.items(kind).where((entry) => kind == DeskKind.note || !entry.done).length}',
-              selected:
-                  controller.page ==
-                  (kind == DeskKind.note ? AppPage.notes : AppPage.todos),
-              onTap: () =>
-                  onPage(kind == DeskKind.note ? AppPage.notes : AppPage.todos),
+        Expanded(
+          child: SingleChildScrollView(
+            child: Column(
+              children: [
+                if (!compact) const _NavLabel('剪切板'),
+                _NavItem(
+                  compact: compact,
+                  icon: Icons.space_dashboard_outlined,
+                  label: '全部历史',
+                  selected: controller.page == AppPage.history,
+                  onTap: () => onPage(AppPage.history),
+                ),
+                _NavItem(
+                  compact: compact,
+                  icon: Icons.star_outline_rounded,
+                  label: '我的收藏',
+                  trailing: '${controller.stats.favorites}',
+                  selected: controller.page == AppPage.favorites,
+                  onTap: () => onPage(AppPage.favorites),
+                ),
+                const SizedBox(height: 12),
+                if (!compact &&
+                    DeskKind.values.any(
+                      (kind) => controller.desktopNotes?.enabled(kind) == true,
+                    ))
+                  const _NavLabel('桌面'),
+                for (final kind in DeskKind.values)
+                  if (controller.desktopNotes?.enabled(kind) == true)
+                    _NavItem(
+                      compact: compact,
+                      icon: kind == DeskKind.note
+                          ? Icons.sticky_note_2_outlined
+                          : Icons.checklist_outlined,
+                      label: kind.label,
+                      trailing:
+                          '${controller.desktopNotes!.items(kind).where((entry) => kind == DeskKind.note || !entry.done).length}',
+                      selected:
+                          controller.page ==
+                          (kind == DeskKind.note
+                              ? AppPage.notes
+                              : AppPage.todos),
+                      onTap: () => onPage(
+                        kind == DeskKind.note ? AppPage.notes : AppPage.todos,
+                      ),
+                    ),
+                if (!compact) const _NavLabel('管理'),
+                _NavItem(
+                  compact: compact,
+                  icon: Icons.sync_rounded,
+                  label: '云同步',
+                  selected: controller.page == AppPage.sync,
+                  onTap: () => onPage(AppPage.sync),
+                ),
+                _NavItem(
+                  compact: compact,
+                  icon: Icons.devices_outlined,
+                  label: '设备',
+                  selected: controller.page == AppPage.devices,
+                  onTap: () => onPage(AppPage.devices),
+                ),
+                _NavItem(
+                  compact: compact,
+                  icon: Icons.shield_outlined,
+                  label: '隐私',
+                  selected: controller.page == AppPage.privacy,
+                  onTap: () => onPage(AppPage.privacy),
+                ),
+                _NavItem(
+                  compact: compact,
+                  icon: Icons.settings_outlined,
+                  label: '设置',
+                  selected: controller.page == AppPage.settings,
+                  onTap: () => onPage(AppPage.settings),
+                ),
+              ],
             ),
-        if (!compact) const _NavLabel('管理'),
-        _NavItem(
-          compact: compact,
-          icon: Icons.sync_rounded,
-          label: '云同步',
-          selected: controller.page == AppPage.sync,
-          onTap: () => onPage(AppPage.sync),
+          ),
         ),
-        _NavItem(
-          compact: compact,
-          icon: Icons.devices_outlined,
-          label: '设备',
-          selected: controller.page == AppPage.devices,
-          onTap: () => onPage(AppPage.devices),
-        ),
-        _NavItem(
-          compact: compact,
-          icon: Icons.shield_outlined,
-          label: '隐私',
-          selected: controller.page == AppPage.privacy,
-          onTap: () => onPage(AppPage.privacy),
-        ),
-        _NavItem(
-          compact: compact,
-          icon: Icons.settings_outlined,
-          label: '设置',
-          selected: controller.page == AppPage.settings,
-          onTap: () => onPage(AppPage.settings),
-        ),
-        const Spacer(),
         if (compact)
           Padding(
             padding: const EdgeInsets.symmetric(vertical: 14),
@@ -379,8 +399,8 @@ class _Sidebar extends StatelessWidget {
                       const SizedBox(height: 5),
                       Text(
                         controller.syncService.config == null
-                            ? '数据保存在本机，云同步尚未配置'
-                            : '本地优先 · 每  ${controller.syncService.config!.intervalMinutes} 分钟同步',
+                            ? '配置你自己的 Git 仓库'
+                            : '${_providerLabel(controller.syncService.config!.provider)} · 每 ${controller.syncService.config!.intervalMinutes} 分钟同步',
                         style: const TextStyle(
                           fontSize: 9.5,
                           color: AppColors.muted,
@@ -390,6 +410,25 @@ class _Sidebar extends StatelessWidget {
                     ],
                   ),
                 ),
+                const SizedBox(height: 10),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: FutureBuilder<Map<String, dynamic>>(
+                    future: releaseInfo,
+                    builder: (context, snapshot) {
+                      final version = snapshot.data?['version'];
+                      return Text(
+                        '本地优先，内容由你掌控${version == null ? '' : '\nv$version'}',
+                        key: const ValueKey('sidebar-version-hint'),
+                        style: const TextStyle(
+                          fontSize: 9.5,
+                          color: AppColors.muted,
+                          height: 1.6,
+                        ),
+                      );
+                    },
+                  ),
+                ),
               ],
             ),
           ),
@@ -397,6 +436,13 @@ class _Sidebar extends StatelessWidget {
     ),
   );
 }
+
+String _providerLabel(SyncProvider provider) => switch (provider) {
+  SyncProvider.gitee => 'Gitee',
+  SyncProvider.github => 'GitHub',
+  SyncProvider.gitlab => 'GitLab',
+  SyncProvider.custom => '自托管 Git',
+};
 
 class _NavLabel extends StatelessWidget {
   const _NavLabel(this.label);
@@ -627,9 +673,15 @@ class _CurrentPage extends StatelessWidget {
     switch (controller.page) {
       case AppPage.history:
       case AppPage.favorites:
-        return _HistoryWorkspace(controller: controller);
+        return _HistoryWorkspace(
+          controller: controller,
+          desktopService: desktopService,
+        );
       case AppPage.sync:
-        return _SyncPage(controller: controller);
+        return _SyncPage(
+          controller: controller,
+          desktopService: desktopService,
+        );
       case AppPage.notes:
       case AppPage.todos:
         final notes = controller.desktopNotes;
@@ -660,8 +712,12 @@ class _CurrentPage extends StatelessWidget {
 }
 
 class _HistoryWorkspace extends StatefulWidget {
-  const _HistoryWorkspace({required this.controller});
+  const _HistoryWorkspace({
+    required this.controller,
+    required this.desktopService,
+  });
   final AppController controller;
+  final DesktopService desktopService;
 
   @override
   State<_HistoryWorkspace> createState() => _HistoryWorkspaceState();
@@ -670,6 +726,64 @@ class _HistoryWorkspace extends StatefulWidget {
 class _HistoryWorkspaceState extends State<_HistoryWorkspace> {
   double _historyDragStartWidth = 0;
   AppController get controller => widget.controller;
+
+  Future<void> _pinItem(ClipboardItem item) async {
+    try {
+      await widget.desktopService.pinHistoryImage(item);
+    } catch (error) {
+      if (mounted) showMessage(context, '$error');
+    }
+  }
+
+  Future<void> _showRowMenu(
+    BuildContext context,
+    ClipboardItem item,
+    Offset position,
+  ) async {
+    final selected = await showMenu<String>(
+      context: context,
+      position: RelativeRect.fromLTRB(
+        position.dx,
+        position.dy,
+        position.dx,
+        position.dy,
+      ),
+      items: [
+        const PopupMenuItem(value: 'copy', child: Text('复制')),
+        PopupMenuItem(
+          value: 'favorite',
+          child: Text(item.favorite ? '取消收藏' : '收藏'),
+        ),
+        if (controller.page != AppPage.favorites)
+          const PopupMenuItem(value: 'delete', child: Text('删除历史记录')),
+        if (item.isImage) const PopupMenuItem(value: 'pin', child: Text('贴图')),
+      ],
+    );
+    if (!context.mounted || selected == null) return;
+    switch (selected) {
+      case 'copy':
+        final copied = await controller.useItem(item);
+        if (context.mounted) {
+          showMessage(
+            context,
+            copied ? '已复制到系统剪切板' : controller.clipboardError ?? '复制失败',
+          );
+        }
+      case 'favorite':
+        final wasFavorite = item.favorite;
+        await controller.toggleFavorite(item.id);
+        if (context.mounted) {
+          showMessage(context, wasFavorite ? '已取消收藏' : '已收藏');
+        }
+      case 'delete':
+        await controller.deleteItem(item.id);
+        if (context.mounted) {
+          showMessage(context, item.favorite ? '历史记录已删除，收藏内容保留' : '历史记录已删除');
+        }
+      case 'pin':
+        await _pinItem(item);
+    }
+  }
 
   @override
   Widget build(BuildContext context) => LayoutBuilder(
@@ -714,18 +828,19 @@ class _HistoryWorkspaceState extends State<_HistoryWorkspace> {
                           onTap: () => controller.setHistoryTodayOnly(true),
                         ),
                         const Spacer(),
+                        Text(
+                          '${controller.historyMatchCount} 条${controller.page == AppPage.favorites ? '收藏' : '记录'}',
+                          style: Theme.of(context).textTheme.bodySmall,
+                        ),
                         if (controller.historyPage > 0 ||
-                            controller.hasNextHistoryPage)
+                            controller.hasNextHistoryPage) ...[
+                          const SizedBox(width: 6),
                           ListPageButtons(
                             page: controller.historyPage,
                             hasNext: controller.hasNextHistoryPage,
                             onChange: controller.changeHistoryPage,
-                          )
-                        else
-                          Text(
-                            '${controller.history.length} 条记录',
-                            style: Theme.of(context).textTheme.bodySmall,
                           ),
+                        ],
                       ],
                     ),
                   ),
@@ -733,12 +848,16 @@ class _HistoryWorkspaceState extends State<_HistoryWorkspace> {
                   Expanded(
                     child: controller.history.isEmpty
                         ? EmptyState(
-                            title: controller.historySearch.isEmpty
-                                ? '还没有剪切板记录'
-                                : '没有找到匹配记录',
-                            subtitle: controller.historySearch.isEmpty
-                                ? '复制文本或图片后会自动保存在本机'
-                                : '试试更短的关键词',
+                            title: controller.historySearch.isNotEmpty
+                                ? '没有找到匹配记录'
+                                : controller.page == AppPage.favorites
+                                ? '还没有收藏内容'
+                                : '还没有剪切板记录',
+                            subtitle: controller.historySearch.isNotEmpty
+                                ? '试试更短的关键词'
+                                : controller.page == AppPage.favorites
+                                ? '点击记录旁的星标，保存重要内容'
+                                : '复制文本或图片后会自动保存在本机',
                           )
                         : ListView.separated(
                             key: ValueKey(controller.historyPage),
@@ -748,8 +867,13 @@ class _HistoryWorkspaceState extends State<_HistoryWorkspace> {
                                 const SizedBox(height: 2),
                             itemBuilder: (context, index) {
                               final item = controller.history[index];
+                              final source = item.sourceApp?.trim();
                               return _HistoryItem(
+                                key: ValueKey(item.id),
                                 item: item,
+                                metaLabel:
+                                    '${relativeTime(item.lastUsedAt)} · ${item.copyCount} 次 · '
+                                    '${source == null || source.isEmpty ? deviceLabel(item, localDeviceId: controller.repository.localDeviceId) : source}',
                                 selected:
                                     item.id == controller.selectedHistoryId,
                                 onTap: () => controller.selectHistory(item.id),
@@ -764,11 +888,31 @@ class _HistoryWorkspaceState extends State<_HistoryWorkspace> {
                                     );
                                   }
                                 },
-                                onFavorite: () =>
-                                    controller.toggleFavorite(item.id),
+                                onFavorite: () async {
+                                  final wasFavorite = item.favorite;
+                                  await controller.toggleFavorite(item.id);
+                                  if (context.mounted) {
+                                    showMessage(
+                                      context,
+                                      wasFavorite ? '已取消收藏' : '已收藏',
+                                    );
+                                  }
+                                },
                                 onDelete: controller.page == AppPage.favorites
                                     ? null
-                                    : () => controller.deleteItem(item.id),
+                                    : () async {
+                                        await controller.deleteItem(item.id);
+                                        if (context.mounted) {
+                                          showMessage(
+                                            context,
+                                            item.favorite
+                                                ? '历史记录已删除，收藏内容保留'
+                                                : '历史记录已删除',
+                                          );
+                                        }
+                                      },
+                                onContextMenu: (position) =>
+                                    _showRowMenu(context, item, position),
                               );
                             },
                           ),
@@ -798,6 +942,18 @@ class _HistoryWorkspaceState extends State<_HistoryWorkspace> {
               child: _DetailCard(
                 key: ValueKey(controller.selectedHistory?.contentHash),
                 item: controller.selectedHistory,
+                sourceDevice: controller.selectedHistory == null
+                    ? null
+                    : deviceLabel(
+                        controller.selectedHistory!,
+                        localDeviceId: controller.repository.localDeviceId,
+                      ),
+                onCopyFormatted: controller.selectedHistory == null
+                    ? null
+                    : (text) => controller.useFormattedText(
+                        controller.selectedHistory!,
+                        text,
+                      ),
                 onUse: () async {
                   final copied = await controller.useItem(
                     controller.selectedHistory,
@@ -813,9 +969,31 @@ class _HistoryWorkspaceState extends State<_HistoryWorkspace> {
                 },
                 onFavorite: controller.selectedHistory == null
                     ? null
-                    : () => controller.toggleFavorite(
-                        controller.selectedHistory!.id,
-                      ),
+                    : () async {
+                        final item = controller.selectedHistory!;
+                        final wasFavorite = item.favorite;
+                        await controller.toggleFavorite(item.id);
+                        if (context.mounted) {
+                          showMessage(context, wasFavorite ? '已取消收藏' : '已收藏');
+                        }
+                      },
+                onDelete:
+                    controller.page == AppPage.favorites ||
+                        controller.selectedHistory == null
+                    ? null
+                    : () async {
+                        final item = controller.selectedHistory!;
+                        await controller.deleteItem(item.id);
+                        if (context.mounted) {
+                          showMessage(
+                            context,
+                            item.favorite ? '历史记录已删除，收藏内容保留' : '历史记录已删除',
+                          );
+                        }
+                      },
+                onPin: controller.selectedHistory?.isImage == true
+                    ? () => _pinItem(controller.selectedHistory!)
+                    : null,
               ),
             ),
           ],
@@ -857,147 +1035,205 @@ class _FilterChip extends StatelessWidget {
   );
 }
 
-class _HistoryItem extends StatelessWidget {
+class _HistoryItem extends StatefulWidget {
   const _HistoryItem({
+    super.key,
     required this.item,
+    required this.metaLabel,
     required this.selected,
     required this.onTap,
     required this.onUse,
     required this.onFavorite,
     required this.onDelete,
+    this.onContextMenu,
   });
   final ClipboardItem item;
+  final String metaLabel;
   final bool selected;
   final VoidCallback onTap;
   final VoidCallback onUse;
   final VoidCallback onFavorite;
   final VoidCallback? onDelete;
+  final void Function(Offset position)? onContextMenu;
 
   @override
-  Widget build(BuildContext context) => LayoutBuilder(
-    builder: (context, constraints) {
-      final previewWidth = (constraints.maxWidth * .28).clamp(104.0, 144.0);
-      final compactActions = item.isImage && constraints.maxWidth < 420;
-      final actions = [
-        IconButton(
-          tooltip: item.favorite ? '取消收藏' : '收藏',
-          onPressed: onFavorite,
-          constraints: compactActions
-              ? const BoxConstraints.tightFor(width: 32, height: 32)
-              : null,
-          padding: compactActions ? EdgeInsets.zero : null,
-          icon: Icon(
-            item.favorite ? Icons.star_rounded : Icons.star_border_rounded,
-            size: 18,
-            color: item.favorite ? AppColors.warning : AppColors.muted,
-          ),
-        ),
-        if (onDelete != null)
+  State<_HistoryItem> createState() => _HistoryItemState();
+}
+
+class _HistoryItemState extends State<_HistoryItem> {
+  bool _hover = false;
+
+  @override
+  Widget build(BuildContext context) {
+    final item = widget.item;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final previewWidth = (constraints.maxWidth * .28).clamp(104.0, 144.0);
+        final compactActions = item.isImage && constraints.maxWidth < 420;
+        final showDelete = _hover || widget.selected;
+        final actions = [
           IconButton(
-            tooltip: '删除',
-            onPressed: onDelete,
+            tooltip: item.favorite ? '取消收藏' : '收藏',
+            onPressed: widget.onFavorite,
             constraints: compactActions
                 ? const BoxConstraints.tightFor(width: 32, height: 32)
                 : null,
             padding: compactActions ? EdgeInsets.zero : null,
-            icon: const Icon(
-              Icons.close_rounded,
-              size: 17,
-              color: AppColors.muted,
+            icon: Icon(
+              item.favorite ? Icons.star_rounded : Icons.star_border_rounded,
+              size: 18,
+              color: item.favorite ? AppColors.warning : AppColors.muted,
             ),
           ),
-      ];
-      return Material(
-        color: selected ? const Color(0xFFF7F5FF) : Colors.transparent,
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(13),
-          side: BorderSide(
-            color: selected ? const Color(0xFFE2DCFF) : Colors.transparent,
-          ),
-        ),
-        child: InkWell(
-          onTap: onTap,
-          onDoubleTap: onUse,
-          borderRadius: BorderRadius.circular(13),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 10),
-            child: Row(
-              children: [
-                if (item.isImage)
-                  Container(
-                    key: ValueKey('history-image-preview-${item.id}'),
-                    width: previewWidth,
-                    height: previewWidth * .625,
-                    decoration: BoxDecoration(
-                      color: selected
-                          ? const Color(0xFFEFEAFF)
-                          : const Color(0xFFF0F1F5),
-                      border: Border.all(
-                        color: selected
-                            ? const Color(0xFFE2DCFF)
-                            : AppColors.line,
-                      ),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    padding: const EdgeInsets.all(3),
-                    alignment: Alignment.center,
-                    child: ClipboardImage(
-                      item: item,
-                      thumbnail: true,
-                      thumbnailSize: const Size(144, 90),
-                    ),
-                  )
-                else
-                  Container(
-                    width: 34,
-                    height: 34,
-                    decoration: BoxDecoration(
-                      color: selected
-                          ? const Color(0xFFE9E5FF)
-                          : const Color(0xFFF0F1F5),
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    alignment: Alignment.center,
-                    child: Text(
-                      'T',
-                      style: TextStyle(
-                        color: selected ? AppColors.primary : AppColors.muted,
-                        fontWeight: FontWeight.w700,
-                      ),
+          if (widget.onDelete != null)
+            SizedBox(
+              width: 36,
+              child: AnimatedOpacity(
+                duration: const Duration(milliseconds: 120),
+                opacity: showDelete ? 1 : 0,
+                child: IgnorePointer(
+                  ignoring: !showDelete,
+                  child: IconButton(
+                    tooltip: '删除历史记录',
+                    onPressed: widget.onDelete,
+                    constraints: compactActions
+                        ? const BoxConstraints.tightFor(width: 32, height: 32)
+                        : null,
+                    padding: compactActions ? EdgeInsets.zero : null,
+                    icon: const Icon(
+                      Icons.delete_outline_rounded,
+                      size: 18,
+                      color: AppColors.muted,
                     ),
                   ),
-                const SizedBox(width: 11),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
+                ),
+              ),
+            ),
+        ];
+        return FocusableActionDetector(
+          actions: {
+            ActivateIntent: CallbackAction<ActivateIntent>(
+              onInvoke: (_) {
+                widget.onUse();
+                return null;
+              },
+            ),
+          },
+          child: MouseRegion(
+            onEnter: (_) => setState(() => _hover = true),
+            onExit: (_) => setState(() => _hover = false),
+            child: Material(
+              color: widget.selected
+                  ? const Color(0xFFF7F5FF)
+                  : Colors.transparent,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(13),
+                side: BorderSide(
+                  color: widget.selected
+                      ? const Color(0xFFE2DCFF)
+                      : Colors.transparent,
+                ),
+              ),
+              child: InkWell(
+                onTap: widget.onTap,
+                onDoubleTap: widget.onUse,
+                onSecondaryTapUp: widget.onContextMenu == null
+                    ? null
+                    : (details) =>
+                          widget.onContextMenu!(details.globalPosition),
+                borderRadius: BorderRadius.circular(13),
+                child: Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 11,
+                    vertical: 10,
+                  ),
+                  child: Row(
                     children: [
-                      Text(
-                        item.summary,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: const TextStyle(fontSize: 12.5),
+                      if (item.isImage)
+                        Container(
+                          key: ValueKey('history-image-preview-${item.id}'),
+                          width: previewWidth,
+                          height: previewWidth * .625,
+                          decoration: BoxDecoration(
+                            color: widget.selected
+                                ? const Color(0xFFEFEAFF)
+                                : const Color(0xFFF0F1F5),
+                            border: Border.all(
+                              color: widget.selected
+                                  ? const Color(0xFFE2DCFF)
+                                  : AppColors.line,
+                            ),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          padding: const EdgeInsets.all(3),
+                          alignment: Alignment.center,
+                          child: ClipboardImage(
+                            item: item,
+                            thumbnail: true,
+                            thumbnailSize: const Size(144, 90),
+                          ),
+                        )
+                      else
+                        Container(
+                          width: 34,
+                          height: 34,
+                          decoration: BoxDecoration(
+                            color: widget.selected
+                                ? const Color(0xFFE9E5FF)
+                                : const Color(0xFFF0F1F5),
+                            borderRadius: BorderRadius.circular(10),
+                          ),
+                          alignment: Alignment.center,
+                          child: Text(
+                            item.isImage == false && item.typeLabel == 'JSON'
+                                ? '{}'
+                                : 'T',
+                            style: TextStyle(
+                              color: widget.selected
+                                  ? AppColors.primary
+                                  : AppColors.muted,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      const SizedBox(width: 11),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              item.summary,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontSize: 12.5),
+                            ),
+                            const SizedBox(height: 5),
+                            Text(
+                              widget.metaLabel,
+                              maxLines: item.isImage ? 2 : 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: Theme.of(context).textTheme.bodySmall,
+                            ),
+                          ],
+                        ),
                       ),
-                      const SizedBox(height: 5),
-                      Text(
-                        '${relativeTime(item.lastUsedAt)}  ·  ${deviceLabel(item)}  ·  ${item.copyCount} 次',
-                        maxLines: item.isImage ? 2 : 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: Theme.of(context).textTheme.bodySmall,
-                      ),
+                      if (compactActions)
+                        Column(
+                          mainAxisSize: MainAxisSize.min,
+                          children: actions,
+                        )
+                      else
+                        ...actions,
                     ],
                   ),
                 ),
-                if (compactActions)
-                  Column(mainAxisSize: MainAxisSize.min, children: actions)
-                else
-                  ...actions,
-              ],
+              ),
             ),
           ),
-        ),
-      );
-    },
-  );
+        );
+      },
+    );
+  }
 }
 
 class _DetailCard extends StatefulWidget {
@@ -1006,10 +1242,18 @@ class _DetailCard extends StatefulWidget {
     required this.item,
     required this.onUse,
     required this.onFavorite,
+    this.sourceDevice,
+    this.onCopyFormatted,
+    this.onDelete,
+    this.onPin,
   });
   final ClipboardItem? item;
   final VoidCallback onUse;
   final VoidCallback? onFavorite;
+  final String? sourceDevice;
+  final Future<bool> Function(String formatted)? onCopyFormatted;
+  final VoidCallback? onDelete;
+  final VoidCallback? onPin;
 
   @override
   State<_DetailCard> createState() => _DetailCardState();
@@ -1077,6 +1321,7 @@ class _DetailCardState extends State<_DetailCard> {
                     key: ValueKey(item!.contentHash),
                     content: item!.content,
                     document: document,
+                    onCopyFormatted: widget.onCopyFormatted,
                   )
                 : SingleChildScrollView(
                     child: SelectableText(
@@ -1092,11 +1337,24 @@ class _DetailCardState extends State<_DetailCard> {
         ),
         const SizedBox(height: 12),
         _MetaRow(
+          label: '创建时间',
+          value: item == null ? '-' : relativeTime(item!.createdAt),
+        ),
+        const SizedBox(height: 7),
+        _MetaRow(
           label: '最近使用',
           value: item == null ? '-' : relativeTime(item!.lastUsedAt),
         ),
         const SizedBox(height: 7),
-        _MetaRow(label: '来源设备', value: item == null ? '-' : deviceLabel(item!)),
+        _MetaRow(
+          label: '来源设备',
+          value: item == null ? '-' : widget.sourceDevice ?? '-',
+        ),
+        const SizedBox(height: 7),
+        _MetaRow(
+          label: '使用次数',
+          value: item == null ? '-' : '${item!.copyCount} 次',
+        ),
         const SizedBox(height: 12),
         Row(
           children: [
@@ -1104,7 +1362,7 @@ class _DetailCardState extends State<_DetailCard> {
               child: FilledButton.icon(
                 onPressed: item == null ? null : widget.onUse,
                 icon: const Icon(Icons.copy_rounded, size: 16),
-                label: const Text('复制内容'),
+                label: Text(item?.isImage == true ? '复制图片' : '复制内容'),
               ),
             ),
             const SizedBox(width: 8),
@@ -1118,6 +1376,25 @@ class _DetailCardState extends State<_DetailCard> {
                 color: item?.favorite == true ? AppColors.warning : null,
               ),
             ),
+            if (widget.onDelete != null) ...[
+              const SizedBox(width: 8),
+              IconButton.outlined(
+                tooltip: '删除历史记录',
+                onPressed: widget.onDelete,
+                icon: const Icon(
+                  Icons.delete_outline_rounded,
+                  color: AppColors.danger,
+                ),
+              ),
+            ],
+            if (widget.onPin != null) ...[
+              const SizedBox(width: 8),
+              IconButton.outlined(
+                tooltip: '贴图',
+                onPressed: widget.onPin,
+                icon: const Icon(Icons.picture_in_picture_alt_rounded),
+              ),
+            ],
           ],
         ),
       ],
@@ -1148,8 +1425,9 @@ class _MetaRow extends StatelessWidget {
 }
 
 class _SyncPage extends StatelessWidget {
-  const _SyncPage({required this.controller});
+  const _SyncPage({required this.controller, required this.desktopService});
   final AppController controller;
+  final DesktopService desktopService;
 
   Future<void> _importLegacy(BuildContext context) async {
     final connected = controller.syncService.config != null;
@@ -1233,7 +1511,6 @@ class _SyncPage extends StatelessWidget {
                   onChanged: isSelfHosted
                       ? (value) => setState(() {
                           scheme = Uri.tryParse(value.trim())?.scheme;
-                          skipCertificate = false;
                         })
                       : null,
                   decoration: InputDecoration(
@@ -1244,9 +1521,22 @@ class _SyncPage extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 12),
-                TextField(
-                  controller: username,
-                  decoration: const InputDecoration(labelText: 'Git 用户名'),
+                Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: username,
+                        decoration: const InputDecoration(labelText: 'Git 用户名'),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: TextField(
+                        controller: branch,
+                        decoration: const InputDecoration(labelText: '同步分支'),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 12),
                 TextField(
@@ -1260,11 +1550,6 @@ class _SyncPage extends StatelessWidget {
                         ? '凭据加密保存在本机。'
                         : '仓库和账号不变时，可留空沿用已保存的凭据。',
                   ),
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  controller: branch,
-                  decoration: const InputDecoration(labelText: '同步分支'),
                 ),
                 if (isSelfHosted && scheme == 'https') ...[
                   const SizedBox(height: 8),
@@ -1374,6 +1659,70 @@ class _SyncPage extends StatelessWidget {
   Widget build(BuildContext context) => ListView(
     key: const ValueKey('cloud-sync-page'),
     children: [
+      if (controller.syncService.config case final sync?) ...[
+        AppCard(
+          key: const ValueKey('sync-connected-header'),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  const Icon(
+                    Icons.cloud_done_outlined,
+                    size: 22,
+                    color: AppColors.primary,
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          '云同步已连接',
+                          style: TextStyle(
+                            fontSize: 15,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          '${_providerLabel(sync.provider)} · ${sync.branch} 分支',
+                          style: const TextStyle(
+                            fontSize: 11,
+                            color: AppColors.muted,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  _syncStatusPill(),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 9,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.canvas,
+                  border: Border.all(color: AppColors.line),
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Text(
+                  sync.remoteUrl,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: const TextStyle(fontSize: 11, color: AppColors.muted),
+                ),
+              ),
+            ],
+          ),
+        ),
+        const SizedBox(height: 14),
+      ],
       const _LocalFirstBanner(),
       const SizedBox(height: 14),
       AppCard(
@@ -1450,6 +1799,7 @@ class _SyncPage extends StatelessWidget {
                 kind == DeskKind.note
                     ? controller.syncService.lastResult?.notes
                     : controller.syncService.lastResult?.todos,
+                onConfigure: () => controller.openSettingsSection('desktop'),
               ),
             ],
             const Padding(
@@ -1499,6 +1849,20 @@ class _SyncPage extends StatelessWidget {
                 ),
               ),
               const Divider(height: 1),
+              _SettingRow(
+                title: '启动时自动同步',
+                subtitle: '应用启动并连接仓库后，立即执行一次同步',
+                trailing: Switch(
+                  key: const ValueKey('sync-on-startup'),
+                  value: controller.syncService.config!.syncOnStartup,
+                  onChanged: (value) => controller.saveSyncConfig(
+                    controller.syncService.config!.copyWith(
+                      syncOnStartup: value,
+                    ),
+                  ),
+                ),
+              ),
+              const Divider(height: 1),
               Padding(
                 padding: const EdgeInsets.only(top: 14),
                 child: Row(
@@ -1511,7 +1875,39 @@ class _SyncPage extends StatelessWidget {
                       child: const Text('编辑连接'),
                     ),
                     TextButton(
+                      key: const ValueKey('open-archive-browser'),
+                      onPressed: () => showSyncArchiveBrowser(
+                        context,
+                        sync: controller.syncService,
+                        screenshots: desktopService.screenshots,
+                      ),
+                      child: const Text('查看仓库目录'),
+                    ),
+                    TextButton(
                       onPressed: () async {
+                        final confirmed = await showDialog<bool>(
+                          context: context,
+                          builder: (context) => AlertDialog(
+                            title: const Text('断开同步连接？'),
+                            content: const Text(
+                              '断开后，本机历史与收藏仍保留在本机，云端仓库不受影响；本机保存的凭据会被移除。',
+                            ),
+                            actions: [
+                              TextButton(
+                                onPressed: () => Navigator.pop(context, false),
+                                child: const Text('取消'),
+                              ),
+                              FilledButton(
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: AppColors.danger,
+                                ),
+                                onPressed: () => Navigator.pop(context, true),
+                                child: const Text('断开连接'),
+                              ),
+                            ],
+                          ),
+                        );
+                        if (confirmed != true || !context.mounted) return;
                         try {
                           await controller.disconnectSync();
                           if (context.mounted) {
@@ -1586,8 +1982,9 @@ class _SyncPage extends StatelessWidget {
   Widget _moduleSyncRow(
     String name,
     SyncModuleState state,
-    SyncModuleResult? previous,
-  ) {
+    SyncModuleResult? previous, {
+    VoidCallback? onConfigure,
+  }) {
     final cloud = controller.syncService.config;
     var label = state.label;
     var detail = switch (state) {
@@ -1605,7 +2002,7 @@ class _SyncPage extends StatelessWidget {
       detail = '开启下方云同步开关后，$name将参与同步。';
     }
     if (previous != null) detail += '\n上次完成 · ${previous.description}';
-    return _SettingRow(
+    final row = _SettingRow(
       title: '$name同步',
       subtitle: detail,
       trailing: StatusPill(
@@ -1614,6 +2011,28 @@ class _SyncPage extends StatelessWidget {
             ? AppColors.success
             : AppColors.muted,
       ),
+    );
+    if (onConfigure == null) return row;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        row,
+        Align(
+          alignment: Alignment.centerLeft,
+          child: TextButton(
+            key: ValueKey('module-settings-$name'),
+            style: TextButton.styleFrom(
+              padding: const EdgeInsets.symmetric(horizontal: 4),
+              minimumSize: const Size(0, 28),
+              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+              foregroundColor: AppColors.primary,
+              textStyle: const TextStyle(fontSize: 12),
+            ),
+            onPressed: onConfigure,
+            child: const Text('前往模块设置 →'),
+          ),
+        ),
+      ],
     );
   }
 
@@ -1651,7 +2070,18 @@ class _SyncHistoryCard extends StatelessWidget {
     child: Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        const _SectionTitle(title: '同步记录', subtitle: '本机保留最近 7 天'),
+        Row(
+          children: [
+            const Expanded(
+              child: _SectionTitle(title: '同步记录', subtitle: '本机保留最近 7 天'),
+            ),
+            Text(
+              '${entries.length} 条',
+              key: const ValueKey('sync-history-count'),
+              style: const TextStyle(fontSize: 11, color: AppColors.muted),
+            ),
+          ],
+        ),
         const SizedBox(height: 10),
         if (unavailable)
           const Padding(
@@ -1659,7 +2089,10 @@ class _SyncHistoryCard extends StatelessWidget {
             child: Text('同步记录暂时无法保存或读取，请检查数据目录。'),
           ),
         if (entries.isEmpty)
-          const Text('暂无同步记录', style: TextStyle(color: AppColors.muted))
+          const Text(
+            '完成第一次同步后，记录会显示在这里。',
+            style: TextStyle(color: AppColors.muted),
+          )
         else
           ConstrainedBox(
             constraints: const BoxConstraints(maxHeight: 240),
@@ -1831,80 +2264,104 @@ class _DevicesPage extends StatelessWidget {
   final AppController controller;
 
   @override
-  Widget build(BuildContext context) => ListView(
-    children: [
-      AppCard(
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            _SectionTitle(
-              title: '我的设备',
-              subtitle: controller.syncService.config == null
-                  ? '当前为纯本地模式，共 ${controller.devices.length} 台设备'
-                  : '从同步仓库识别到 ${controller.devices.length} 台设备',
-            ),
-            const SizedBox(height: 14),
-            for (final device in controller.devices)
-              Padding(
-                padding: const EdgeInsets.only(bottom: 9),
-                child: Container(
-                  padding: const EdgeInsets.all(14),
-                  decoration: BoxDecoration(
-                    color: const Color(0xFFF9F9FB),
-                    border: Border.all(color: AppColors.line),
-                    borderRadius: BorderRadius.circular(13),
-                  ),
-                  child: Row(
-                    children: [
-                      const Icon(
-                        Icons.desktop_windows_outlined,
-                        color: AppColors.primary,
-                      ),
-                      const SizedBox(width: 12),
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              device.isCurrent
-                                  ? '${device.name}（本机）'
-                                  : device.name,
-                              style: const TextStyle(
-                                fontWeight: FontWeight.w700,
-                              ),
-                            ),
-                            const SizedBox(height: 3),
-                            Text(
-                              device.shortMachineId == null
-                                  ? device.isCurrent
-                                        ? '设备编号不可用'
-                                        : '旧记录 · 无设备编号'
-                                  : '设备编号 ${device.shortMachineId}',
-                              style: const TextStyle(
-                                fontSize: 10.5,
-                                color: AppColors.muted,
-                              ),
-                            ),
-                            Text(
-                              '${device.platform} · 最近同步 ${relativeTime(device.lastSeenAt)}',
-                              style: const TextStyle(
-                                fontSize: 10.5,
-                                color: AppColors.muted,
-                              ),
-                            ),
-                          ],
-                        ),
-                      ),
-                      StatusPill(label: device.isCurrent ? '当前' : '已同步'),
-                    ],
+  Widget build(BuildContext context) {
+    // Legacy rows without a machine id cannot be merged by number.
+    final devices = controller.devices
+        .where((device) => device.shortMachineId != null)
+        .toList();
+    return ListView(
+      children: [
+        AppCard(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              _SectionTitle(
+                title: '我的设备',
+                subtitle: controller.syncService.config == null
+                    ? '当前为纯本地模式，共 ${devices.length} 台设备'
+                    : '从同步仓库识别到 ${devices.length} 台设备',
+              ),
+              const SizedBox(height: 14),
+              if (devices.isEmpty)
+                const Padding(
+                  padding: EdgeInsets.only(bottom: 10),
+                  child: Text(
+                    '还没有带设备编号的设备记录。安装新版本后，设备会自动登记编号并出现在这里。',
+                    style: TextStyle(fontSize: 12, color: AppColors.muted),
                   ),
                 ),
+              for (final device in devices)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 9),
+                  child: Container(
+                    padding: const EdgeInsets.all(14),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFF9F9FB),
+                      border: Border.all(color: AppColors.line),
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(
+                          Icons.desktop_windows_outlined,
+                          color: AppColors.primary,
+                        ),
+                        const SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                device.isCurrent
+                                    ? '${device.name}（本机）'
+                                    : device.name,
+                                style: const TextStyle(
+                                  fontWeight: FontWeight.w700,
+                                ),
+                              ),
+                              const SizedBox(height: 3),
+                              Text(
+                                '设备编号 ${device.shortMachineId}',
+                                style: const TextStyle(
+                                  fontSize: 10.5,
+                                  color: AppColors.muted,
+                                ),
+                              ),
+                              Text(
+                                '${device.platform} · 最近同步 ${relativeTime(device.lastSeenAt)}',
+                                style: const TextStyle(
+                                  fontSize: 10.5,
+                                  color: AppColors.muted,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                        StatusPill(
+                          label: device.isCurrent ? '当前设备' : '已记录',
+                          color: device.isCurrent
+                              ? AppColors.primary
+                              : AppColors.muted,
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              const SizedBox(height: 4),
+              const Text(
+                '按完整设备编号合并。同名且编号不同的设备分别显示，改名后展示最新名称。',
+                style: TextStyle(
+                  fontSize: 11,
+                  color: AppColors.muted,
+                  height: 1.6,
+                ),
               ),
-          ],
+            ],
+          ),
         ),
-      ),
-    ],
-  );
+      ],
+    );
+  }
 }
 
 class _PrivacyPage extends StatelessWidget {
@@ -1925,7 +2382,7 @@ class _PrivacyPage extends StatelessWidget {
           FilledButton(
             style: FilledButton.styleFrom(backgroundColor: AppColors.danger),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('确认清空'),
+            child: const Text('清空全部历史'),
           ),
         ],
       ),
@@ -1943,27 +2400,8 @@ class _PrivacyPage extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            const _SectionTitle(title: '隐私控制', subtitle: '管理历史保留与清理'),
+            const _SectionTitle(title: '隐私控制', subtitle: '管理历史清空与本地统计'),
             const SizedBox(height: 8),
-            _SettingRow(
-              title: '自动清理历史',
-              subtitle: '收藏内容不会被自动清理',
-              trailing: DropdownButton<int>(
-                value: controller.autoCleanupDays,
-                underline: const SizedBox.shrink(),
-                borderRadius: BorderRadius.circular(10),
-                items: const [
-                  DropdownMenuItem(value: 0, child: Text('永不')),
-                  DropdownMenuItem(value: 30, child: Text('30 天')),
-                  DropdownMenuItem(value: 90, child: Text('90 天')),
-                  DropdownMenuItem(value: 180, child: Text('180 天')),
-                ],
-                onChanged: (value) {
-                  if (value != null) controller.setAutoCleanupDays(value);
-                },
-              ),
-            ),
-            const Divider(height: 1),
             _SettingRow(
               title: '清空历史',
               subtitle: '移除全部历史中的记录，收藏列表保留',
@@ -1990,22 +2428,56 @@ class _PrivacyPage extends StatelessWidget {
               children: [
                 Expanded(
                   child: _StatBox(
-                    label: '本地历史',
+                    label: '全部历史',
                     value: '${controller.stats.history}',
+                    caption: '条本机记录',
                   ),
                 ),
                 const SizedBox(width: 10),
                 Expanded(
                   child: _StatBox(
-                    label: '收藏',
+                    label: '我的收藏',
                     value: '${controller.stats.favorites}',
+                    caption: '条长期保留',
                   ),
                 ),
                 const SizedBox(width: 10),
-                const Expanded(
-                  child: _StatBox(label: '设备', value: '1'),
+                Expanded(
+                  child: _StatBox(
+                    label: '独立桌面内容',
+                    value:
+                        '${(controller.desktopNotes?.items(DeskKind.note).length ?? 0) + (controller.desktopNotes?.items(DeskKind.todo).length ?? 0)}',
+                    caption: '条便签与待办',
+                  ),
                 ),
               ],
+            ),
+          ],
+        ),
+      ),
+      const SizedBox(height: 14),
+      AppCard(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const Row(
+              children: [
+                Icon(Icons.shield_outlined, size: 18, color: AppColors.primary),
+                SizedBox(width: 8),
+                Text(
+                  '你的内容，由你掌控',
+                  style: TextStyle(fontSize: 13, fontWeight: FontWeight.w700),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            const Text(
+              '文字、图片和设置保存在本地。便签与待办独立于剪切板历史。启用云同步后，选择的内容会保存到你配置的 Git 仓库。',
+              style: TextStyle(
+                fontSize: 11.5,
+                color: AppColors.muted,
+                height: 1.7,
+              ),
             ),
           ],
         ),
@@ -2062,39 +2534,98 @@ class _SettingsPage extends StatelessWidget {
         if (desktopService.screenshots.supported) _SettingsSection.screenshot,
         if (controller.desktopNotes != null) _SettingsSection.desktop,
         _SettingsSection.startup,
+        _SettingsSection.release,
       ];
-      return ListView(
-        key: const PageStorageKey('settings-index'),
-        children: [
-          AppCard(
-            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-            child: Material(
-              type: MaterialType.transparency,
-              child: Column(
+      return LayoutBuilder(
+        builder: (context, constraints) {
+          // Keep every card at least 260 wide so text never squashes into
+          // extra lines while the window is being resized or snapped.
+          final columns = ((constraints.maxWidth + 14) / 274).floor().clamp(
+            1,
+            3,
+          );
+          final width = (constraints.maxWidth - 14 * (columns - 1)) / columns;
+          return ListView(
+            key: const PageStorageKey('settings-index'),
+            children: [
+              Wrap(
+                spacing: 14,
+                runSpacing: 14,
                 children: [
-                  for (final (index, group) in sections.indexed) ...[
-                    if (index > 0) const Divider(height: 1, indent: 60),
-                    ListTile(
-                      onTap: () => onSection(group),
-                      leading: Icon(group.icon, color: AppColors.primary),
-                      title: Text(group.title),
-                      subtitle: Text(group.description(desktopService)),
-                      trailing: const Icon(Icons.chevron_right_rounded),
+                  for (final group in sections)
+                    SizedBox(
+                      width: width,
+                      height: 92,
+                      child: AppCard(
+                        padding: EdgeInsets.zero,
+                        child: InkWell(
+                          key: ValueKey('settings-card-${group.name}'),
+                          borderRadius: BorderRadius.circular(18),
+                          onTap: () => onSection(group),
+                          child: Padding(
+                            padding: const EdgeInsets.all(16),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 38,
+                                  height: 38,
+                                  decoration: BoxDecoration(
+                                    color: AppColors.primarySoft,
+                                    borderRadius: BorderRadius.circular(11),
+                                  ),
+                                  child: Icon(
+                                    group.icon,
+                                    size: 19,
+                                    color: AppColors.primary,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Column(
+                                    mainAxisAlignment: MainAxisAlignment.center,
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        group.title,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 13,
+                                          fontWeight: FontWeight.w700,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      Text(
+                                        group.description(desktopService),
+                                        maxLines: 2,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: const TextStyle(
+                                          fontSize: 11,
+                                          height: 1.5,
+                                          color: AppColors.muted,
+                                        ),
+                                      ),
+                                    ],
+                                  ),
+                                ),
+                                const SizedBox(width: 8),
+                                const Icon(
+                                  Icons.chevron_right_rounded,
+                                  size: 18,
+                                  color: AppColors.muted,
+                                ),
+                              ],
+                            ),
+                          ),
+                        ),
+                      ),
                     ),
-                  ],
                 ],
               ),
-            ),
-          ),
-          Align(
-            alignment: Alignment.centerLeft,
-            child: TextButton.icon(
-              onPressed: () => onSection(_SettingsSection.release),
-              icon: Icon(_SettingsSection.release.icon, size: 16),
-              label: Text(_SettingsSection.release.title),
-            ),
-          ),
-        ],
+            ],
+          );
+        },
       );
     }
     if (current == _SettingsSection.desktop &&
@@ -2120,7 +2651,10 @@ class _SettingsPage extends StatelessWidget {
         if (current == _SettingsSection.history &&
             controller.storagePath != null) ...[
           const SizedBox(height: 14),
-          StorageDirectoryCard(controller: controller),
+          StorageDirectoryCard(
+            controller: controller,
+            onRestart: desktopService.restartApplication,
+          ),
         ],
       ],
     );
@@ -2206,7 +2740,7 @@ class _SettingsPage extends StatelessWidget {
               }
               try {
                 if (!context.mounted) return;
-                await showDialog<bool>(
+                final saved = await showDialog<bool>(
                   context: context,
                   barrierDismissible: false,
                   builder: (_) => ShortcutDialog(
@@ -2214,12 +2748,36 @@ class _SettingsPage extends StatelessWidget {
                     screenshot: true,
                   ),
                 );
+                if (saved == true && context.mounted) {
+                  showMessage(context, '快捷键已更新');
+                }
               } finally {
                 await desktopService.endShortcutRecording();
               }
             },
             icon: const Icon(Icons.screenshot_monitor_outlined, size: 18),
             label: Text(controller.screenshotShortcut.label()),
+          ),
+        ),
+      if (controller.desktopNotes != null)
+        _SettingRow(
+          title: '便签与待办快捷键',
+          subtitle: '单按 F3 新建便签，快速双按 F3 新建待办',
+          trailing: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            decoration: BoxDecoration(
+              color: AppColors.canvas,
+              border: Border.all(color: AppColors.line),
+              borderRadius: BorderRadius.circular(6),
+            ),
+            child: const Text(
+              'F3',
+              style: TextStyle(
+                fontSize: 12,
+                fontWeight: FontWeight.w600,
+                color: AppColors.text,
+              ),
+            ),
           ),
         ),
       _SettingRow(
@@ -2284,13 +2842,13 @@ class _SettingsPage extends StatelessWidget {
       ),
       _SettingRow(
         title: '默认箭头样式',
-        subtitle: '开始截图时采用的样式，编辑时也可以临时切换',
+        subtitle: '「默认」沿用上次选择的样式，编辑时也可以临时切换',
         trailing: DropdownButton<String>(
           value: controller.defaultArrowStyle?.name ?? 'last',
           underline: const SizedBox.shrink(),
           borderRadius: BorderRadius.circular(10),
           items: [
-            const DropdownMenuItem(value: 'last', child: Text('沿用上次选择')),
+            const DropdownMenuItem(value: 'last', child: Text('默认')),
             for (final style in ArrowStyle.values)
               DropdownMenuItem(
                 value: style.name,
@@ -2363,6 +2921,29 @@ class _SettingsPage extends StatelessWidget {
           },
         ),
       ),
+      if (desktopService.screenshots.supported)
+        _SettingRow(
+          title: '体验截图与贴图',
+          subtitle: '可框选、绘图、取色、长截图，并将结果加入历史',
+          trailing: Builder(
+            builder: (buttonContext) => FilledButton.icon(
+              key: const ValueKey('try-screenshot-button'),
+              style: FilledButton.styleFrom(
+                backgroundColor: AppColors.primary,
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () {
+                final box = buttonContext.findRenderObject()! as RenderBox;
+                final point =
+                    box.localToGlobal(box.size.center(Offset.zero)) *
+                    View.of(buttonContext).devicePixelRatio;
+                desktopService.screenshots.start(buttonPoint: point);
+              },
+              icon: const Icon(Icons.screenshot_monitor_outlined, size: 17),
+              label: const Text('开始截图'),
+            ),
+          ),
+        ),
     ],
     _SettingsSection.history => [
       _SettingRow(
@@ -2396,6 +2977,26 @@ class _SettingsPage extends StatelessWidget {
         title: '历史保存数量',
         subtitle: '超出限制时自动清理最旧的非收藏记录',
         trailing: HistoryLimitPicker(controller: controller),
+      ),
+      _SettingRow(
+        title: '自动清理历史',
+        subtitle: '按保存时长定期清理历史记录，收藏内容不会被自动清理',
+        trailing: DropdownButton<int>(
+          key: const ValueKey('auto-cleanup-days'),
+          value: controller.autoCleanupDays,
+          underline: const SizedBox.shrink(),
+          borderRadius: BorderRadius.circular(10),
+          items: const [
+            DropdownMenuItem(value: 0, child: Text('不自动清理')),
+            DropdownMenuItem(value: 7, child: Text('7 天')),
+            DropdownMenuItem(value: 30, child: Text('30 天')),
+            DropdownMenuItem(value: 90, child: Text('90 天')),
+            DropdownMenuItem(value: 180, child: Text('180 天')),
+          ],
+          onChanged: (value) {
+            if (value != null) controller.setAutoCleanupDays(value);
+          },
+        ),
       ),
     ],
     _SettingsSection.startup => [
@@ -2515,9 +3116,10 @@ class _SettingRow extends StatelessWidget {
 }
 
 class _StatBox extends StatelessWidget {
-  const _StatBox({required this.label, required this.value});
+  const _StatBox({required this.label, required this.value, this.caption});
   final String label;
   final String value;
+  final String? caption;
 
   @override
   Widget build(BuildContext context) => Container(
@@ -2536,6 +3138,10 @@ class _StatBox extends StatelessWidget {
           value,
           style: const TextStyle(fontWeight: FontWeight.w800, fontSize: 20),
         ),
+        if (caption != null) ...[
+          const SizedBox(height: 4),
+          Text(caption!, style: Theme.of(context).textTheme.bodySmall),
+        ],
       ],
     ),
   );

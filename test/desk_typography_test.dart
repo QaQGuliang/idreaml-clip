@@ -200,6 +200,54 @@ void main() {
     });
   }
 
+  testWidgets('新建便签非取消关闭保留草稿，取消才清空', (tester) async {
+    await tester.runAsync(
+      () => notes.updateSettings(DeskKind.note, {'enabled': true}),
+    );
+    await tester.pumpWidget(page(DeskKind.note));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('新建便签'));
+    await waitForChange(
+      tester,
+      () => find.byType(AlertDialog).evaluate().isNotEmpty,
+    );
+    await tester.enterText(keyed('desk-editor-body'), '关闭后仍保留的草稿');
+    await tester.pump(const Duration(milliseconds: 500));
+    tester.state<NavigatorState>(find.byType(Navigator).first).pop();
+    await waitForChange(
+      tester,
+      () => find.byType(AlertDialog).evaluate().isEmpty,
+    );
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    final kept = await tester.runAsync(() => notes.draft(DeskKind.note));
+    expect(kept!['body'], '关闭后仍保留的草稿');
+
+    await tester.tap(find.text('新建便签'));
+    await waitForChange(
+      tester,
+      () => find.byType(AlertDialog).evaluate().isNotEmpty,
+    );
+    expect(
+      tester.widget<TextField>(keyed('desk-editor-body')).controller!.text,
+      '关闭后仍保留的草稿',
+    );
+    await tester.tap(find.text('取消'));
+    await waitForChange(
+      tester,
+      () => find.byType(AlertDialog).evaluate().isEmpty,
+    );
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 100)),
+    );
+    final cleared = await tester.runAsync(() => notes.draft(DeskKind.note));
+    expect(cleared!['body'], '');
+    await tester.pump(const Duration(milliseconds: 350));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('继承白色文字的列表与全文保留选定字色，并提供可读的局部背景', (tester) async {
     await tester.runAsync(() async {
       await notes.updateSettings(DeskKind.note, {

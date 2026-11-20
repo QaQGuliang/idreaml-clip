@@ -133,18 +133,20 @@ class EmptyState extends StatelessWidget {
 
 String relativeTime(DateTime value) {
   final difference = DateTime.now().difference(value);
-  if (difference.inSeconds < 45) return '刚刚';
+  if (difference.inSeconds < 60) return '刚刚';
   if (difference.inMinutes < 60) return '${difference.inMinutes} 分钟前';
   if (difference.inHours < 24) return '${difference.inHours} 小时前';
-  if (difference.inDays == 1) {
-    return '昨天 ${value.hour.toString().padLeft(2, '0')}:${value.minute.toString().padLeft(2, '0')}';
-  }
-  return '${value.year}-${value.month.toString().padLeft(2, '0')}-${value.day.toString().padLeft(2, '0')}';
+  return '${value.month}月${value.day}日';
 }
 
-String deviceLabel(ClipboardItem item) => item.deviceId.length > 8
-    ? '本机 · ${item.deviceId.substring(0, 8)}'
-    : '本机 · ${item.deviceId}';
+String deviceLabel(ClipboardItem item, {String? localDeviceId}) {
+  final prefix = localDeviceId == null || item.deviceId == localDeviceId
+      ? '本机'
+      : '设备';
+  return item.deviceId.length > 8
+      ? '$prefix · ${item.deviceId.substring(0, 8)}'
+      : '$prefix · ${item.deviceId}';
+}
 
 void showMessage(BuildContext context, String message) {
   ScaffoldMessenger.of(context)

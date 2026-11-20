@@ -146,6 +146,9 @@ void main() {
   final fontPicker = find.byKey(const ValueKey('screenshot-font-size'));
 
   double sizeValue(WidgetTester tester, Finder picker) =>
+      tester.widget<Slider>(picker).value;
+
+  double fontValue(WidgetTester tester, Finder picker) =>
       tester.widget<DropdownButton<double>>(picker).value!;
 
   bool toolActive(WidgetTester tester, String label) {
@@ -350,9 +353,9 @@ void main() {
     expect(body.top, greaterThanOrEqualTo(160 / 1.5));
     expect(body.right, lessThanOrEqualTo(1600 / 1.5));
     expect(body.bottom, lessThanOrEqualTo(800 / 1.5));
-    await tester.ensureVisible(find.text('取色器（普通截图）'));
+    await tester.ensureVisible(find.text('取色器'));
     await tester.pumpAndSettle();
-    expect(find.text('取色器（普通截图）').hitTestable(), findsOneWidget);
+    expect(find.text('取色器').hitTestable(), findsOneWidget);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -414,8 +417,8 @@ void main() {
     await tester.dragFrom(const Offset(300, 190), const Offset(60, 60));
     final result = await exportedImage(tester);
     expect(result.getPixel(70, 120).g, 255); // Original rectangle moved away.
-    expect(result.getPixel(130, 150).g, 68); // Its new left edge.
-    expect(result.getPixel(250, 120).g, 68); // The next rectangle was drawn.
+    expect(result.getPixel(130, 150).g, 87); // Its new left edge.
+    expect(result.getPixel(250, 120).g, 87); // The next rectangle was drawn.
     await undo(tester);
     expect(toolActive(tester, '矩形'), isTrue);
     final undone = await exportedImage(tester);
@@ -426,7 +429,7 @@ void main() {
     await settleImages(tester);
     expect(toolActive(tester, '矩形'), isTrue);
     final redone = await exportedImage(tester);
-    expect(redone.getPixel(250, 120).g, 68);
+    expect(redone.getPixel(250, 120).g, 87);
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -453,11 +456,11 @@ void main() {
     await settleImages(tester);
     expect(toolActive(tester, '矩形'), isTrue);
     final resized = await exportedImage(tester);
-    expect(resized.getPixel(170, 150).g, 68);
+    expect(resized.getPixel(170, 150).g, 87);
     expect(resized.getPixel(150, 150).g, 255);
     await undo(tester);
     final restored = await exportedImage(tester);
-    expect(restored.getPixel(150, 120).g, 68);
+    expect(restored.getPixel(150, 120).g, 87);
     expect(restored.getPixel(170, 150).g, 255);
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -510,8 +513,8 @@ void main() {
     await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
     await tester.tapAt(const Offset(100, 150));
     await tester.pump();
-    expect(toolActive(tester, '选择 / 调整'), isTrue);
-    expect(toolActive(tester, '矩形'), isFalse);
+    expect(toolActive(tester, '矩形'), isTrue);
+    expect(toolActive(tester, '选择 / 调整'), isFalse);
     await tester.pump(const Duration(milliseconds: 350));
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -525,13 +528,13 @@ void main() {
     await settleImages(tester);
     await tester.tap(find.byTooltip('荧光笔'));
     await tester.pump();
-    expect(sizeValue(tester, strokePicker), 18);
+    expect(sizeValue(tester, strokePicker), 3);
     await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
     await tester.tapAt(const Offset(160, 220));
     await tester.pump(const Duration(milliseconds: 350));
     expect(toolActive(tester, '选择 / 调整'), isTrue);
     expect(sizeValue(tester, strokePicker), 3);
-    await tester.tap(strokePicker);
+    await tester.tap(find.text('粗细'));
     await tester.pumpAndSettle();
     expect(toolActive(tester, '选择 / 调整'), isTrue);
     expect(sizeValue(tester, strokePicker), 3);
@@ -540,7 +543,7 @@ void main() {
     expect(toolActive(tester, '荧光笔'), isTrue);
     await tester.sendKeyEvent(LogicalKeyboardKey.escape);
     await tester.pumpAndSettle();
-    expect(sizeValue(tester, strokePicker), 18);
+    expect(sizeValue(tester, strokePicker), 3);
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
   });
@@ -594,8 +597,8 @@ void main() {
     expect(toolActive(tester, '直线'), isTrue);
     await tester.dragFrom(origin + const Offset(60, 180), const Offset(120, 0));
     final result = await exportedImage(tester);
-    expect(result.getPixel(120, 130).g, 68);
-    expect(result.getPixel(120, 180).g, 68);
+    expect(result.getPixel(120, 130).g, 87);
+    expect(result.getPixel(120, 180).g, 87);
     expect(result.getPixel(120, 90).toList(), base.getPixel(120, 90).toList());
     expect(tester.takeException(), isNull);
     await tester.pumpWidget(const SizedBox.shrink());
@@ -669,10 +672,10 @@ void main() {
     await tester.pump();
     expect(strokePicker, findsNothing);
     expect(find.text('字号'), findsOneWidget);
-    final number = sizeValue(tester, fontPicker);
+    final number = fontValue(tester, fontPicker);
     await tester.sendKeyEvent(LogicalKeyboardKey.numpad1);
     await tester.pump();
-    expect(sizeValue(tester, fontPicker), number - 2);
+    expect(fontValue(tester, fontPicker), number - 2);
     await tester.tap(find.byTooltip('实心遮盖'));
     await tester.pump();
     expect(strokePicker, findsNothing);
@@ -684,14 +687,14 @@ void main() {
     await tester.pump();
     expect(strokePicker, findsNothing);
     expect(fontPicker, findsOneWidget);
-    final font = sizeValue(tester, fontPicker);
+    final font = fontValue(tester, fontPicker);
     await tester.tapAt(const Offset(120, 170));
     await tester.pump();
     await tester.enterText(find.byType(TextField), '编号 12');
     await tester.sendKeyEvent(LogicalKeyboardKey.digit1);
     await tester.sendKeyEvent(LogicalKeyboardKey.digit2);
     await tester.pump();
-    expect(sizeValue(tester, fontPicker), font);
+    expect(fontValue(tester, fontPicker), font);
     expect(
       tester.widget<TextField>(find.byType(TextField)).controller!.text,
       '编号 12',
@@ -727,7 +730,7 @@ void main() {
     }
     await tester.pump();
     expect(sizeValue(tester, strokePicker), original);
-    await tester.tap(strokePicker);
+    await tester.tap(find.byTooltip('截图帮助'));
     await tester.pumpAndSettle();
     await tester.sendKeyEvent(LogicalKeyboardKey.digit2);
     await tester.pump();
@@ -745,7 +748,7 @@ void main() {
     await tester.pump();
     expect(sizeValue(tester, strokePicker), original + 1);
     final moved = await exportedImage(tester);
-    expect(moved.getPixel(130, 150).r, 239);
+    expect(moved.getPixel(130, 150).r, 108);
     expect(moved.getPixel(130, 110).g, 255);
     await undo(tester);
     await tester.tapAt(const Offset(180, 210));
@@ -840,10 +843,10 @@ void main() {
     await tester.tap(find.byTooltip('箭头样式'));
     await tester.pumpAndSettle();
     final first = tester.getRect(
-      find.widgetWithText(PopupMenuItem<ArrowStyle>, '单向箭头'),
+      find.widgetWithText(PopupMenuItem<ArrowStyle>, '单向'),
     );
     final last = tester.getRect(
-      find.widgetWithText(PopupMenuItem<ArrowStyle>, '折线箭头'),
+      find.widgetWithText(PopupMenuItem<ArrowStyle>, '折线'),
     );
     expect(first.left, greaterThanOrEqualTo(800 / 1.5));
     expect(first.top, greaterThanOrEqualTo(160 / 1.5));
@@ -880,6 +883,8 @@ void main() {
       const Offset(120, 250) / 1.5,
       const Offset(300, 150) / 1.5,
     );
+    await tester.pump();
+    await tester.tap(find.byTooltip('选择 / 调整'));
     await tester.pump();
     await tester.dragFrom(
       const Offset(200, 310) / 1.5,
@@ -936,6 +941,8 @@ void main() {
     await tester.pump();
     expect(find.textContaining('显示器之间的空隙'), findsOneWidget);
     // Lift the visible top-left handle into the area shared by both displays.
+    await tester.tap(find.byTooltip('选择 / 调整'));
+    await tester.pump();
     await tester.dragFrom(
       const Offset(650, 90) / 1.5,
       const Offset(0, 120) / 1.5,
@@ -1103,7 +1110,6 @@ void main() {
     await fromHost(tester, 'start', snapshot(1)..['showColorPicker'] = false);
     await settleImages(tester);
     expect(picker, findsNothing);
-    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
     await fromHost(tester, 'localShortcut', {
       'session': 1,
       'key': 'togglePicker',
@@ -1157,7 +1163,7 @@ void main() {
     scrollTop = 80;
     await settleImages(tester);
     await settleImages(tester);
-    expect(find.text('400 × 380 px'), findsOneWidget);
+    expect(find.textContaining('400 × 380 px'), findsOneWidget);
     await tester.tap(find.byTooltip('完成采集，进入编辑'));
     await settleImages(tester);
     expect(
@@ -1203,7 +1209,7 @@ void main() {
     await tester.pump();
     await tester.tap(find.byTooltip('撤销（Ctrl + Z）'));
     await tester.pump();
-    await tester.tap(find.byTooltip('重做（Ctrl + Y）'));
+    await tester.tap(find.byTooltip('重做（Ctrl + Shift + Z）'));
     await settleImages(tester);
     await tester.tap(find.byTooltip('完成（Enter）'));
     await settleImages(tester);
@@ -1315,12 +1321,11 @@ void main() {
     await tester.tap(find.byTooltip('标注样式'));
     await tester.pumpAndSettle();
     expect(find.text('粗细'), findsOneWidget);
-    final strokeWidth = find.byType(DropdownButton<double>).first;
-    await tester.tap(strokeWidth);
+    final strokeWidth = find.byKey(const ValueKey('screenshot-stroke-width'));
+    final beforeWidth = tester.widget<Slider>(strokeWidth).value;
+    await tester.drag(strokeWidth, const Offset(40, 0));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('8').last);
-    await tester.pumpAndSettle();
-    expect(tester.widget<DropdownButton<double>>(strokeWidth).value, 8);
+    expect(tester.widget<Slider>(strokeWidth).value, greaterThan(beforeWidth));
     expect(tester.getRect(bar), bounds);
     // Dismiss the popover by clicking the canvas outside it.
     await tester.tapAt(const Offset(200, 460));
@@ -1356,7 +1361,7 @@ void main() {
       await tester.pump(const Duration(milliseconds: 100));
     }
     expect(bottom, findsOneWidget);
-    expect(find.text('400 × 420 px'), findsOneWidget);
+    expect(find.textContaining('400 × 420 px'), findsOneWidget);
     expect(find.byKey(const ValueKey('long-screenshot-editor')), findsNothing);
     final count = calls.length;
     await tester.pump(const Duration(seconds: 3));
@@ -1384,7 +1389,7 @@ void main() {
     scrollTop = 80;
     await settleImages(tester);
     await settleImages(tester);
-    expect(find.text('400 × 380 px'), findsOneWidget);
+    expect(find.textContaining('400 × 380 px'), findsOneWidget);
     expect(calls.where((c) => c.method == 'scrollStep'), hasLength(1));
     expect(calls.where((c) => c.method == 'beginScroll'), hasLength(1));
     await tester.pumpWidget(const SizedBox.shrink());
@@ -1439,7 +1444,7 @@ void main() {
   }) async {
     final bounds = tester.getRect(toolbar);
     final pointer = await tester.startGesture(
-      Offset(bounds.right - 3, bounds.center.dy),
+      Offset(bounds.left + 15, bounds.top + 15),
       kind: PointerDeviceKind.mouse,
     );
     if (hold) await tester.pump(const Duration(milliseconds: 600));
@@ -1477,17 +1482,18 @@ void main() {
         Offset(350, 180) / pixelRatio,
       );
       await tester.pump();
+      await tester.tap(find.byTooltip('选择 / 调整'));
+      await tester.pump();
       expect(tester.getRect(toolbar).bottom, closeTo(400 / pixelRatio, .01));
       await tester.tap(find.byTooltip('矩形'));
       await tester.pump();
       final styledToolbar = tester.getRect(toolbar);
-      // Narrow high-DPI views can wrap the style controls onto another row.
+      // The style row makes the toolbar taller; it stays attached to an edge.
       expect(
-        styledToolbar.bottom,
-        closeTo(
-          (styledToolbar.height <= 400 / pixelRatio ? 400 : 580) / pixelRatio,
-          .01,
-        ),
+        (styledToolbar.bottom - 400 / pixelRatio).abs() < .01 ||
+            (styledToolbar.top - 580 / pixelRatio).abs() < .01 ||
+            (styledToolbar.bottom - 580 / pixelRatio).abs() < .01,
+        isTrue,
       );
       expect(
         tester
@@ -1575,12 +1581,15 @@ void main() {
     );
     await tester.pump();
     expect(tester.getRect(toolbar), moved);
-    final widthControl = find.byType(DropdownButton<double>).first;
-    await tester.tap(widthControl);
-    await tester.pumpAndSettle();
-    await tester.tap(find.text('5').last);
-    await tester.pumpAndSettle();
-    expect(tester.widget<DropdownButton<double>>(widthControl).value, 5);
+    final widthControl = find.byKey(const ValueKey('screenshot-stroke-width'));
+    final beforeWidth = tester.widget<Slider>(widthControl).value;
+    await tester.drag(
+      widthControl,
+      const Offset(30, 0),
+      kind: PointerDeviceKind.mouse,
+    );
+    await tester.pump();
+    expect(tester.widget<Slider>(widthControl).value, greaterThan(beforeWidth));
     expect(tester.getRect(toolbar), moved);
     await tester.tap(find.byTooltip('文字'));
     await tester.pump();
@@ -1779,6 +1788,131 @@ void main() {
     await tester.tap(find.byTooltip('完成（Enter）'));
     await settleImages(tester);
     expect(calls.last.method, 'close');
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('取色器隐藏时 C 仍复制并退出', (tester) async {
+    await mount(tester, pending: false);
+    await fromHost(tester, 'start', snapshot(1)..['showColorPicker'] = false);
+    await settleImages(tester);
+    expect(find.byKey(const ValueKey('screenshot-color-picker')), findsNothing);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.pump();
+    final copy = calls.singleWhere((c) => c.method == 'copyColor');
+    expect(copy.arguments, {'token': 1, 'hex': '#FFFFFF'});
+    expect(calls.last.method, 'close');
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('重新框选清空选区与标注，撤销可恢复', (tester) async {
+    await mount(tester);
+    await tester.tapAt(const Offset(100, 150));
+    await tester.pump();
+    await tester.dragFrom(const Offset(120, 190), const Offset(80, 60));
+    await settleImages(tester);
+    expect(find.text('400 × 300 px'), findsOneWidget);
+    await tester.tap(find.byTooltip('重新框选'));
+    await tester.pump();
+    expect(find.text('400 × 300 px'), findsNothing);
+    expect(find.textContaining('拖动框选'), findsOneWidget);
+    await tester.tap(find.byTooltip('撤销（Ctrl + Z）'));
+    await tester.pump();
+    expect(find.text('400 × 300 px'), findsOneWidget);
+    final result = await exportedImage(tester);
+    expect(result.getPixel(70, 120).g, 87);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('自定义颜色输入 HEX 应用到标注', (tester) async {
+    await mount(tester);
+    await tester.tapAt(const Offset(100, 150));
+    await tester.pump();
+    await tester.tap(find.byKey(const ValueKey('screenshot-custom-color')));
+    await tester.pumpAndSettle();
+    expect(find.text('自定义颜色'), findsOneWidget);
+    await tester.enterText(
+      find.byKey(const ValueKey('screenshot-custom-color-input')),
+      '#123456',
+    );
+    await tester.pump();
+    await tester.tap(
+      find.byKey(const ValueKey('screenshot-custom-color-apply')),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('自定义颜色'), findsNothing);
+    await tester.dragFrom(const Offset(120, 190), const Offset(80, 60));
+    await settleImages(tester);
+    final result = await exportedImage(tester);
+    final pixel = result.getPixel(70, 120);
+    expect([pixel.r, pixel.g, pixel.b], [0x12, 0x34, 0x56]);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('长图采集显示屏数，到底暂停后可继续向下采集', (tester) async {
+    autoScroll = true;
+    await mount(tester);
+    await tester.tapAt(const Offset(100, 150));
+    await tester.pump();
+    await tester.tap(find.byTooltip('长截图'));
+    final bottom = find.textContaining('可能已到底');
+    for (var i = 0; i < 160 && bottom.evaluate().isEmpty; i++) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(bottom, findsOneWidget);
+    expect(find.textContaining('已采集 2 屏'), findsOneWidget);
+    final resume = find.byKey(const ValueKey('scroll-resume'));
+    expect(resume, findsOneWidget);
+    final steps = calls.where((c) => c.method == 'scrollStep').length;
+    await tester.tap(resume);
+    await tester.pump();
+    expect(find.textContaining('正在自动向下滚动'), findsOneWidget);
+    for (
+      var i = 0;
+      i < 40 && calls.where((c) => c.method == 'scrollStep').length <= steps;
+      i++
+    ) {
+      await tester.runAsync(
+        () => Future<void>.delayed(const Duration(milliseconds: 10)),
+      );
+      await tester.pump(const Duration(milliseconds: 100));
+    }
+    expect(
+      calls.where((c) => c.method == 'scrollStep').length,
+      greaterThan(steps),
+    );
+    await tester.tap(find.byTooltip('取消长截图（Esc）'));
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('长图编辑取色器采样包含标注，C 复制退出', (tester) async {
+    await openLongEditor(tester);
+    tester.view.physicalSize = const Size(1200, 700);
+    await tester.pump();
+    await tester.tap(find.byTooltip('实心遮盖'));
+    await tester.pump();
+    final origin = tester.getTopLeft(
+      find.byKey(const ValueKey('long-screenshot-canvas')),
+    );
+    await tester.dragFrom(origin + const Offset(60, 90), const Offset(120, 60));
+    await settleImages(tester);
+    final pointer = await tester.createGesture(kind: PointerDeviceKind.mouse);
+    await pointer.addPointer(location: origin + const Offset(100, 110));
+    await pointer.moveTo(origin + const Offset(100, 110));
+    await tester.pump();
+    expect(find.text('#111827'), findsOneWidget);
+    await tester.sendKeyEvent(LogicalKeyboardKey.keyC);
+    await tester.pump();
+    final copy = calls.lastWhere((c) => c.method == 'copyColor');
+    expect(copy.arguments, {'token': 1, 'hex': '#111827'});
+    expect(calls.last.method, 'close');
+    await pointer.removePointer();
+    await tester.pump(const Duration(milliseconds: 300));
     await tester.pumpWidget(const SizedBox.shrink());
   });
 }

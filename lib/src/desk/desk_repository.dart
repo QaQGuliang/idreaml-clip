@@ -93,10 +93,10 @@ class DeskRepository {
     Set<String>? expected,
   }) => _access(
     (db) => db.transaction((tx) async {
-      if (title.length > 200 ||
+      if (title.length > 120 ||
           body.length > 20000 ||
           (!deleted && body.trim().isEmpty)) {
-        throw const FormatException('请填写内容，标题最多 200 字，正文最多 20000 字');
+        throw const FormatException('请填写内容，标题最多 120 字，正文最多 20000 字');
       }
       if (!validDeskFontFamily(fontFamily) ||
           !validDeskFontSize(fontSize) ||

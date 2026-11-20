@@ -7,10 +7,16 @@ import 'app_theme.dart';
 import 'json_tree_view.dart';
 
 class JsonSplitPreview extends StatefulWidget {
-  const JsonSplitPreview({super.key, required this.content, this.document});
+  const JsonSplitPreview({
+    super.key,
+    required this.content,
+    this.document,
+    this.onCopyFormatted,
+  });
 
   final String content;
   final JsonDocument? document;
+  final Future<bool> Function(String formatted)? onCopyFormatted;
 
   @override
   State<JsonSplitPreview> createState() => _JsonSplitPreviewState();
@@ -18,6 +24,7 @@ class JsonSplitPreview extends StatefulWidget {
 
 class _JsonSplitPreviewState extends State<JsonSplitPreview> {
   late Future<JsonDocument> _formatted;
+  bool _rawMode = false;
 
   Future<JsonDocument> _load() => widget.document == null
       ? loadJsonPreview(widget.content)
@@ -38,36 +45,82 @@ class _JsonSplitPreviewState extends State<JsonSplitPreview> {
     }
   }
 
+  Widget _tab(String label, bool active, VoidCallback onTap) => TextButton(
+    onPressed: onTap,
+    style: TextButton.styleFrom(
+      backgroundColor: active ? AppColors.primarySoft : Colors.transparent,
+      foregroundColor: active ? AppColors.primary : AppColors.muted,
+      minimumSize: const Size(0, 26),
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      textStyle: const TextStyle(fontSize: 11, fontWeight: FontWeight.w600),
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+    ),
+    child: Text(label),
+  );
+
   @override
-  Widget build(BuildContext context) => Row(
+  Widget build(BuildContext context) => Column(
     crossAxisAlignment: CrossAxisAlignment.stretch,
     children: [
-      Expanded(
-        child: _JsonPane(
-          key: ValueKey(('raw', widget.content)),
-          title: '原始文本',
-          textKey: const ValueKey('json-raw-text'),
-          content: widget.content,
+      Container(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+        decoration: const BoxDecoration(
+          color: AppColors.sidebar,
+          border: Border(bottom: BorderSide(color: AppColors.line)),
+        ),
+        child: Row(
+          children: [
+            _tab('JSON 预览', !_rawMode, () => setState(() => _rawMode = false)),
+            const SizedBox(width: 4),
+            _tab('原文', _rawMode, () => setState(() => _rawMode = true)),
+          ],
         ),
       ),
-      const VerticalDivider(width: 1, thickness: 1, color: AppColors.line),
       Expanded(
-        child: FutureBuilder<JsonDocument>(
-          key: ValueKey(widget.content),
-          future: _formatted,
-          builder: (context, snapshot) => _JsonPane(
-            title: '格式化 JSON',
-            textKey: const ValueKey('json-formatted-text'),
-            body: snapshot.hasData
-                ? JsonTreeView(
-                    key: const ValueKey('json-formatted-tree'),
-                    document: snapshot.data!,
-                  )
-                : null,
-            error: snapshot.hasError ? '无法解析这段 JSON' : null,
-            formatted: true,
-          ),
-        ),
+        child: _rawMode
+            ? _JsonPane(
+                key: const ValueKey('json-raw-only'),
+                title: '原文',
+                textKey: const ValueKey('json-raw-text'),
+                content: widget.content,
+              )
+            : Row(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Expanded(
+                    child: _JsonPane(
+                      key: ValueKey(('raw', widget.content)),
+                      title: '原始文本',
+                      textKey: const ValueKey('json-raw-text'),
+                      content: widget.content,
+                    ),
+                  ),
+                  const VerticalDivider(
+                    width: 1,
+                    thickness: 1,
+                    color: AppColors.line,
+                  ),
+                  Expanded(
+                    child: FutureBuilder<JsonDocument>(
+                      key: ValueKey(widget.content),
+                      future: _formatted,
+                      builder: (context, snapshot) => _JsonPane(
+                        title: '格式化 JSON',
+                        textKey: const ValueKey('json-formatted-text'),
+                        body: snapshot.hasData
+                            ? JsonTreeView(
+                                key: const ValueKey('json-formatted-tree'),
+                                document: snapshot.data!,
+                                onCopy: widget.onCopyFormatted,
+                              )
+                            : null,
+                        error: snapshot.hasError ? '无法解析这段 JSON' : null,
+                        formatted: true,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
       ),
     ],
   );

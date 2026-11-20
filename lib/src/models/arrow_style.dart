@@ -1,10 +1,10 @@
 enum ArrowStyle {
-  single('单向箭头'),
-  filled('实心箭头'),
-  outlined('空心箭头'),
-  doubleHeaded('双向箭头'),
-  dashed('虚线箭头'),
-  elbow('折线箭头');
+  single('单向'),
+  filled('实心'),
+  outlined('空心'),
+  doubleHeaded('双向'),
+  dashed('虚线'),
+  elbow('折线');
 
   const ArrowStyle(this.label);
   final String label;

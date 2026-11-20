@@ -40,6 +40,7 @@ class _QuickPanelState extends State<QuickPanel> {
   final _scrollController = ScrollController();
   bool _copying = false;
   bool _contextMenuOpen = false;
+  MenuController? _openMenu;
   Timer? _hoverTimer;
   Timer? _previewCloseTimer;
   int _hoverGeneration = 0;
@@ -99,6 +100,10 @@ class _QuickPanelState extends State<QuickPanel> {
         return true;
       case LogicalKeyboardKey.escape:
         // Handle Escape even while the search field or context menu has focus.
+        if (_contextMenuOpen) {
+          _openMenu?.close();
+          return true;
+        }
         unawaited(_clearPreview());
         unawaited(widget.desktopService.hide());
         return true;
@@ -372,7 +377,7 @@ class _QuickPanelState extends State<QuickPanel> {
         child: Container(
           decoration: BoxDecoration(
             color: AppColors.surface,
-            borderRadius: BorderRadius.circular(14),
+            borderRadius: BorderRadius.circular(18),
             border: Border.all(color: AppColors.line),
           ),
           clipBehavior: Clip.antiAlias,
@@ -442,7 +447,9 @@ class _QuickPanelState extends State<QuickPanel> {
                       )
                     else
                       Text(
-                        controller.quickSearch.trim().isEmpty
+                        controller.quickFavoritesOnly
+                            ? '收藏内容'
+                            : controller.quickSearch.trim().isEmpty
                             ? '最近 ${controller.quickCount} 条'
                             : '全部历史搜索',
                         style: Theme.of(context).textTheme.bodySmall,
@@ -455,10 +462,14 @@ class _QuickPanelState extends State<QuickPanel> {
                 child: controller.quickItems.isEmpty
                     ? EmptyState(
                         title: controller.quickSearch.isEmpty
-                            ? '还没有剪切板记录'
+                            ? controller.quickFavoritesOnly
+                                  ? '还没有收藏内容'
+                                  : '还没有剪切板记录'
                             : '没有找到匹配记录',
                         subtitle: controller.quickSearch.isEmpty
-                            ? '复制文本后会出现在这里'
+                            ? controller.quickFavoritesOnly
+                                  ? '在全部历史中点击星标收藏内容'
+                                  : '复制文本后会出现在这里'
                             : '试试更短的关键词',
                       )
                     : NotificationListener<ScrollStartNotification>(
@@ -484,11 +495,47 @@ class _QuickPanelState extends State<QuickPanel> {
                               onExit: _leaveItem,
                               onDelete: controller.quickFavoritesOnly
                                   ? null
-                                  : () => controller.deleteItem(item.id),
-                              onFavorite: () =>
-                                  controller.toggleFavorite(item.id),
-                              onMenuChanged: (open) {
+                                  : () async {
+                                      await controller.deleteItem(item.id);
+                                      if (context.mounted) {
+                                        showMessage(
+                                          context,
+                                          item.favorite
+                                              ? '历史记录已删除，收藏内容保留'
+                                              : '历史记录已删除',
+                                        );
+                                      }
+                                    },
+                              onFavorite: () async {
+                                final wasFavorite = item.favorite;
+                                await controller.toggleFavorite(item.id);
+                                if (context.mounted) {
+                                  showMessage(
+                                    context,
+                                    wasFavorite ? '已取消收藏' : '已收藏',
+                                  );
+                                }
+                              },
+                              onPin:
+                                  item.isImage &&
+                                      widget
+                                          .desktopService
+                                          .screenshots
+                                          .supported
+                                  ? () async {
+                                      try {
+                                        await widget.desktopService
+                                            .pinHistoryImage(item);
+                                      } catch (error) {
+                                        if (context.mounted) {
+                                          showMessage(context, '$error');
+                                        }
+                                      }
+                                    }
+                                  : null,
+                              onMenuChanged: (open, menu) {
                                 _contextMenuOpen = open;
+                                _openMenu = open ? menu : null;
                                 if (open) unawaited(_clearPreview());
                               },
                             );
@@ -641,6 +688,7 @@ class _QuickItem extends StatefulWidget {
     required this.onDelete,
     required this.onFavorite,
     required this.onMenuChanged,
+    this.onPin,
   });
 
   final ClipboardItem item;
@@ -651,7 +699,8 @@ class _QuickItem extends StatefulWidget {
   final VoidCallback onExit;
   final VoidCallback? onDelete;
   final VoidCallback onFavorite;
-  final ValueChanged<bool> onMenuChanged;
+  final VoidCallback? onPin;
+  final void Function(bool open, MenuController menu) onMenuChanged;
 
   @override
   State<_QuickItem> createState() => _QuickItemState();
@@ -670,8 +719,8 @@ class _QuickItemState extends State<_QuickItem> {
         padding: const EdgeInsets.symmetric(vertical: 2),
         child: MenuAnchor(
           controller: _menuController,
-          onOpen: () => widget.onMenuChanged(true),
-          onClose: () => widget.onMenuChanged(false),
+          onOpen: () => widget.onMenuChanged(true, _menuController),
+          onClose: () => widget.onMenuChanged(false, _menuController),
           style: const MenuStyle(
             minimumSize: WidgetStatePropertyAll(Size(130, 0)),
           ),
@@ -681,6 +730,23 @@ class _QuickItemState extends State<_QuickItem> {
               onPressed: widget.onCopy,
               child: const Text('复制'),
             ),
+            MenuItemButton(
+              leadingIcon: Icon(
+                item.favorite ? Icons.star_rounded : Icons.star_outline_rounded,
+                size: 17,
+              ),
+              onPressed: widget.onFavorite,
+              child: Text(item.favorite ? '取消收藏' : '收藏'),
+            ),
+            if (widget.onPin != null)
+              MenuItemButton(
+                leadingIcon: const Icon(
+                  Icons.picture_in_picture_alt_rounded,
+                  size: 16,
+                ),
+                onPressed: widget.onPin,
+                child: const Text('贴图'),
+              ),
             if (widget.onDelete != null)
               MenuItemButton(
                 leadingIcon: const Icon(Icons.delete_outline_rounded, size: 17),
@@ -722,7 +788,7 @@ class _QuickItemState extends State<_QuickItem> {
                       child: item.isImage
                           ? ClipboardImage(item: item, thumbnail: true)
                           : Text(
-                              'T',
+                              item.typeLabel == 'JSON' ? '{}' : 'T',
                               style: TextStyle(
                                 color: widget.selected
                                     ? AppColors.primary

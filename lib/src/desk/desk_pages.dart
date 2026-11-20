@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../ui/app_theme.dart';
@@ -73,6 +75,7 @@ class _DeskPageState extends State<DeskPage> {
         widget.kind,
         entry,
         settings: widget.notes.config(widget.kind),
+        onEdit: () => _edit(context, entry: entry),
       );
       _viewing = false;
     });
@@ -110,6 +113,26 @@ class _DeskPageState extends State<DeskPage> {
         : entry.textColor;
     final settings = notes.config(kind);
     var saving = false;
+    var cancelled = false;
+    var saved = false;
+    Timer? draftTimer;
+    void scheduleDraft() {
+      if (entry != null) return;
+      draftTimer?.cancel();
+      draftTimer = Timer(const Duration(milliseconds: 400), () {
+        unawaited(
+          notes.storeDraft(
+            kind,
+            title.text,
+            body.text,
+            fontFamily: fontFamily,
+            fontSize: fontSize,
+            textColor: textColor,
+          ),
+        );
+      });
+    }
+
     await notes.editing(true);
     try {
       if (!context.mounted) return;
@@ -147,8 +170,11 @@ class _DeskPageState extends State<DeskPage> {
                         TextField(
                           key: const ValueKey('desk-editor-title'),
                           controller: title,
-                          onChanged: (_) => setDialogState(() {}),
-                          maxLength: 200,
+                          onChanged: (_) {
+                            setDialogState(() {});
+                            scheduleDraft();
+                          },
+                          maxLength: 120,
                           decoration: const InputDecoration(
                             labelText: '标题（可选）',
                             hintText: '这一刻，想记下什么？',
@@ -157,7 +183,10 @@ class _DeskPageState extends State<DeskPage> {
                       TextField(
                         key: const ValueKey('desk-editor-body'),
                         controller: body,
-                        onChanged: (_) => setDialogState(() {}),
+                        onChanged: (_) {
+                          setDialogState(() {});
+                          scheduleDraft();
+                        },
                         autofocus: true,
                         minLines: 5,
                         maxLines: 12,
@@ -176,12 +205,18 @@ class _DeskPageState extends State<DeskPage> {
                         textColor: textColor,
                         inheritedFontSize: settings.fontSize,
                         enabled: !saving,
-                        onFontFamily: (value) =>
-                            setDialogState(() => fontFamily = value),
-                        onFontSize: (value) =>
-                            setDialogState(() => fontSize = value),
-                        onTextColor: (value) =>
-                            setDialogState(() => textColor = value),
+                        onFontFamily: (value) {
+                          setDialogState(() => fontFamily = value);
+                          scheduleDraft();
+                        },
+                        onFontSize: (value) {
+                          setDialogState(() => fontSize = value);
+                          scheduleDraft();
+                        },
+                        onTextColor: (value) {
+                          setDialogState(() => textColor = value);
+                          scheduleDraft();
+                        },
                       ),
                       const SizedBox(height: 14),
                       const Align(
@@ -231,7 +266,12 @@ class _DeskPageState extends State<DeskPage> {
               ),
               actions: [
                 TextButton(
-                  onPressed: saving ? null : () => Navigator.pop(context),
+                  onPressed: saving
+                      ? null
+                      : () {
+                          cancelled = true;
+                          Navigator.pop(context);
+                        },
                   child: const Text('取消'),
                 ),
                 FilledButton(
@@ -259,6 +299,7 @@ class _DeskPageState extends State<DeskPage> {
                               textColor: textColor,
                               expected: entry == null ? null : {entry.revision},
                             );
+                            saved = true;
                             if (context.mounted) Navigator.pop(context);
                           } catch (error) {
                             if (context.mounted) {
@@ -275,9 +316,23 @@ class _DeskPageState extends State<DeskPage> {
         ),
       );
     } finally {
+      draftTimer?.cancel();
       await notes.editing(false);
     }
-    if (entry == null) await notes.storeDraft(kind, '', '');
+    if (entry == null) {
+      if (cancelled || saved) {
+        await notes.storeDraft(kind, '', '');
+      } else {
+        await notes.storeDraft(
+          kind,
+          title.text,
+          body.text,
+          fontFamily: fontFamily,
+          fontSize: fontSize,
+          textColor: textColor,
+        );
+      }
+    }
     // Dialog route animation can still reference the controllers for a frame.
     Future<void>.delayed(const Duration(milliseconds: 250), () {
       title.dispose();
@@ -300,10 +355,8 @@ class _DeskPageState extends State<DeskPage> {
           fontWeight: FontWeight.w700,
           color: AppColors.text,
         ),
-        title: Text('永久删除${widget.kind.label}？'),
-        content: const Text(
-          '删除后无法在应用内恢复。已开启同步时，删除会传播到其他设备。Git 仓库的既有历史版本不会自动清除。',
-        ),
+        title: Text('删除${widget.kind.label}？'),
+        content: const Text('内容删除后会同步到其他设备，已有 Git 历史提交仍可恢复。'),
         actions: [
           TextButton(
             onPressed: () => Navigator.pop(context, false),
@@ -311,20 +364,25 @@ class _DeskPageState extends State<DeskPage> {
           ),
           FilledButton(
             style: FilledButton.styleFrom(
-              backgroundColor: AppColors.primary,
+              backgroundColor: AppColors.danger,
               foregroundColor: Colors.white,
               shape: RoundedRectangleBorder(
                 borderRadius: BorderRadius.circular(12),
               ),
             ),
             onPressed: () => Navigator.pop(context, true),
-            child: const Text('永久删除'),
+            child: const Text('删除'),
           ),
         ],
       ),
     );
     if (confirmed == true && context.mounted) {
-      await _attempt(context, () => widget.notes.remove(entry));
+      try {
+        await widget.notes.remove(entry);
+        if (context.mounted) showMessage(context, '内容已删除');
+      } catch (error) {
+        if (context.mounted) showMessage(context, '$error');
+      }
     }
   }
 

@@ -6,8 +6,13 @@ import '../services/directory_picker.dart';
 import 'common.dart';
 
 class StorageDirectoryCard extends StatelessWidget {
-  const StorageDirectoryCard({super.key, required this.controller});
+  const StorageDirectoryCard({
+    super.key,
+    required this.controller,
+    this.onRestart,
+  });
   final AppController controller;
+  final Future<void> Function()? onRestart;
 
   @override
   Widget build(BuildContext context) => AppCard(
@@ -21,7 +26,9 @@ class StorageDirectoryCard extends StatelessWidget {
           const SizedBox(height: 8),
           SelectableText(controller.storagePath ?? ''),
           const SizedBox(height: 10),
-          const Text('默认位于安装目录下的 data/idreaml_clip。更改后会迁移全部数据，并删除旧目录及其内容。'),
+          const Text(
+            '默认位于安装目录下的 data/idreaml_clip。更改后会把全部数据迁移到新目录并删除旧目录；若目标目录已有理梦剪藏的数据，则直接使用其中的数据，原目录保留。',
+          ),
           if (controller.storageMessage != null) ...[
             const SizedBox(height: 8),
             Text(controller.storageMessage!),
@@ -35,8 +42,10 @@ class StorageDirectoryCard extends StatelessWidget {
                 : () => showDialog<void>(
                     context: context,
                     barrierDismissible: false,
-                    builder: (_) =>
-                        _StorageDirectoryDialog(controller: controller),
+                    builder: (_) => _StorageDirectoryDialog(
+                      controller: controller,
+                      onRestart: onRestart,
+                    ),
                   ),
             icon: const Icon(Icons.drive_file_move_outlined, size: 18),
             label: Text(controller.storageChanging ? '正在迁移…' : '更改目录'),
@@ -101,8 +110,9 @@ class _StorageContents extends StatelessWidget {
 }
 
 class _StorageDirectoryDialog extends StatefulWidget {
-  const _StorageDirectoryDialog({required this.controller});
+  const _StorageDirectoryDialog({required this.controller, this.onRestart});
   final AppController controller;
+  final Future<void> Function()? onRestart;
   @override
   State<_StorageDirectoryDialog> createState() =>
       _StorageDirectoryDialogState();
@@ -151,15 +161,97 @@ class _StorageDirectoryDialogState extends State<_StorageDirectoryDialog> {
     });
     try {
       final controller = widget.controller;
-      final destination = await controller.validateStoragePath(_path.text);
+      final probe = await controller.probeStoragePath(_path.text);
       if (!mounted) return;
-      if (controller.repository.storage!.samePath(
-        controller.storagePath!,
-        destination,
-      )) {
+      final currentPath = controller.storagePath!;
+      if (controller.repository.storage!.samePath(currentPath, probe.path)) {
         Navigator.pop(context);
         return;
       }
+      if (probe.kind == StorageKind.unknown) {
+        setState(
+          () => _error =
+              '目标目录包含无法识别的数据（${probe.detail}）。请选择空文件夹，或选择由理梦剪藏生成的数据目录。',
+        );
+        return;
+      }
+      if (probe.kind != StorageKind.empty) {
+        final useExisting = await showDialog<bool>(
+          context: context,
+          barrierDismissible: false,
+          builder: (context) => AlertDialog(
+            title: const Text('使用该目录中的数据？'),
+            content: SizedBox(
+              width: 480,
+              child: SingleChildScrollView(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      probe.kind == StorageKind.current
+                          ? '检测到当前版本的数据（${probe.detail}）。历史、收藏、设置和便签待办会直接沿用。'
+                          : '检测到较早版本的数据（${probe.detail}）。使用时会自动升级为当前版本格式。',
+                    ),
+                    const SizedBox(height: 12),
+                    const Text('当前目录'),
+                    SelectableText(currentPath),
+                    const SizedBox(height: 8),
+                    const Text('切换后，当前目录的数据会保留在原处，之后仍可切回。'),
+                  ],
+                ),
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context, false),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                key: const ValueKey('confirm-adopt-storage'),
+                onPressed: () => Navigator.pop(context, true),
+                child: const Text('使用此数据'),
+              ),
+            ],
+          ),
+        );
+        if (useExisting != true || !mounted) return;
+        setState(() => _moving = true);
+        await controller.adoptStoragePath(probe.path);
+        if (!mounted) return;
+        setState(() => _moving = false);
+        final restart = widget.onRestart == null
+            ? false
+            : await showDialog<bool>(
+                context: context,
+                barrierDismissible: false,
+                builder: (context) => AlertDialog(
+                  title: const Text('数据已切换'),
+                  content: const SizedBox(
+                    width: 460,
+                    child: Text(
+                      '已使用该目录中的数据。应用需要重启，才能加载其中的设置、云同步配置、快捷键以及便签与待办开关。',
+                    ),
+                  ),
+                  actions: [
+                    TextButton(
+                      onPressed: () => Navigator.pop(context, false),
+                      child: const Text('稍后'),
+                    ),
+                    FilledButton(
+                      key: const ValueKey('restart-after-adopt'),
+                      onPressed: () => Navigator.pop(context, true),
+                      child: const Text('立即重启'),
+                    ),
+                  ],
+                ),
+              );
+        if (!mounted) return;
+        Navigator.pop(context);
+        if (restart == true) await widget.onRestart!();
+        return;
+      }
+      final destination = probe.path;
       final confirmed = await showDialog<bool>(
         context: context,
         barrierDismissible: false,
@@ -259,7 +351,9 @@ class _StorageDirectoryDialogState extends State<_StorageDirectoryDialog> {
                 ],
               ),
               const SizedBox(height: 12),
-              const Text('可手动输入完整路径，或选择一个空文件夹；也可以输入尚未创建的文件夹路径。'),
+              const Text(
+                '可手动输入完整路径，或选择一个文件夹；已有理梦剪藏数据的目录会直接沿用其中的数据，空目录则迁移当前数据。',
+              ),
               if (_moving) ...[
                 const SizedBox(height: 16),
                 const LinearProgressIndicator(),

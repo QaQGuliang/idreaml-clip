@@ -116,6 +116,26 @@ class AppController extends ChangeNotifier {
   Future<String> validateStoragePath(String value) =>
       repository.storage!.validateDestination(value);
 
+  Future<StorageProbe> probeStoragePath(String value) =>
+      repository.storage!.probeDestination(value);
+
+  Future<StorageMoveResult> adoptStoragePath(String value) async {
+    if (administratorChanging) throw const StorageException('正在切换启动权限，请稍候。');
+    if (storageChanging) throw const StorageException('正在使用目标目录，请稍候。');
+    storageChanging = true;
+    storageMessage = null;
+    notifyListeners();
+    try {
+      final result = await repository.adoptStorage(value);
+      storageMessage = '已切换到目标目录的数据（原目录保留），重启后加载其中的设置。';
+      await reload();
+      return result;
+    } finally {
+      storageChanging = false;
+      if (!_disposed) notifyListeners();
+    }
+  }
+
   Future<StorageMoveResult> changeStoragePath(String value) async {
     if (administratorChanging) throw const StorageException('正在切换启动权限，请稍候。');
     if (storageChanging) throw const StorageException('正在迁移数据，请稍候。');
@@ -158,6 +178,7 @@ class AppController extends ChangeNotifier {
   int historyPage = 0;
   int quickSearchPage = 0;
   bool hasNextHistoryPage = false;
+  int historyMatchCount = 0;
   bool hasNextQuickPage = false;
   int _historyRevision = 0;
   int _quickRevision = 0;
@@ -326,10 +347,10 @@ class AppController extends ChangeNotifier {
     final revision = ++_historyRevision;
     // A sync may refresh these lists inside an existing storage lease.
     // Always take the lease before the query gate so relocation can drain it.
-    final rows = await repository.access(
+    final result = await repository.access(
       () => _historyQueries.run(() async {
         if (_disposed || revision != _historyRevision) return null;
-        return repository.list(
+        final rows = await repository.list(
           query: historySearch,
           favoritesOnly: page == AppPage.favorites,
           todayOnly: historyTodayOnly,
@@ -337,14 +358,22 @@ class AppController extends ChangeNotifier {
           offset: historyPage * _pageSize,
           loadImages: false,
         );
+        final total = await repository.count(
+          query: historySearch,
+          favoritesOnly: page == AppPage.favorites,
+          todayOnly: historyTodayOnly,
+        );
+        return (rows, total);
       }),
     );
-    if (_disposed || revision != _historyRevision || rows == null) return;
+    if (_disposed || revision != _historyRevision || result == null) return;
+    final (rows, total) = result;
     if (rows.isEmpty && historyPage > 0) {
       historyPage = 0;
       return _readHistory();
     }
     hasNextHistoryPage = rows.length > _pageSize;
+    historyMatchCount = total;
     history = rows.take(_pageSize).toList(growable: false);
     if (selectedHistoryId == null ||
         !history.any((item) => item.id == selectedHistoryId)) {
@@ -429,6 +458,15 @@ class AppController extends ChangeNotifier {
     if (!_disposed) notifyListeners();
   }
 
+  String? requestedSettingsSection;
+  int settingsSectionRequest = 0;
+
+  Future<void> openSettingsSection(String section) async {
+    requestedSettingsSection = section;
+    settingsSectionRequest++;
+    await setPage(AppPage.settings);
+  }
+
   Future<void> setHistorySearch(String value) async {
     historySearch = value;
     historyPage = 0;
@@ -500,6 +538,30 @@ class AppController extends ChangeNotifier {
 
   bool screenshotWasCopied(String operationId) =>
       _copiedScreenshots.containsKey(operationId);
+
+  Future<bool> useFormattedText(ClipboardItem item, String text) async {
+    _writeGeneration++;
+    return _clipboardGate.run(() async {
+      _writingClipboard = true;
+      try {
+        final content = ClipboardContent.text(text);
+        await clipboard.write(content);
+        _lastSequence = clipboard.lastWriteSequence ?? clipboard.sequence;
+        copiedClipboardSequence = _lastSequence;
+        _lastSignature = content.hash;
+        clipboardError = null;
+        await repository.markUsed(item.id);
+        await reload();
+        return true;
+      } on Exception {
+        clipboardError = '复制失败，请重试';
+        notifyListeners();
+        return false;
+      } finally {
+        _writingClipboard = false;
+      }
+    });
+  }
 
   Future<void> commitScreenshot(
     String operationId,
@@ -610,7 +672,7 @@ class AppController extends ChangeNotifier {
   }
 
   Future<void> setAutoCleanupDays(int value) async {
-    if (!const [0, 30, 90, 180].contains(value)) return;
+    if (!const [0, 7, 30, 90, 180].contains(value)) return;
     autoCleanupDays = value;
     await repository.setSetting('auto_cleanup_days', '$value');
     await repository.cleanupOlderThan(value);

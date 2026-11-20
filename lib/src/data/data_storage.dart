@@ -4,6 +4,7 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:path/path.dart' as p;
 import 'package:path_provider/path_provider.dart';
+import 'package:sqflite_common_ffi/sqflite_ffi.dart';
 import 'package:uuid/uuid.dart';
 
 import 'storage_access.dart';
@@ -19,6 +20,27 @@ class StorageException implements Exception {
 class StorageMoveResult {
   const StorageMoveResult({this.warning});
   final String? warning;
+}
+
+enum StorageKind {
+  /// The directory is missing or empty and can receive a fresh copy.
+  empty,
+
+  /// Managed data of the current version (marker plus both databases).
+  current,
+
+  /// Older data that the application upgrades while opening it.
+  legacy,
+
+  /// Unrecognized non-empty content that must not be overwritten.
+  unknown,
+}
+
+class StorageProbe {
+  const StorageProbe(this.path, this.kind, {this.detail = ''});
+  final String path;
+  final StorageKind kind;
+  final String detail;
 }
 
 /// Only the bootstrap locator lives outside the managed directory. It contains
@@ -165,7 +187,29 @@ class DataStorage {
     Platform.isWindows ? child.toLowerCase() : child,
   );
 
+  static const currentSchemaVersion = 3;
+
+  Future<StorageProbe> probeDestination(String input) async {
+    final destination = await _validateTransferable(input);
+    return _classify(destination);
+  }
+
   Future<String> validateDestination(String input) async {
+    final destination = await _validateTransferable(input);
+    // The current directory is always a valid no-op target for a move.
+    if (samePath(await _canonical(root.path), destination)) {
+      return destination;
+    }
+    final probe = await _classify(destination);
+    if (probe.kind != StorageKind.empty) {
+      throw const StorageException('目标目录必须为空，以免覆盖已有文件。请新建一个专用文件夹。');
+    }
+    return probe.path;
+  }
+
+  /// Shared path rules for migration and adoption. Emptiness is checked later
+  /// because existing application data may be adopted instead of overwritten.
+  Future<String> _validateTransferable(String input) async {
     final value = input.trim();
     if (value.isEmpty || !p.isAbsolute(value)) {
       throw const StorageException('请输入完整的绝对目录路径。');
@@ -184,11 +228,89 @@ class DataStorage {
         type != FileSystemEntityType.directory) {
       throw const StorageException('目标路径不是文件夹。');
     }
-    if (type == FileSystemEntityType.directory &&
-        !await Directory(destination).list().isEmpty) {
-      throw const StorageException('目标目录必须为空，以免覆盖已有文件。请新建一个专用文件夹。');
-    }
     return destination;
+  }
+
+  Future<StorageProbe> _classify(String destination) async {
+    final type = await FileSystemEntity.type(destination, followLinks: false);
+    if (type == FileSystemEntityType.notFound) {
+      return StorageProbe(destination, StorageKind.empty);
+    }
+    final entries = await Directory(destination)
+        .list(followLinks: false)
+        .toList();
+    if (entries.isEmpty) return StorageProbe(destination, StorageKind.empty);
+    final database = File(p.join(destination, 'database', 'clipboard.db'));
+    final marker = File(p.join(destination, markerName));
+    final settings = File(p.join(destination, 'config', 'settings.db'));
+    if (await database.exists()) {
+      final version = await _sqliteVersion(database.path);
+      if (version == null) {
+        return StorageProbe(
+          destination,
+          StorageKind.unknown,
+          detail: 'database/clipboard.db 无法读取或已损坏',
+        );
+      }
+      if (version > currentSchemaVersion) {
+        return StorageProbe(
+          destination,
+          StorageKind.unknown,
+          detail: '数据版本 v$version 高于当前版本支持的 v$currentSchemaVersion',
+        );
+      }
+      if (version < 1) {
+        return StorageProbe(
+          destination,
+          StorageKind.unknown,
+          detail: 'database/clipboard.db 不是理梦剪藏的数据库',
+        );
+      }
+      if (await marker.exists() && await settings.exists()) {
+        return StorageProbe(
+          destination,
+          StorageKind.current,
+          detail: '数据版本 v$version',
+        );
+      }
+      return StorageProbe(
+        destination,
+        StorageKind.legacy,
+        detail: '较早版本的数据库 v$version',
+      );
+    }
+    if (await marker.exists() || await settings.exists()) {
+      return StorageProbe(
+        destination,
+        StorageKind.unknown,
+        detail: '数据目录不完整（缺少 database/clipboard.db）',
+      );
+    }
+    final names = entries
+        .map((entry) => p.basename(entry.path))
+        .take(3)
+        .join('、');
+    return StorageProbe(
+      destination,
+      StorageKind.unknown,
+      detail: '发现无法识别的内容：$names',
+    );
+  }
+
+  Future<int?> _sqliteVersion(String path) async {
+    sqfliteFfiInit();
+    Database? database;
+    try {
+      database = await databaseFactoryFfi.openDatabase(
+        path,
+        options: OpenDatabaseOptions(readOnly: true, singleInstance: false),
+      );
+      return await database.getVersion();
+    } catch (_) {
+      return null;
+    } finally {
+      await database?.close();
+    }
   }
 
   /// Resolves existing ancestors too, detecting containment through symlinks.
@@ -289,6 +411,39 @@ class DataStorage {
     }
     needsLegacyMigration = false;
     return StorageMoveResult(warning: await cleanupPreviousDirectory());
+  });
+
+  /// Switches to an existing application data directory instead of copying.
+  /// The previous directory is left untouched so users can switch back.
+  Future<StorageMoveResult> adoptTo(
+    String input, {
+    required Future<void> Function() close,
+    required Future<void> Function() open,
+  }) => access.exclusive(() async {
+    final cleanupWarning = await cleanupPreviousDirectory();
+    if (cleanupWarning != null) throw StorageException(cleanupWarning);
+    final probe = await probeDestination(input);
+    if (probe.kind != StorageKind.current && probe.kind != StorageKind.legacy) {
+      throw const StorageException('目标目录中没有可用的理梦剪藏数据。');
+    }
+    if (samePath(root.path, probe.path)) return const StorageMoveResult();
+    final source = root;
+    await close();
+    try {
+      root = Directory(probe.path);
+      await prepare();
+      await open();
+      _pendingCleanup = null;
+      await _saveLocation(probe.path);
+    } catch (error) {
+      await close();
+      root = source;
+      await open();
+      if (error is StorageException) rethrow;
+      throw const StorageException('无法使用目标目录中的数据。请确认目录可写且数据库完整后重试。');
+    }
+    needsLegacyMigration = false;
+    return const StorageMoveResult();
   });
 
   Future<void> _copyVerified(Directory source, Directory target) async {

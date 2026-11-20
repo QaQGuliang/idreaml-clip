@@ -2,9 +2,9 @@ import 'dart:ui';
 
 enum PinnedImageBorder {
   none('无边框', null),
-  light('浅色', Color(0xFFF5F5F5)),
-  dark('深色', Color(0xFF303030)),
-  amber('琥珀色', Color(0xFFFCD68B));
+  light('浅色边框', Color(0xFFFFFFFF)),
+  dark('深色边框', Color(0xFF292630)),
+  amber('琥珀色边框', Color(0xFFE8A52C));
 
   const PinnedImageBorder(this.label, this.color);
 

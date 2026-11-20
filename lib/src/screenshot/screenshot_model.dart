@@ -17,10 +17,10 @@ enum ScreenshotTool {
   arrow,
   pen,
   highlighter,
-  text,
   mosaic,
   cover,
   number,
+  text,
 }
 
 extension ScreenshotToolLabel on ScreenshotTool {
@@ -32,10 +32,10 @@ extension ScreenshotToolLabel on ScreenshotTool {
     '箭头',
     '画笔',
     '荧光笔',
-    '文字',
     '马赛克',
     '实心遮盖',
     '自动编号',
+    '文字',
   ][index];
 
   bool get usesWidth => switch (this) {
@@ -59,7 +59,7 @@ extension ScreenshotToolLabel on ScreenshotTool {
 @immutable
 class ToolStyle {
   const ToolStyle({
-    this.color = const Color(0xFFEF4444),
+    this.color = const Color(0xFF6C57E5),
     this.width = 3,
     this.fontSize = 24,
     this.arrowStyle = ArrowStyle.single,
@@ -86,7 +86,7 @@ class ToolStyle {
     if (arrowStyle != ArrowStyle.single) 'arrowStyle': arrowStyle.name,
   };
   static ToolStyle fromJson(Map<String, dynamic> data) => ToolStyle(
-    color: Color((data['color'] as num?)?.toInt() ?? 0xFFEF4444),
+    color: Color((data['color'] as num?)?.toInt() ?? 0xFF6C57E5),
     width: ((data['width'] as num?)?.toDouble() ?? 3).clamp(1, 40),
     fontSize: ((data['fontSize'] as num?)?.toDouble() ?? 24).clamp(12, 96),
     arrowStyle: ArrowStyle.tryParse(data['arrowStyle']) ?? ArrowStyle.single,
@@ -221,7 +221,7 @@ class ScreenshotModel extends ChangeNotifier {
   final Size size;
   Rect? selection;
   List<ScreenshotAnnotation> annotations = [];
-  ScreenshotTool tool = ScreenshotTool.select;
+  ScreenshotTool tool = ScreenshotTool.rectangle;
   int? selectedId;
   int nextId = 1;
   int nextNumber = 1;
@@ -245,11 +245,7 @@ class ScreenshotModel extends ChangeNotifier {
     final saved =
         toolStyles[tool] ??
         switch (tool) {
-          ScreenshotTool.highlighter => const ToolStyle(
-            color: Color(0xFFFFDE33),
-            width: 18,
-          ),
-          ScreenshotTool.mosaic => const ToolStyle(width: 12),
+          ScreenshotTool.mosaic => const ToolStyle(width: 3),
           ScreenshotTool.cover => const ToolStyle(color: Color(0xFF111827)),
           _ => const ToolStyle(),
         };
@@ -260,6 +256,15 @@ class ScreenshotModel extends ChangeNotifier {
 
   ScreenshotSnapshot get snapshot =>
       ScreenshotSnapshot(selection, List.of(annotations));
+  ArrowStyle get defaultArrowStyle =>
+      _sessionArrowStyle ??
+      toolStyles[ScreenshotTool.arrow]?.arrowStyle ??
+      ArrowStyle.single;
+  void resetArrowStyle() {
+    final current = selected?.style ?? style;
+    setStyle(current.copyWith(arrowStyle: defaultArrowStyle));
+  }
+
   String encodeStyles() => jsonEncode(
     toolStyles.map((tool, style) => MapEntry(tool.name, style.toJson())),
   );
@@ -318,24 +323,24 @@ class ScreenshotModel extends ChangeNotifier {
   bool adjustSize(int direction) {
     final object = selected;
     final target = object?.tool ?? tool;
-    final numbered = target == ScreenshotTool.number;
-    if (direction == 0 || (!target.usesWidth && !numbered)) return false;
+    final sized = target.usesFontSize;
+    if (direction == 0 || (!target.usesWidth && !sized)) return false;
     final current = object?.style ?? style;
-    final minimum = numbered
+    final minimum = sized
         ? 12.0
         : (target == ScreenshotTool.mosaic ? 2.0 : 1.0);
-    final maximum = numbered ? 96.0 : 40.0;
-    final size = (numbered ? current.fontSize : current.width).clamp(
+    final maximum = sized ? 96.0 : 40.0;
+    final size = (sized ? current.fontSize : current.width).clamp(
       minimum,
       maximum,
     );
-    final next = (size + direction.sign * (numbered ? 2 : 1)).clamp(
+    final next = (size + direction.sign * (sized ? 2 : 1)).clamp(
       minimum,
       maximum,
     );
     if (next != size) {
       setStyle(
-        numbered
+        sized
             ? current.copyWith(fontSize: next)
             : current.copyWith(width: next),
       );

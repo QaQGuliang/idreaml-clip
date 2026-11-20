@@ -147,6 +147,7 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
   Offset? _textOrigin;
   Offset _pointer = Offset.zero;
   Uint8List? _frozenPixels;
+  Uint8List? _compositePixels, _longPixels;
   bool _showColorPicker = true;
   bool get _autoScroll => widget.snapshot['autoScroll'] == true;
   bool _currentRoute = true, _localShortcutsEnabled = true;
@@ -392,6 +393,7 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
           final old = _composite;
           setState(() {
             _composite = null;
+            _compositePixels = null;
             _renderedObjects = const [];
           });
           old?.dispose();
@@ -402,9 +404,17 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
           image.dispose();
           return;
         }
+        final pixels = await image.toByteData(
+          format: ui.ImageByteFormat.rawRgba,
+        );
+        if (!mounted || _background != renderingBackground) {
+          image.dispose();
+          return;
+        }
         final old = _composite;
         setState(() {
           _composite = image;
+          _compositePixels = pixels?.buffer.asUint8List();
           _renderedObjects = objects;
         });
         old?.dispose();
@@ -437,8 +447,25 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
   int get _sampleRgb {
     final pixel = _samplePixel;
     final i = (pixel.dy.toInt() * _background!.width + pixel.dx.toInt()) * 4;
+    final rgba = _compositePixels ?? _longPixels;
+    if (rgba != null) {
+      return (rgba[i] << 16) | (rgba[i + 1] << 8) | rgba[i + 2];
+    }
     final bgra = _frozenPixels!;
     return (bgra[i + 2] << 16) | (bgra[i + 1] << 8) | bgra[i];
+  }
+
+  bool get _hasSamplePixels =>
+      (_compositePixels ?? _longPixels ?? _frozenPixels) != null;
+
+  Future<void> _ensureSamplePixels() async {
+    if (!_longImage || _longPixels != null || _background == null) return;
+    final background = _background!;
+    final data = await background.toByteData(
+      format: ui.ImageByteFormat.rawRgba,
+    );
+    if (!mounted || _background != background || data == null) return;
+    setState(() => _longPixels = data.buffer.asUint8List());
   }
 
   void _trackPointer(PointerEvent event) {
@@ -452,6 +479,8 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
       _error = null;
     });
     try {
+      await _ensureSamplePixels();
+      if (!mounted || !_hasSamplePixels) return;
       await _channel.invokeMethod<void>('copyColor', {
         'token': widget.snapshot['session'],
         'hex': screenshotHex(_sampleRgb),
@@ -580,6 +609,8 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
     _background?.dispose();
     _composite?.dispose();
     _composite = null;
+    _compositePixels = null;
+    _longPixels = null;
     _renderedObjects = const [];
     _background = background;
     _frozenPixels = null;
@@ -609,6 +640,7 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
         widget.snapshot['session'],
       );
       if (mounted) _focus.requestFocus();
+      if (mounted && _showColorPicker) unawaited(_ensureSamplePixels());
     });
     WidgetsBinding.instance.scheduleWarmUpFrame();
   }
@@ -909,6 +941,7 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
         {
           'png': png,
           'saveAs': _pendingAction == _ScreenshotAction.saveAs,
+          'long': _longImage,
           if (_pendingAction == _ScreenshotAction.pin) ...{
             'pin': true,
             'x': origin.dx.round(),
@@ -944,16 +977,31 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
       case 'escape':
         _escapeCanvas();
       case 'copyColor':
-        if (_canPickColor && _showColorPicker) unawaited(_copyColor());
+        if (_canPickColor) unawaited(_copyColor());
       case 'togglePicker':
         if (_canPickColor) _togglePicker();
     }
   }
 
   bool get _canPickColor =>
-      _model != null && _editable && !_longImage && _scrollCapture == null;
+      _model != null && _editable && _scrollCapture == null;
 
-  void _togglePicker() => setState(() => _showColorPicker = !_showColorPicker);
+  void _togglePicker() {
+    setState(() => _showColorPicker = !_showColorPicker);
+    if (_showColorPicker) unawaited(_ensureSamplePixels());
+  }
+
+  void _reselect() {
+    final m = _model;
+    if (m == null || !_editable || m.selection == null) return;
+    _commitText();
+    m.begin();
+    m.annotations = [];
+    m.selectedId = null;
+    m.selection = null;
+    m.end();
+    _focus.requestFocus();
+  }
 
   void _escapeCanvas() {
     final m = _model;
@@ -1005,7 +1053,7 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
         }
         return KeyEventResult.handled;
       }
-      if (_showColorPicker && key == LogicalKeyboardKey.keyC) {
+      if (key == LogicalKeyboardKey.keyC) {
         if (event is KeyDownEvent) unawaited(_copyColor());
         return KeyEventResult.handled;
       }
@@ -1216,8 +1264,8 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
                         child: IgnorePointer(
                           child: DecoratedBox(
                             decoration: BoxDecoration(
-                              color: const Color(0xDD18181B),
-                              borderRadius: BorderRadius.circular(4),
+                              color: const Color(0xFF6C57E5),
+                              borderRadius: BorderRadius.circular(6),
                             ),
                             child: Padding(
                               padding: const EdgeInsets.symmetric(
@@ -1226,7 +1274,10 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
                               ),
                               child: Text(
                                 '${selected!.width.toInt()} × ${selected.height.toInt()} px',
-                                style: const TextStyle(fontSize: 12),
+                                style: const TextStyle(
+                                  fontSize: 12,
+                                  color: Colors.white,
+                                ),
                               ),
                             ),
                           ),
@@ -1243,11 +1294,11 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
                     child: Text('拖动框选 · 单击选择窗口 · F2 取色器 · Esc 取消'),
                   ),
                 ),
-              if (_showColorPicker)
+              if (_showColorPicker && _hasSamplePixels)
                 Positioned.fromRect(
                   rect: pickerArea,
                   child: ScreenshotColorPicker(
-                    image: _background!,
+                    image: _composite ?? _background!,
                     pixel: _samplePixel,
                     rgb: _sampleRgb,
                     anchor: _pointer * _scale - pickerArea.topLeft,
@@ -1323,10 +1374,16 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
                       '长截图',
                       style: TextStyle(fontWeight: FontWeight.w700),
                     ),
-                    const Spacer(),
-                    Text(
-                      '${capture.width} × ${capture.height} px',
-                      style: const TextStyle(fontSize: 12),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        '已采集 ${capture.screens} 屏 · ${capture.width} × ${capture.height} px',
+                        key: const ValueKey('scroll-capture-screens'),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        textAlign: TextAlign.right,
+                        style: const TextStyle(fontSize: 12),
+                      ),
                     ),
                   ],
                 ),
@@ -1353,37 +1410,47 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
                     ),
                   ),
                 ),
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    if (capture.canTakeOver)
-                      TextButton(
-                        onPressed: capture.takeOver,
-                        child: const Text('手动接管'),
-                      ),
-                    if (capture.finishing || capture.starting)
-                      const Padding(
-                        padding: EdgeInsets.only(right: 12),
-                        child: SizedBox(
-                          width: 16,
-                          height: 16,
-                          child: CircularProgressIndicator(strokeWidth: 2),
+                FittedBox(
+                  fit: BoxFit.scaleDown,
+                  alignment: Alignment.centerRight,
+                  child: Row(
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: [
+                      if (capture.canResume)
+                        TextButton(
+                          key: const ValueKey('scroll-resume'),
+                          onPressed: capture.resume,
+                          child: const Text('继续向下采集'),
                         ),
+                      if (capture.canTakeOver)
+                        TextButton(
+                          onPressed: capture.takeOver,
+                          child: const Text('手动接管'),
+                        ),
+                      if (capture.finishing || capture.starting)
+                        const Padding(
+                          padding: EdgeInsets.only(right: 12),
+                          child: SizedBox(
+                            width: 16,
+                            height: 16,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          ),
+                        ),
+                      IconButton(
+                        tooltip: '取消长截图（Esc）',
+                        onPressed: _close,
+                        icon: const Icon(Icons.close),
                       ),
-                    IconButton(
-                      tooltip: '取消长截图（Esc）',
-                      onPressed: _close,
-                      icon: const Icon(Icons.close),
-                    ),
-                    const SizedBox(width: 8),
-                    IconButton.filled(
-                      tooltip: '完成采集，进入编辑',
-                      onPressed: capture.starting || capture.finishing
-                          ? null
-                          : capture.finish,
-                      icon: const Icon(Icons.check),
-                    ),
-                  ],
+                      const SizedBox(width: 8),
+                      IconButton.filled(
+                        tooltip: '完成采集，进入编辑',
+                        onPressed: capture.starting || capture.finishing
+                            ? null
+                            : capture.finish,
+                        icon: const Icon(Icons.check),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),
@@ -1491,7 +1558,11 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
                 onPointerDown: (event) {
                   if (event.buttons == 1) _start(event.localPosition);
                 },
-                onPointerMove: (event) => _move(event.localPosition),
+                onPointerHover: _trackPointer,
+                onPointerMove: (event) {
+                  _trackPointer(event);
+                  _move(event.localPosition);
+                },
                 onPointerUp: (_) => _end(),
                 onPointerCancel: (_) {
                   _cancelPointerGesture();
@@ -1509,6 +1580,15 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
             ),
           ),
         ),
+        if (_showColorPicker && _hasSamplePixels)
+          Positioned.fill(
+            child: ScreenshotColorPicker(
+              image: _composite ?? _background!,
+              pixel: _samplePixel,
+              rgb: _sampleRgb,
+              anchor: _pointer * _scale,
+            ),
+          ),
         if (_textOrigin != null)
           Positioned(
             left: _textOrigin!.dx * _scale,
@@ -1549,6 +1629,12 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
           ? null
           : (arrow) {
               m.setStyle(style.copyWith(arrowStyle: arrow));
+              _focus.requestFocus();
+            },
+      onDefault: !_editable
+          ? null
+          : () {
+              m.resetArrowStyle();
               _focus.requestFocus();
             },
     );
@@ -1665,6 +1751,92 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
     }
   }
 
+  static int? _parseHexColor(String text) {
+    final value = text.trim().replaceFirst('#', '');
+    if (!RegExp(r'^[0-9a-fA-F]{6}$').hasMatch(value)) return null;
+    return int.parse(value, radix: 16);
+  }
+
+  Future<void> _pickCustomColor(ScreenshotModel m) async {
+    final style = m.selected?.style ?? m.style;
+    final controller = TextEditingController(
+      text: screenshotHex(style.color.toARGB32() & 0xFFFFFF),
+    );
+    final chosen = await showDialog<int>(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          final parsed = _parseHexColor(controller.text);
+          return AlertDialog(
+            title: const Text('自定义颜色'),
+            content: SizedBox(
+              width: 280,
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  TextField(
+                    key: const ValueKey('screenshot-custom-color-input'),
+                    controller: controller,
+                    autofocus: true,
+                    onChanged: (_) => setDialogState(() {}),
+                    decoration: const InputDecoration(
+                      labelText: 'HEX 色值',
+                      hintText: '#6C57E5',
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Row(
+                    children: [
+                      Container(
+                        width: 24,
+                        height: 24,
+                        decoration: BoxDecoration(
+                          color: parsed == null
+                              ? Colors.transparent
+                              : Color(0xFF000000 | parsed),
+                          border: Border.all(color: Colors.white24),
+                          borderRadius: BorderRadius.circular(5),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Text(
+                        parsed == null
+                            ? '请输入 6 位 HEX 色值'
+                            : screenshotHex(parsed),
+                        style: const TextStyle(fontSize: 12),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(context),
+                child: const Text('取消'),
+              ),
+              FilledButton(
+                key: const ValueKey('screenshot-custom-color-apply'),
+                onPressed: parsed == null
+                    ? null
+                    : () => Navigator.pop(context, parsed),
+                child: const Text('应用'),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+    // Dialog route animation can still reference the controller for a frame.
+    Future<void>.delayed(const Duration(milliseconds: 250), controller.dispose);
+    if (chosen != null && mounted) {
+      final current = m.selected?.style ?? m.style;
+      m.setStyle(current.copyWith(color: Color(0xFF000000 | chosen)));
+      if (_textOrigin == null) _focus.requestFocus();
+    }
+  }
+
   Widget _styleControls(ScreenshotModel m) => Builder(
     builder: (context) {
       final style = m.selected?.style ?? m.style;
@@ -1684,7 +1856,7 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
               Color(0xFFFDE047),
               Color(0xFF22C55E),
               Color(0xFF3B82F6),
-              Color(0xFF8B5CF6),
+              Color(0xFF6C57E5),
               Colors.white,
               Color(0xFF111827),
             ])
@@ -1708,6 +1880,32 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
                   ),
                 ),
               ),
+            Tooltip(
+              message: '自定义颜色',
+              child: InkWell(
+                key: const ValueKey('screenshot-custom-color'),
+                onTap: _busy ? null : () => _pickCustomColor(m),
+                child: Container(
+                  width: 19,
+                  height: 19,
+                  decoration: BoxDecoration(
+                    shape: BoxShape.circle,
+                    gradient: const SweepGradient(
+                      colors: [
+                        Color(0xFFEF4444),
+                        Color(0xFFFDE047),
+                        Color(0xFF22C55E),
+                        Color(0xFF3B82F6),
+                        Color(0xFF8B5CF6),
+                        Color(0xFFEF4444),
+                      ],
+                    ),
+                    border: Border.all(color: colors.outlineVariant),
+                  ),
+                  child: const Icon(Icons.add, size: 12, color: Colors.white),
+                ),
+              ),
+            ),
             const SizedBox(width: 5),
           ],
           if (tool.usesWidth) ...[
@@ -1718,41 +1916,27 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
                 style: const TextStyle(fontSize: 11),
               ),
             ),
-            DropdownButton<double>(
-              key: const ValueKey('screenshot-stroke-width'),
-              value: width,
-              underline: const SizedBox.shrink(),
-              isDense: true,
-              items:
-                  ({
-                        if (!mosaic) 1.0,
-                        2.0,
-                        3.0,
-                        5.0,
-                        8.0,
-                        12.0,
-                        18.0,
-                        24.0,
-                        40.0,
-                        width,
-                      }.toList()..sort())
-                      .map(
-                        (v) => DropdownMenuItem(
-                          value: v,
-                          child: Text(
-                            '${v.toInt()}',
-                            style: const TextStyle(fontSize: 12),
-                          ),
-                        ),
-                      )
-                      .toList(),
-              onChanged: (v) {
-                if (v != null) {
-                  m.setStyle(style.copyWith(width: v));
-                  _focus.requestFocus();
-                }
-              },
+            SizedBox(
+              width: 110,
+              child: Slider(
+                key: const ValueKey('screenshot-stroke-width'),
+                value: width.clamp(mosaic ? 2.0 : 1.0, 40.0),
+                min: mosaic ? 2.0 : 1.0,
+                max: 40,
+                onChanged: !_editable
+                    ? null
+                    : (value) {
+                        final current = m.selected?.style ?? m.style;
+                        m.setStyle(current.copyWith(width: value));
+                      },
+                onChangeStart: (_) => m.begin(),
+                onChangeEnd: (_) {
+                  m.end();
+                  if (_textOrigin == null) _focus.requestFocus();
+                },
+              ),
             ),
+            Text('${width.toInt()}', style: const TextStyle(fontSize: 11)),
           ],
           if (tool.usesFontSize) ...[
             Tooltip(
@@ -1862,6 +2046,7 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
         disabledForegroundColor: _overlayDisabledToolColor,
         backgroundColor: active ? const Color(0xFF6D28D9) : null,
         minimumSize: const Size(32, 32),
+        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
         padding: const EdgeInsets.all(6),
       ),
       icon: glyph ?? Icon(icon, size: 19),
@@ -1937,12 +2122,23 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
                               },
                       ),
                       button(
+                        Icons.crop_free,
+                        '重新框选',
+                        selected && _editable ? _reselect : null,
+                      ),
+                      button(
                         Icons.swipe_down_alt,
                         '长截图',
                         selected && _editable ? _startLongScreenshot : null,
                       ),
                       for (final command in _historyCommands(m))
                         button(command.icon, command.label, command.run),
+                      button(
+                        Icons.colorize,
+                        '取色器（F2）',
+                        _canPickColor ? _togglePicker : null,
+                        active: _canPickColor && _showColorPicker,
+                      ),
                       _pinButton(enabled: selected && _editable, light: false),
                       button(
                         Icons.save_alt,
@@ -1965,6 +2161,24 @@ class _ScreenshotEditorState extends State<ScreenshotEditor>
                     IgnorePointer(
                       ignoring: !_editable,
                       child: _styleControls(m),
+                    ),
+                  if (selected)
+                    Padding(
+                      padding: const EdgeInsets.only(top: 3),
+                      child: Text(
+                        '已选区域 ${m.selection!.width.toInt()} × ${m.selection!.height.toInt()} · '
+                        '${(m.selected?.tool ?? m.tool).label}'
+                        '${switch (m.selected?.tool ?? m.tool) {
+                          ScreenshotTool.mosaic => ' · 1 / 2 调块大小',
+                          ScreenshotTool.text || ScreenshotTool.number => ' · 1 / 2 调字号',
+                          final tool when tool.usesWidth => ' · 1 / 2 调粗细',
+                          _ => '',
+                        }}',
+                        style: const TextStyle(
+                          fontSize: 10,
+                          color: _overlayDisabledToolColor,
+                        ),
+                      ),
                     ),
                 ],
               ),

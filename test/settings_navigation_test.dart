@@ -47,9 +47,10 @@ void main() {
 
   testWidgets('设置分类可进入、返回和重新从侧栏打开，保留存储和版本入口', (tester) async {
     await mount(tester);
-    for (final name in ['快捷键', '快捷面板与历史', '截图与贴图', '启动与权限']) {
-      expect(find.widgetWithText(ListTile, name), findsOneWidget);
+    for (final key in ['shortcuts', 'history', 'screenshot', 'startup']) {
+      expect(find.byKey(ValueKey('settings-card-$key')), findsOneWidget);
     }
+    expect(find.byKey(const ValueKey('settings-card-release')), findsOneWidget);
     expect(find.byType(StorageDirectoryCard), findsNothing);
     expect(find.byType(ReleaseInfoCard), findsNothing);
     await tester.tap(find.text('快捷面板与历史'));
@@ -65,7 +66,10 @@ void main() {
     await tester.tap(find.byTooltip('设置'));
     await tester.pumpAndSettle();
     expect(find.byType(ReleaseInfoCard), findsNothing);
-    expect(find.widgetWithText(ListTile, '快捷键'), findsOneWidget);
+    expect(
+      find.byKey(const ValueKey('settings-card-shortcuts')),
+      findsOneWidget,
+    );
   });
 
   testWidgets('默认箭头可固定、取消展开或恢复沿用，失败保留原值', (tester) async {
@@ -93,7 +97,7 @@ void main() {
     expect(find.text('默认箭头样式保存失败，请重试'), findsOneWidget);
     expect(controller.defaultArrowStyle, ArrowStyle.outlined);
     repository.failSettingWrite = false;
-    await choose('沿用上次选择');
+    await choose('默认');
     expect(controller.defaultArrowStyle, isNull);
     expect(repository.settings['default_arrow_style'], 'last');
   });
@@ -203,6 +207,27 @@ void main() {
     await tester.ensureVisible(find.text('贴图窗口'));
     await tester.pumpAndSettle();
     expect(find.text('贴图窗口').hitTestable(), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('设置首页卡片在缩放窗口时保持等高同宽', (tester) async {
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetDevicePixelRatio);
+    await mount(tester);
+    const keys = ['shortcuts', 'history', 'screenshot', 'startup', 'release'];
+    Set<Size> sizes() => {
+      for (final key in keys)
+        tester.getSize(find.byKey(ValueKey('settings-card-$key'))),
+    };
+    final wide = sizes();
+    expect(wide, hasLength(1));
+    expect(wide.single.height, 92);
+    tester.view.physicalSize = const Size(700, 620);
+    addTearDown(tester.view.resetPhysicalSize);
+    await tester.pumpAndSettle();
+    final narrow = sizes();
+    expect(narrow, hasLength(1));
+    expect(narrow.single.height, 92);
     expect(tester.takeException(), isNull);
   });
 }

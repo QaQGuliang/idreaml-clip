@@ -19,15 +19,16 @@ struct BorderStyle {
   COLORREF color;
 };
 constexpr BorderStyle kBorders[] = {
-    {"none", L"无边框", 0}, {"light", L"浅色", RGB(245, 245, 245)},
-    {"dark", L"深色", RGB(48, 48, 48)}, {"amber", L"琥珀色", RGB(252, 214, 139)},
+    {"none", L"无边框", 0}, {"light", L"浅色边框", RGB(255, 255, 255)},
+    {"dark", L"深色边框", RGB(0x29, 0x26, 0x30)},
+    {"amber", L"琥珀色边框", RGB(0xE8, 0xA5, 0x2C)},
 };
 constexpr int kBorderCount = static_cast<int>(std::size(kBorders));
 constexpr int kFollow = -1;
 constexpr UINT kCopy = 1, kClose = 2, kLocal = 100, kDefault = 200;
 constexpr UINT kUseDefault = kLocal - 1;
 
-int Inset(int border) { return border == 0 ? 0 : 2; }
+int Inset(int border) { return border == 0 ? 0 : 3; }
 
 struct Image {
   PinnedImages* host;
@@ -131,18 +132,6 @@ void Zoom(HWND window, Image& image, POINT point, int delta, int inset) {
   SetWindowPos(window, nullptr, x, y, width + 2 * inset, height + 2 * inset,
                SWP_NOZORDER | SWP_NOACTIVATE);
 }
-
-void AppendBorders(HMENU parent, const wchar_t* title, UINT first, int selected, bool local) {
-  HMENU menu = CreatePopupMenu();
-  if (!menu) return;
-  if (local) AppendMenuW(menu, MF_STRING, kUseDefault, L"跟随全局设置");
-  for (int i = 0; i < kBorderCount; ++i) {
-    AppendMenuW(menu, MF_STRING, first + i, kBorders[i].label);
-  }
-  CheckMenuRadioItem(menu, local ? kUseDefault : first, first + kBorderCount - 1,
-                     selected == kFollow ? kUseDefault : first + selected, MF_BYCOMMAND);
-  if (!AppendMenuW(parent, MF_POPUP, reinterpret_cast<UINT_PTR>(menu), title)) DestroyMenu(menu);
-}
 }  // namespace
 
 PinnedImages::~PinnedImages() {
@@ -235,8 +224,26 @@ LRESULT CALLBACK PinnedImages::WindowProc(HWND window, UINT message, WPARAM wpar
       if (!menu) return 0;
       AppendMenuW(menu, MF_STRING, kCopy, L"复制图片\tCtrl+C");
       AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
-      AppendBorders(menu, L"当前贴图边框", kLocal, image->border, true);
-      AppendBorders(menu, L"全局默认边框", kDefault, image->host->default_border_, false);
+      AppendMenuW(menu, MF_STRING, kUseDefault, L"跟随全局设置");
+      for (int i = 0; i < kBorderCount; ++i) {
+        AppendMenuW(menu, MF_STRING, kLocal + i, kBorders[i].label);
+      }
+      CheckMenuRadioItem(menu, kUseDefault, kLocal + kBorderCount - 1,
+                         image->border == kFollow ? kUseDefault : kLocal + image->border,
+                         MF_BYCOMMAND);
+      AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
+      HMENU global = CreatePopupMenu();
+      if (global) {
+        for (int i = 0; i < kBorderCount; ++i) {
+          AppendMenuW(global, MF_STRING, kDefault + i, kBorders[i].label);
+        }
+        CheckMenuRadioItem(global, kDefault, kDefault + kBorderCount - 1,
+                           kDefault + image->host->default_border_, MF_BYCOMMAND);
+        if (!AppendMenuW(menu, MF_POPUP, reinterpret_cast<UINT_PTR>(global),
+                         L"全局默认边框")) {
+          DestroyMenu(global);
+        }
+      }
       AppendMenuW(menu, MF_SEPARATOR, 0, nullptr);
       AppendMenuW(menu, MF_STRING, kClose, L"关闭贴图\tEsc");
       SetForegroundWindow(window);

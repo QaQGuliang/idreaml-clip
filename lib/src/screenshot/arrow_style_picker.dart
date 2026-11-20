@@ -50,11 +50,13 @@ class ArrowStylePicker extends StatelessWidget {
     super.key,
     required this.value,
     required this.onChanged,
+    this.onDefault,
     this.monitor,
   });
 
   final ArrowStyle value;
   final ValueChanged<ArrowStyle>? onChanged;
+  final VoidCallback? onDefault;
 
   // The regular capture overlay spans the virtual desktop. A floating menu
   // anchored to its toolbar must stay on the same real monitor as the button.
@@ -72,10 +74,8 @@ class ArrowStylePicker extends StatelessWidget {
       math.max(192.0, 110 + 4 * fontSize),
     );
     final itemHeight = math.max(38.0, fontSize + 12);
-    final menuHeight = math.min(
-      bounds.height,
-      16 + itemHeight * ArrowStyle.values.length,
-    );
+    final itemCount = ArrowStyle.values.length + (onDefault == null ? 0 : 1);
+    final menuHeight = math.min(bounds.height, 16 + itemHeight * itemCount);
     final anchor =
         button.localToGlobal(Offset.zero, ancestor: overlay) & button.size;
     final left = anchor.left.clamp(bounds.left, bounds.right - menuWidth);
@@ -83,7 +83,7 @@ class ArrowStylePicker extends StatelessWidget {
         ? anchor.bottom
         : anchor.top - menuHeight;
     final top = preferredTop.clamp(bounds.top, bounds.bottom - menuHeight);
-    final result = await showMenu<ArrowStyle>(
+    final result = await showMenu<Object>(
       context: context,
       position: RelativeRect.fromRect(
         Rect.fromLTWH(left, top, menuWidth, 0),
@@ -93,8 +93,22 @@ class ArrowStylePicker extends StatelessWidget {
           .copyWith(maxHeight: menuHeight),
       menuPadding: const EdgeInsets.symmetric(vertical: 8),
       items: [
-        for (final style in ArrowStyle.values)
+        if (onDefault != null)
           PopupMenuItem(
+            value: 'default',
+            height: itemHeight,
+            child: Row(
+              children: [
+                const Icon(Icons.settings_backup_restore_rounded, size: 18),
+                const SizedBox(width: 8),
+                const Expanded(child: Text('默认')),
+                if (value == ArrowStyle.single)
+                  const Icon(Icons.check, size: 16),
+              ],
+            ),
+          ),
+        for (final style in ArrowStyle.values)
+          PopupMenuItem<ArrowStyle>(
             value: style,
             height: itemHeight,
             child: Row(
@@ -108,8 +122,12 @@ class ArrowStylePicker extends StatelessWidget {
           ),
       ],
     );
-    if (context.mounted && result != null && result != value) {
-      onChanged?.call(result);
+    if (context.mounted) {
+      if (result == 'default') {
+        onDefault?.call();
+      } else if (result is ArrowStyle && result != value) {
+        onChanged?.call(result);
+      }
     }
   }
 

@@ -209,4 +209,20 @@ void main() {
     table[16] = 43;
     expect(machineIdFromSmbios(table), isNot(id));
   });
+
+  test('count 与列表过滤口径一致，收藏计数包含已删除历史', () async {
+    final kept = await repository.captureText('alpha report');
+    await repository.captureText('beta note');
+    await repository.toggleFavorite(kept!.id);
+
+    expect(await repository.count(), 2);
+    expect(await repository.count(query: 'alpha'), 1);
+    expect(await repository.count(favoritesOnly: true), 1);
+    expect(await repository.count(todayOnly: true), 2);
+
+    await repository.softDelete(kept.id);
+    expect(await repository.count(), 1);
+    expect(await repository.count(query: 'alpha'), 0);
+    expect(await repository.count(favoritesOnly: true), 1);
+  });
 }

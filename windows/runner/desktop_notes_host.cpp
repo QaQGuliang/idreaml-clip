@@ -308,7 +308,11 @@ struct DesktopNotesHost::Impl {
       result->Success(V(M{{V("registered"),V(registered)},{V("rails"),V(values)}}));
     } else if (method=="monitors") {
       L values;
-      for (const auto& monitor : Monitors()) values.emplace_back(M{{V("id"),V(monitor.id)},{V("label"),V(monitor.label)}});
+      for (const auto& monitor : Monitors()) values.emplace_back(M{{V("id"),V(monitor.id)},{V("label"),V(monitor.label)},
+        {V("primary"),V(monitor.primary)},
+        {V("workX"),V(static_cast<double>(monitor.work.left))},{V("workY"),V(static_cast<double>(monitor.work.top))},
+        {V("workWidth"),V(static_cast<double>(monitor.work.right-monitor.work.left))},
+        {V("workHeight"),V(static_cast<double>(monitor.work.bottom-monitor.work.top))}});
       result->Success(V(values));
     } else if (method=="compose" && args) {
       if (!composer && !selector && !suspended && !blocked()) OpenComposer(*args);
@@ -421,8 +425,8 @@ struct DesktopNotesHost::Impl {
       const UINT32 c2=static_cast<UINT32>(N(rail.config,"color2",4292399352.0));
       const bool transparent=B(rail.config,"transparent");
       // The slider controls the material tint, never the final card or glyph
-      // opacity. Even at 100% transparency the blurred wallpaper remains.
-      const double tint_alpha=transparent ? .10+.90*std::clamp(N(rail.config,"opacity",.24),0.0,1.0) : 1.0;
+      // opacity. Even at full transparency a thin tint keeps text readable.
+      const double tint_alpha=transparent ? std::max(.10,std::clamp(N(rail.config,"opacity",.24),0.0,1.0)) : 1.0;
       const BYTE alpha=static_cast<BYTE>(std::lround(255*tint_alpha));
       const Color background(alpha,(c1>>16)&255,(c1>>8)&255,c1&255), end(alpha,(c2>>16)&255,(c2>>8)&255,c2&255);
       const auto mode=S(rail.config,"gradient","none");
@@ -584,7 +588,9 @@ struct DesktopNotesHost::Impl {
         const float body_line=std::ceil(std::max((is_todo ? fonts.task : fonts.normal)->GetHeight(&g)+2,(fonts.base+(is_todo ? 1 : 0))*1.8f));
         const float title_line=std::ceil(std::max(fonts.heading->GetHeight(&g)+2,(fonts.base+2)*1.6f));
         const float caption_line=std::ceil(std::max(fonts.caption->GetHeight(&g)+2,std::max(10.0f,fonts.base-1)*1.6f));
-        const auto content=Wide(S(row,"body")), heading_text=Wide(S(row,"title"));
+        auto content=Wide(S(row,"body"));
+        if (content.size()>150) content=content.substr(0,150)+L"…";
+        const auto heading_text=Wide(S(row,"title"));
         const float left=inset+18+(is_todo ? 27 : 0), text_width=std::max(1.0f,width-inset-18-left);
         const auto body_lines=lines(content,*(is_todo ? fonts.task : fonts.normal),text_width,is_todo ? 8 : 10);
         const auto title_lines=heading_text.empty() ? std::vector<std::wstring>{} : lines(heading_text,*fonts.heading,text_width,2);
@@ -600,7 +606,7 @@ struct DesktopNotesHost::Impl {
             GraphicsPath checkbox; RoundPath(checkbox,RectF(inset+18,y+18+(body_line-16)/2,16,16),5);
             Pen outline(Color(255,ink.GetR(),ink.GetG(),ink.GetB()),1.5f); g.DrawPath(&outline,&checkbox);
           } else {
-            const auto timestamp=date(N(row,"created"));
+            const auto timestamp=date(N(row,"updated"));
             drawText(timestamp.c_str(),fonts.caption.get(),RectF(left,text_y,text_width,caption_line),&single,&muted);
             text_y+=caption_line+7;
             for (const auto& line : title_lines) {
@@ -613,7 +619,10 @@ struct DesktopNotesHost::Impl {
             drawText(line.c_str(),(is_todo ? fonts.task : fonts.normal).get(),RectF(left,text_y,text_width,body_line),&single,is_todo ? &text : &paragraph);
             text_y+=body_line;
           }
-          if (is_todo) drawText(conflict ? L"有同步冲突 · 点击查看" : L"待完成",fonts.caption.get(),RectF(left,text_y+4,text_width,caption_line),&single,&muted);
+          if (is_todo) {
+            const auto meta=conflict ? std::wstring(L"有同步冲突 · 点击查看") : date(N(row,"updated"));
+            drawText(meta.c_str(),fonts.caption.get(),RectF(left,text_y+4,text_width,caption_line),&single,&muted);
+          }
           if (conflict) g.FillEllipse(&accent,width-inset-14,y+12,5.0f,5.0f);
           g.Restore(clipped);
           rail.hits.push_back({{static_cast<LONG>(inset),static_cast<LONG>(std::max(content_top,y)),
@@ -623,12 +632,13 @@ struct DesktopNotesHost::Impl {
       }
       if (rail.rows.empty()) {
         active_color=default_color;
+        const bool all_done=rail.kind=="todo" && N(rail.config,"doneCount",0)>0;
         const float normal_line=std::ceil(std::max(defaults.normal->GetHeight(&g)+2,defaults.base*1.8f));
         const float empty_height=18+header_line+12+normal_line*2+18;
         card(RectF(inset,y,card_width,empty_height));
-        drawText(rail.kind=="note" ? L"给想法一个落脚点" : L"把计划变成行动",defaults.heading.get(),
+        drawText(all_done ? L"今天的待办已完成" : rail.kind=="note" ? L"给想法一个落脚点" : L"把计划变成行动",defaults.heading.get(),
           RectF(inset+18,y+18,card_width-36,header_line),&single,&text);
-        drawText(rail.kind=="note" ? L"单按 F3，记下此刻的灵感" : L"双按 F3，添加一项待办",defaults.normal.get(),
+        drawText(all_done ? L"双按 F3，记录新的事项" : rail.kind=="note" ? L"单按 F3，记下此刻的灵感" : L"双按 F3，添加一项待办",defaults.normal.get(),
           RectF(inset+18,y+18+header_line+12,card_width-36,normal_line*2),&format,&muted);
         rail.hits.push_back({{15,static_cast<LONG>(std::max(content_top,y)),static_cast<LONG>(width-15),static_cast<LONG>(std::min(height,y+empty_height))},"",false,false});
         y+=empty_height+12;
@@ -902,7 +912,7 @@ struct DesktopNotesHost::Impl {
   bool HandleMessage(const MSG& msg) {
     if (selector && msg.message==WM_KEYDOWN && msg.wParam==VK_ESCAPE) { FinishSelection(false); return true; }
     if (composer && !choosing_color && (msg.hwnd==composer || IsChild(composer,msg.hwnd))) {
-      if (msg.message==WM_KEYDOWN && msg.wParam==VK_ESCAPE && !pending) { CloseComposer(2,true); return true; }
+      if (msg.message==WM_KEYDOWN && msg.wParam==VK_ESCAPE && !pending) { CloseComposer(1,true); return true; }
       if (msg.message==WM_KEYDOWN && msg.wParam==VK_RETURN && (GetKeyState(VK_CONTROL)&0x8000)) { SaveComposer(); return true; }
       if (msg.message==WM_KEYDOWN && msg.wParam==VK_TAB) {
         SetFocus(GetNextDlgTabItem(composer,GetFocus(),(GetKeyState(VK_SHIFT)&0x8000)!=0)); return true;
@@ -997,7 +1007,8 @@ struct DesktopNotesHost::Impl {
       if (message==WM_COMMAND) {
         if (LOWORD(wp)==104 && HIWORD(wp)==BN_CLICKED) self->SaveComposer();
         else if (LOWORD(wp)==106 && HIWORD(wp)==BN_CLICKED && !self->pending) self->ChooseComposerColor();
-        else if ((LOWORD(wp)==103 || LOWORD(wp)==105) && HIWORD(wp)==BN_CLICKED && !self->pending) self->CloseComposer(2,true);
+        else if (LOWORD(wp)==103 && HIWORD(wp)==BN_CLICKED && !self->pending) self->CloseComposer(2,true);
+        else if (LOWORD(wp)==105 && HIWORD(wp)==BN_CLICKED && !self->pending) self->CloseComposer(1,true);
         else if (HIWORD(wp)==EN_CHANGE) InvalidateRect(reinterpret_cast<HWND>(lp),nullptr,FALSE);
         return 0;
       }
@@ -1009,7 +1020,7 @@ struct DesktopNotesHost::Impl {
         if (GetForegroundWindow()!=window && !self->pending && !self->choosing_color) self->CloseComposer(1,false);
         return 0;
       }
-      if (message==WM_CLOSE) { if (!self->pending) self->CloseComposer(2,true); return 0; }
+      if (message==WM_CLOSE) { if (!self->pending) self->CloseComposer(1,true); return 0; }
     }
     return DefWindowProc(window,message,wp,lp);
   }
