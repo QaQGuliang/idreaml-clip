@@ -5,6 +5,13 @@ import 'package:flutter/services.dart';
 
 import '../desk/desk_management_list.dart';
 import '../desk/desk_models.dart';
+import '../desk/desk_pages.dart'
+    show
+        DeskSchedule,
+        DeskScheduleErrors,
+        DeskScheduleFields,
+        deskScheduleSummary,
+        validateDeskScheduleFields;
 import '../desk/desk_typography.dart';
 import '../desk/desktop_notes.dart';
 import 'app_theme.dart';
@@ -17,17 +24,6 @@ typedef DeskComposerFinish = Future<void> Function(DeskComposerResult result);
 
 /// 失焦或系统关闭时由外层驱动退出：草稿保留，不再恢复窗口焦点。
 typedef DeskComposerDismiss = Future<void> Function({required bool clearDraft});
-
-/// 快速新增的预设文字颜色，与原生窗口的七个色块保持一致。
-const deskComposerSwatches = <({String label, int color})>[
-  (label: '墨色', color: 0xFF302B3C),
-  (label: '紫色', color: 0xFF6C57E5),
-  (label: '红色', color: 0xFFD84461),
-  (label: '橙色', color: 0xFFBA6518),
-  (label: '绿色', color: 0xFF268064),
-  (label: '蓝色', color: 0xFF347AC4),
-  (label: '白色', color: 0xFFFFFFFF),
-];
 
 /// 快速新增便签/待办。窗口本身由 desktop_service 切换到无边框浮层，
 /// 这里只负责卡片内容、校验、草稿与保存。
@@ -62,6 +58,9 @@ class _DeskComposerState extends State<DeskComposer> {
   late int? _textColor = _draftColor(widget.draft['textColor']);
   final _titleFocus = FocusNode();
   final _bodyFocus = FocusNode();
+  final _scheduleFocus = FocusNode();
+  late DeskSchedule _schedule;
+  DeskScheduleErrors _scheduleErrors = const DeskScheduleErrors();
   Timer? _draftTimer;
   String? _titleError;
   String? _bodyError;
@@ -71,16 +70,27 @@ class _DeskComposerState extends State<DeskComposer> {
   bool _paletteOpen = false;
   bool _pickingColor = false;
 
+  /// 打开时间/提醒或选色对话框期间，Esc 与 Ctrl+Enter 交给对话框处理。
+  bool _dialogOpen = false;
+
   bool get _note => widget.kind == DeskKind.note;
+  bool get _todo => widget.kind == DeskKind.todo;
   DeskSettings get _settings => widget.notes.config(widget.kind);
   String get _titleTooLongMessage => '标题最多 $deskTitleMaxLength 字，请精简后保存';
 
   @override
   void initState() {
     super.initState();
-    // 历史草稿可能超过新的标题上限，打开时先给出可修正的提示。
+    _schedule = _todo
+        ? DeskSchedule.fromDraft(widget.draft)
+        : DeskSchedule.empty;
+    // 历史草稿可能超过新的标题上限或带着互相矛盾的时间，打开时先提示。
     if (_title.text.length > deskTitleMaxLength) {
       _titleError = _titleTooLongMessage;
+    }
+    if (_todo) {
+      final scheduleErrors = validateDeskScheduleFields(_schedule);
+      if (!scheduleErrors.isEmpty) _scheduleErrors = scheduleErrors;
     }
     HardwareKeyboard.instance.addHandler(_handleKey);
     widget.onDismissReady?.call(_dismiss);
@@ -97,12 +107,14 @@ class _DeskComposerState extends State<DeskComposer> {
     _body.dispose();
     _titleFocus.dispose();
     _bodyFocus.dispose();
+    _scheduleFocus.dispose();
     super.dispose();
   }
 
   bool _handleKey(KeyEvent event) {
     if (_finished || _saving) return false;
     if (event is! KeyDownEvent && event is! KeyRepeatEvent) return false;
+    if (_dialogOpen) return false;
     if (event.logicalKey == LogicalKeyboardKey.escape) {
       // 选色弹层自行处理 Esc，避免同时关闭整个窗口。
       if (_pickingColor) return false;
@@ -153,6 +165,10 @@ class _DeskComposerState extends State<DeskComposer> {
     fontFamily: _fontFamily,
     fontSize: _fontSize,
     textColor: _textColor,
+    startAt: _schedule.startAt,
+    endAt: _schedule.endAt,
+    remindAt: _schedule.remindAt,
+    remindBeforeMinutes: _schedule.remindBeforeMinutes,
   );
 
   void _scheduleDraft() {
@@ -168,14 +184,24 @@ class _DeskComposerState extends State<DeskComposer> {
     final body = _body.text;
     final bodyEmpty = body.trim().isEmpty;
     final titleTooLong = title.length > deskTitleMaxLength;
-    if (bodyEmpty || titleTooLong) {
+    final scheduleErrors = _todo
+        ? validateDeskScheduleFields(_schedule)
+        : const DeskScheduleErrors();
+    if (bodyEmpty || titleTooLong || !scheduleErrors.isEmpty) {
       setState(() {
         _bodyError = bodyEmpty ? '请先填写内容' : null;
         _titleError = titleTooLong ? _titleTooLongMessage : null;
+        _scheduleErrors = scheduleErrors;
         _saveError = null;
       });
       // 焦点跳到第一个错误字段，重新输入即清除提示。
-      (titleTooLong ? _titleFocus : _bodyFocus).requestFocus();
+      if (titleTooLong) {
+        _titleFocus.requestFocus();
+      } else if (bodyEmpty) {
+        _bodyFocus.requestFocus();
+      } else {
+        _scheduleFocus.requestFocus();
+      }
       return;
     }
     setState(() {
@@ -183,6 +209,7 @@ class _DeskComposerState extends State<DeskComposer> {
       _saveError = null;
       _bodyError = null;
       _titleError = null;
+      _scheduleErrors = const DeskScheduleErrors();
       _paletteOpen = false;
     });
     try {
@@ -193,6 +220,10 @@ class _DeskComposerState extends State<DeskComposer> {
         fontFamily: _fontFamily,
         fontSize: _fontSize,
         textColor: _textColor,
+        startAt: _todo ? _schedule.startAt : null,
+        endAt: _todo ? _schedule.endAt : null,
+        remindAt: _todo ? _schedule.remindAt : null,
+        remindBeforeMinutes: _todo ? _schedule.remindBeforeMinutes : null,
       );
     } catch (error) {
       if (!mounted) return;
@@ -240,6 +271,100 @@ class _DeskComposerState extends State<DeskComposer> {
       if (selected != null && mounted) _selectColor(selected);
     } finally {
       _pickingColor = false;
+    }
+  }
+
+  /// 时间与提醒使用应用内对话框，避免撑高固定尺寸的快速新增窗口。
+  Future<void> _editSchedule() async {
+    if (_saving || _finished || _dialogOpen) return;
+    _dialogOpen = true;
+    try {
+      var draft = _schedule;
+      var errors = const DeskScheduleErrors();
+      final result = await showDialog<DeskSchedule>(
+        context: context,
+        builder: (dialogContext) => StatefulBuilder(
+          builder: (context, setDialogState) => CallbackShortcuts(
+            bindings: {
+              const SingleActivator(LogicalKeyboardKey.escape): () =>
+                  Navigator.maybePop(dialogContext),
+            },
+            child: AlertDialog(
+              backgroundColor: AppColors.surface,
+              surfaceTintColor: Colors.transparent,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(18),
+                side: const BorderSide(color: AppColors.line),
+              ),
+              titleTextStyle: const TextStyle(
+                fontSize: 16,
+                fontWeight: FontWeight.w700,
+                color: AppColors.text,
+              ),
+              title: const Text('时间与提醒'),
+              content: SizedBox(
+                width: 318,
+                child: SingleChildScrollView(
+                  child: DeskScheduleFields(
+                    value: draft,
+                    errors: errors,
+                    onChanged: (value) {
+                      setDialogState(() {
+                        draft = value;
+                        errors = const DeskScheduleErrors();
+                      });
+                    },
+                  ),
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.maybePop(dialogContext),
+                  child: const Text('取消'),
+                ),
+                if (!draft.isEmpty)
+                  TextButton(
+                    key: const ValueKey('desk-composer-schedule-reset'),
+                    onPressed: () => setDialogState(() {
+                      draft = DeskSchedule.empty;
+                      errors = const DeskScheduleErrors();
+                    }),
+                    child: const Text('清除'),
+                  ),
+                FilledButton(
+                  key: const ValueKey('desk-composer-schedule-save'),
+                  style: FilledButton.styleFrom(
+                    backgroundColor: AppColors.primary,
+                    foregroundColor: Colors.white,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                  ),
+                  onPressed: () {
+                    final value = validateDeskScheduleFields(draft);
+                    if (!value.isEmpty) {
+                      setDialogState(() => errors = value);
+                      return;
+                    }
+                    Navigator.pop(dialogContext, draft);
+                  },
+                  child: const Text('完成'),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      if (result != null && mounted) {
+        setState(() {
+          _schedule = result;
+          _scheduleErrors = const DeskScheduleErrors();
+          _paletteOpen = false;
+        });
+        _scheduleDraft();
+      }
+    } finally {
+      _dialogOpen = false;
     }
   }
 
@@ -329,6 +454,15 @@ class _DeskComposerState extends State<DeskComposer> {
                 const ValueKey('desk-composer-body-error'),
                 _bodyError!,
               ),
+            if (_todo) ...[
+              const SizedBox(height: 10),
+              _scheduleRow(),
+              if (_scheduleErrors.first != null)
+                _errorText(
+                  const ValueKey('desk-composer-schedule-error'),
+                  _scheduleErrors.first!,
+                ),
+            ],
             const SizedBox(height: 12),
             _colorRow(),
             if (_paletteOpen) ...[const SizedBox(height: 8), _palette()],
@@ -444,6 +578,78 @@ class _DeskComposerState extends State<DeskComposer> {
     ),
   );
 
+  Widget _scheduleRow() {
+    final error = _scheduleErrors.first;
+    return SizedBox(
+      height: 36,
+      child: Row(
+        children: [
+          Expanded(
+            child: OutlinedButton(
+              key: const ValueKey('desk-composer-schedule'),
+              focusNode: _scheduleFocus,
+              onPressed: _saving ? null : () => unawaited(_editSchedule()),
+              style: OutlinedButton.styleFrom(
+                padding: const EdgeInsets.symmetric(horizontal: 10),
+                foregroundColor: AppColors.text,
+                side: BorderSide(
+                  color: error == null ? AppColors.line : AppColors.danger,
+                  width: error == null ? 1 : 1.4,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: Row(
+                children: [
+                  Icon(
+                    Icons.schedule_rounded,
+                    size: 15,
+                    color: error == null ? AppColors.muted : AppColors.danger,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      _schedule.isEmpty
+                          ? '时间与提醒：未设置'
+                          : '时间与提醒：${deskScheduleSummary(_schedule)}',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 12,
+                        color: error == null
+                            ? AppColors.muted
+                            : AppColors.danger,
+                      ),
+                    ),
+                  ),
+                  const Icon(Icons.expand_more_rounded, size: 16),
+                ],
+              ),
+            ),
+          ),
+          if (!_schedule.isEmpty) ...[
+            const SizedBox(width: 4),
+            _iconButton(
+              key: const ValueKey('desk-composer-schedule-clear'),
+              tooltip: '清除时间与提醒',
+              icon: Icons.close_rounded,
+              onPressed: _saving ? null : _clearSchedule,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  void _clearSchedule() {
+    setState(() {
+      _schedule = DeskSchedule.empty;
+      _scheduleErrors = const DeskScheduleErrors();
+    });
+    _scheduleDraft();
+  }
+
   Widget _colorRow() {
     final color = _textColor;
     return SizedBox(
@@ -500,8 +706,14 @@ class _DeskComposerState extends State<DeskComposer> {
       crossAxisAlignment: WrapCrossAlignment.center,
       children: [
         _followSwatch(),
-        for (final swatch in deskComposerSwatches)
-          _colorSwatch(swatch.label, swatch.color),
+        // 与管理页选色器共用同一套 18 色与提示文案。
+        DeskPaletteSwatches(
+          selected: _textColor,
+          size: 30,
+          spacing: 8,
+          keyPrefix: 'desk-composer-color',
+          onSelected: _selectColor,
+        ),
         OutlinedButton.icon(
           key: const ValueKey('desk-composer-color-custom'),
           onPressed: () => unawaited(_pickCustomColor()),
@@ -515,7 +727,7 @@ class _DeskComposerState extends State<DeskComposer> {
             ),
           ),
           icon: const Icon(Icons.colorize_rounded, size: 13),
-          label: const Text('自定义…', style: TextStyle(fontSize: 11)),
+          label: const Text('自定义…（HEX）', style: TextStyle(fontSize: 11)),
         ),
       ],
     ),
@@ -546,39 +758,6 @@ class _DeskComposerState extends State<DeskComposer> {
             size: 14,
             color: selected ? AppColors.primary : AppColors.muted,
           ),
-        ),
-      ),
-    );
-  }
-
-  Widget _colorSwatch(String label, int color) {
-    final selected = _textColor == color;
-    return Tooltip(
-      message: '$label ${deskColorHex(color)}',
-      child: InkWell(
-        key: ValueKey('desk-composer-color-${deskColorHex(color)}'),
-        borderRadius: BorderRadius.circular(9),
-        onTap: () => _selectColor(color),
-        child: Container(
-          width: 30,
-          height: 30,
-          decoration: BoxDecoration(
-            color: Color(color),
-            borderRadius: BorderRadius.circular(9),
-            border: Border.all(
-              color: selected ? AppColors.primary : AppColors.line,
-              width: selected ? 1.6 : 1,
-            ),
-          ),
-          child: selected
-              ? Icon(
-                  Icons.check,
-                  size: 16,
-                  color: Color(color).computeLuminance() > .45
-                      ? AppColors.primary
-                      : Colors.white,
-                )
-              : null,
         ),
       ),
     );

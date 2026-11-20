@@ -189,6 +189,10 @@ class DesktopNotes extends ChangeNotifier {
     String? fontFamily,
     double? fontSize,
     int? textColor,
+    int? startAt,
+    int? endAt,
+    int? remindAt,
+    int? remindBeforeMinutes,
   }) => repository.savePreference(
     'draft.${kind.name}',
     jsonEncode({
@@ -197,6 +201,10 @@ class DesktopNotes extends ChangeNotifier {
       'fontFamily': ?fontFamily,
       'fontSize': ?fontSize,
       'textColor': ?textColor,
+      'startAt': ?startAt,
+      'endAt': ?endAt,
+      'remindAt': ?remindAt,
+      'remindBeforeMinutes': ?remindBeforeMinutes,
     }),
   );
 
@@ -332,6 +340,10 @@ class DesktopNotes extends ChangeNotifier {
           fontFamily: args['fontFamily'] as String?,
           fontSize: (args['fontSize'] as num?)?.toDouble(),
           textColor: args['textColor'] as int?,
+          startAt: _channelStamp(args['startAt']),
+          endAt: _channelStamp(args['endAt']),
+          remindAt: _channelStamp(args['remindAt']),
+          remindBeforeMinutes: _channelMinutes(args['remindBeforeMinutes']),
         );
         await storeDraft(kind, '', '');
       case 'draft':
@@ -342,6 +354,10 @@ class DesktopNotes extends ChangeNotifier {
           fontFamily: args['fontFamily'] as String?,
           fontSize: (args['fontSize'] as num?)?.toDouble(),
           textColor: args['textColor'] as int?,
+          startAt: _channelStamp(args['startAt']),
+          endAt: _channelStamp(args['endAt']),
+          remindAt: _channelStamp(args['remindAt']),
+          remindBeforeMinutes: _channelMinutes(args['remindBeforeMinutes']),
         );
       case 'cancel':
         await storeDraft(kind, '', '');
@@ -372,3 +388,13 @@ class DesktopNotes extends ChangeNotifier {
     super.dispose();
   }
 }
+
+/// 原生通道可能来自旧版窗口或未来版本：只接收合法的毫秒时间戳与分钟数，
+/// 其余视为未设置，避免脏数据进入草稿或仓库。
+int? _channelStamp(Object? value) =>
+    value is int && validDeskTimestamp(value) ? value : null;
+
+int? _channelMinutes(Object? value) =>
+    value is int && value >= 1 && value <= deskRemindBeforeMinutesMax
+    ? value
+    : null;

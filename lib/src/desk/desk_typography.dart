@@ -33,6 +33,101 @@ Future<int?> pickDeskColor(
   builder: (_) => _ColorPickerDialog(label: label, initialColor: initialColor),
 );
 
+/// 统一色板：管理页选色对话框与快速新增内联色板共用同一套 18 色。
+const List<int> deskPaletteSwatches = [
+  0xFFFFFFFF,
+  0xFFF8F7FB,
+  0xFFD8D0F8,
+  0xFFF0EDFF,
+  0xFFE8DAF4,
+  0xFFF7DDE8,
+  0xFFFFE3CF,
+  0xFFFFF1C9,
+  0xFFE2EDCB,
+  0xFFD4EBDD,
+  0xFFD7E9EF,
+  0xFFD3DEF4,
+  0xFF6C57E5,
+  0xFF6B8F78,
+  0xFF526887,
+  0xFF393345,
+  0xFF25232C,
+  0xFF151419,
+];
+
+/// 沿用旧版快速新增名称的色块；其余色块只在提示中显示 HEX。
+const Map<int, String> deskPaletteSwatchNames = {
+  0xFF6C57E5: '紫色',
+  0xFFFFFFFF: '白色',
+};
+
+/// 18 色预设色板。管理页选色对话框与快速新增内联色板共用同一组件，
+/// 选中态、提示文案与尺寸保持一致。
+class DeskPaletteSwatches extends StatelessWidget {
+  const DeskPaletteSwatches({
+    super.key,
+    required this.selected,
+    required this.onSelected,
+    this.size = 36,
+    this.spacing = 9,
+    this.keyPrefix = 'desk-palette-swatch',
+  });
+  final int? selected;
+  final ValueChanged<int> onSelected;
+  final double size;
+  final double spacing;
+  final String keyPrefix;
+
+  @override
+  Widget build(BuildContext context) => Wrap(
+    spacing: spacing,
+    runSpacing: spacing,
+    children: [
+      for (final color in deskPaletteSwatches)
+        _swatch(color, color == selected),
+    ],
+  );
+
+  Widget _swatch(int color, bool isSelected) {
+    final hex = deskColorHex(color);
+    final name = deskPaletteSwatchNames[color];
+    return Tooltip(
+      message: name == null ? hex : '$name $hex',
+      child: Semantics(
+        label: hex,
+        selected: isSelected,
+        button: true,
+        child: InkWell(
+          key: ValueKey('$keyPrefix-$hex'),
+          onTap: () => onSelected(color),
+          borderRadius: BorderRadius.circular(size / 4),
+          child: Container(
+            width: size,
+            height: size,
+            decoration: BoxDecoration(
+              color: Color(color),
+              borderRadius: BorderRadius.circular(size / 4),
+              border: Border.all(
+                color: isSelected ? AppColors.primary : AppColors.line,
+                width: isSelected ? 2 : 1,
+              ),
+            ),
+            child: isSelected
+                ? Icon(
+                    Icons.check,
+                    size: size / 2,
+                    color: Color(color).computeLuminance() > .45
+                        ? AppColors.primary
+                        : Colors.white,
+                  )
+                : null,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 Future<int?> pickDeskTextColor(
   BuildContext context, {
   required int initialColor,
@@ -204,26 +299,6 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog> {
   late int _color = widget.initialColor;
   late final _controller = TextEditingController(text: deskColorHex(_color));
   String? _error;
-  static const _swatches = [
-    0xFFFFFFFF,
-    0xFFF8F7FB,
-    0xFFD8D0F8,
-    0xFFF0EDFF,
-    0xFFE8DAF4,
-    0xFFF7DDE8,
-    0xFFFFE3CF,
-    0xFFFFF1C9,
-    0xFFE2EDCB,
-    0xFFD4EBDD,
-    0xFFD7E9EF,
-    0xFFD3DEF4,
-    0xFF6C57E5,
-    0xFF6B8F78,
-    0xFF526887,
-    0xFF393345,
-    0xFF25232C,
-    0xFF151419,
-  ];
   @override
   void dispose() {
     _controller.dispose();
@@ -258,48 +333,14 @@ class _ColorPickerDialogState extends State<_ColorPickerDialog> {
               ),
             ),
             const SizedBox(height: 18),
-            Wrap(
-              spacing: 9,
-              runSpacing: 9,
-              children: [
-                for (final color in _swatches)
-                  Semantics(
-                    label: deskColorHex(color),
-                    selected: color == _color,
-                    button: true,
-                    child: InkWell(
-                      onTap: () => setState(() {
-                        _color = color;
-                        _controller.text = deskColorHex(color);
-                        _error = null;
-                      }),
-                      borderRadius: BorderRadius.circular(9),
-                      child: Container(
-                        width: 36,
-                        height: 36,
-                        decoration: BoxDecoration(
-                          color: Color(color),
-                          borderRadius: BorderRadius.circular(9),
-                          border: Border.all(
-                            color: color == _color
-                                ? AppColors.primary
-                                : AppColors.line,
-                            width: color == _color ? 2 : 1,
-                          ),
-                        ),
-                        child: color == _color
-                            ? Icon(
-                                Icons.check,
-                                size: 18,
-                                color: Color(color).computeLuminance() > .45
-                                    ? AppColors.primary
-                                    : Colors.white,
-                              )
-                            : null,
-                      ),
-                    ),
-                  ),
-              ],
+            DeskPaletteSwatches(
+              selected: _color,
+              keyPrefix: 'desk-color-picker',
+              onSelected: (color) => setState(() {
+                _color = color;
+                _controller.text = deskColorHex(color);
+                _error = null;
+              }),
             ),
             const SizedBox(height: 18),
             TextField(

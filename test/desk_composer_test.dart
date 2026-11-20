@@ -64,7 +64,7 @@ void main() {
     await flush(tester);
     // 与桌面服务的快速新增窗口尺寸保持一致。
     await tester.binding.setSurfaceSize(
-      Size(410, kind == DeskKind.note ? 496 : 414),
+      Size(410, kind == DeskKind.note ? 496 : 470),
     );
     addTearDown(() async {
       await flush(tester);
@@ -352,5 +352,212 @@ void main() {
       (await tester.runAsync(() => notes.draft(DeskKind.todo)))!['body'],
       '离开窗口的草稿',
     );
+  });
+
+  Future<void> openSchedule(WidgetTester tester) async {
+    await tester.tap(keyed('desk-composer-schedule'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsOneWidget);
+  }
+
+  Future<void> pickDateTime(
+    WidgetTester tester,
+    String fieldKey,
+    String date,
+    String hour,
+    String minute,
+  ) async {
+    await tester.tap(keyed(fieldKey));
+    await tester.pumpAndSettle();
+    await tester.enterText(keyed('desk-time-date'), date);
+    await tester.enterText(keyed('desk-time-hour'), hour);
+    await tester.enterText(keyed('desk-time-minute'), minute);
+    await tester.tap(keyed('desk-time-confirm'));
+    await tester.pumpAndSettle();
+  }
+
+  Future<void> chooseReminder(WidgetTester tester, String label) async {
+    await tester.tap(keyed('desk-schedule-remind'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text(label).last);
+    await tester.pumpAndSettle();
+  }
+
+  testWidgets('待办设置开始时间与提前提醒，保存时携带四个字段', (tester) async {
+    final start = DateTime(2099, 12, 31, 8);
+    await pumpComposer(tester, DeskKind.todo);
+    await tester.enterText(keyed('desk-composer-body'), '带提醒的待办');
+    await openSchedule(tester);
+    await pickDateTime(tester, 'desk-schedule-start', '2099-12-31', '08', '00');
+    await chooseReminder(tester, '开始前 15 分钟');
+    expect(find.text('将在 2099-12-31 07:45 提醒'), findsOneWidget);
+    await tester.tap(keyed('desk-composer-schedule-save'));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('开始 2099-12-31 08:00'), findsOneWidget);
+
+    await tester.tap(keyed('desk-composer-save'));
+    await waitFor(tester, () => finished.isNotEmpty);
+    final saved = notes.items(DeskKind.todo).single;
+    expect(saved.startAt, start.millisecondsSinceEpoch);
+    expect(saved.remindBeforeMinutes, 15);
+    expect(saved.endAt, isNull);
+    expect(saved.remindAt, isNull);
+    final cleared = await tester.runAsync(() => notes.draft(DeskKind.todo));
+    for (final key in ['startAt', 'endAt', 'remindAt', 'remindBeforeMinutes']) {
+      expect(cleared!.containsKey(key), isFalse, reason: key);
+    }
+  });
+
+  testWidgets('关闭窗口保留的草稿携带时间与提醒，重新打开可恢复', (tester) async {
+    final start = DateTime(2099, 12, 31, 8);
+    await pumpComposer(tester, DeskKind.todo);
+    await tester.enterText(keyed('desk-composer-body'), '带时间的草稿');
+    await openSchedule(tester);
+    await pickDateTime(tester, 'desk-schedule-start', '2099-12-31', '08', '00');
+    await chooseReminder(tester, '开始前 15 分钟');
+    await tester.tap(keyed('desk-composer-schedule-save'));
+    await tester.pumpAndSettle();
+
+    await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+    await waitFor(tester, () => finished.isNotEmpty);
+    expect(finished.single, DeskComposerResult.dismissed);
+    final draft = await tester.runAsync(() => notes.draft(DeskKind.todo));
+    expect(draft!['body'], '带时间的草稿');
+    expect(draft['startAt'], start.millisecondsSinceEpoch);
+    expect(draft['remindBeforeMinutes'], 15);
+
+    finished.clear();
+    await pumpComposer(tester, DeskKind.todo, draft: draft);
+    expect(find.textContaining('开始 2099-12-31 08:00'), findsOneWidget);
+    expect(find.textContaining('提前 15 分钟提醒'), findsOneWidget);
+
+    // 清除入口同时清理草稿字段。
+    await tester.tap(keyed('desk-composer-schedule-clear'));
+    await tester.pumpAndSettle();
+    expect(find.text('时间与提醒：未设置'), findsOneWidget);
+    await tester.tap(keyed('desk-composer-cancel'));
+    await waitFor(tester, () => finished.isNotEmpty);
+    final cleared = await tester.runAsync(() => notes.draft(DeskKind.todo));
+    for (final key in ['startAt', 'endAt', 'remindAt', 'remindBeforeMinutes']) {
+      expect(cleared!.containsKey(key), isFalse, reason: key);
+    }
+  });
+
+  testWidgets('结束早于开始在对话框内报错，修正后可完成，入口可清除', (tester) async {
+    await pumpComposer(tester, DeskKind.todo);
+    await tester.enterText(keyed('desk-composer-body'), '结束早于开始');
+    await openSchedule(tester);
+    await pickDateTime(tester, 'desk-schedule-start', '2099-12-31', '10', '00');
+    await pickDateTime(tester, 'desk-schedule-end', '2099-12-31', '09', '00');
+    await tester.tap(keyed('desk-composer-schedule-save'));
+    await tester.pumpAndSettle();
+
+    expect(find.byType(AlertDialog), findsOneWidget);
+    expect(
+      tester.widget<Text>(keyed('desk-schedule-end-error')).data,
+      '结束时间不能早于开始时间',
+    );
+
+    await pickDateTime(tester, 'desk-schedule-end', '2099-12-31', '11', '00');
+    await tester.tap(keyed('desk-composer-schedule-save'));
+    await tester.pumpAndSettle();
+    expect(find.byType(AlertDialog), findsNothing);
+    expect(find.textContaining('结束 2099-12-31 11:00'), findsOneWidget);
+
+    await tester.tap(keyed('desk-composer-schedule-clear'));
+    await tester.pumpAndSettle();
+    expect(find.text('时间与提醒：未设置'), findsOneWidget);
+
+    await tester.tap(keyed('desk-composer-save'));
+    await waitFor(tester, () => finished.isNotEmpty);
+    final saved = notes.items(DeskKind.todo).single;
+    expect(saved.startAt, isNull);
+    expect(saved.endAt, isNull);
+    expect(saved.remindAt, isNull);
+    expect(saved.remindBeforeMinutes, isNull);
+  });
+
+  testWidgets('草稿恢复时间与提醒，直接保存时写回原值', (tester) async {
+    final start = DateTime(2099, 5, 1, 9, 30);
+    final remind = DateTime(2099, 5, 1, 9, 0);
+    await pumpComposer(
+      tester,
+      DeskKind.todo,
+      draft: {
+        'body': '草稿里的提醒',
+        'startAt': start.millisecondsSinceEpoch,
+        'endAt': start.add(const Duration(hours: 1)).millisecondsSinceEpoch,
+        'remindAt': remind.millisecondsSinceEpoch,
+      },
+    );
+    expect(find.textContaining('开始 2099-05-01 09:30'), findsOneWidget);
+    expect(find.textContaining('2099-05-01 09:00 提醒'), findsOneWidget);
+
+    await tester.tap(keyed('desk-composer-save'));
+    await waitFor(tester, () => finished.isNotEmpty);
+    final saved = notes.items(DeskKind.todo).single;
+    expect(saved.startAt, start.millisecondsSinceEpoch);
+    expect(
+      saved.endAt,
+      start.add(const Duration(hours: 1)).millisecondsSinceEpoch,
+    );
+    expect(saved.remindAt, remind.millisecondsSinceEpoch);
+    expect(saved.remindBeforeMinutes, isNull);
+  });
+
+  testWidgets('草稿里的提前提醒缺少开始时间时字段级报错并聚焦入口', (tester) async {
+    await pumpComposer(
+      tester,
+      DeskKind.todo,
+      draft: {'body': '缺少开始时间', 'remindBeforeMinutes': 30},
+    );
+    expect(
+      tester.widget<Text>(keyed('desk-composer-schedule-error')).data,
+      '提前提醒需要先设置开始时间',
+    );
+    await tester.tap(keyed('desk-composer-save'));
+    await tester.pumpAndSettle();
+    expect(finished, isEmpty);
+    expect(
+      tester
+          .widget<OutlinedButton>(keyed('desk-composer-schedule'))
+          .focusNode!
+          .hasFocus,
+      isTrue,
+    );
+
+    // 补上开始时间后错误即时清除，并可保存。
+    await openSchedule(tester);
+    await pickDateTime(tester, 'desk-schedule-start', '2099-12-31', '08', '00');
+    await tester.tap(keyed('desk-composer-schedule-save'));
+    await tester.pumpAndSettle();
+    expect(keyed('desk-composer-schedule-error'), findsNothing);
+    await tester.tap(keyed('desk-composer-save'));
+    await waitFor(tester, () => finished.isNotEmpty);
+    final saved = notes.items(DeskKind.todo).single;
+    expect(saved.startAt, DateTime(2099, 12, 31, 8).millisecondsSinceEpoch);
+    expect(saved.remindBeforeMinutes, 30);
+  });
+
+  testWidgets('内联色板与整体色板一致，18 色均可选择', (tester) async {
+    await pumpComposer(tester, DeskKind.note);
+    await tester.enterText(keyed('desk-composer-body'), '统一色板');
+    await tester.tap(keyed('desk-composer-color'));
+    await tester.pumpAndSettle();
+
+    expect(keyed('desk-composer-palette'), findsOneWidget);
+    expect(deskPaletteSwatches, hasLength(18));
+    for (final color in deskPaletteSwatches) {
+      expect(
+        keyed('desk-composer-color-${deskColorHex(color)}'),
+        findsOneWidget,
+        reason: deskColorHex(color),
+      );
+    }
+    // 与旧版 7 色不同的浅色块也能直接选择。
+    final custom = deskPaletteSwatches[5];
+    await tester.tap(keyed('desk-composer-color-${deskColorHex(custom)}'));
+    await tester.pumpAndSettle();
+    expect(find.text('文字颜色：${deskColorHex(custom)}'), findsOneWidget);
   });
 }

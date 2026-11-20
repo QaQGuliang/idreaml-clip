@@ -37,9 +37,10 @@ const _dwmncrpEnabled = 2;
 const _dwmColorNone = 0xFFFFFFFE;
 const _dwmColorDefault = 0xFFFFFFFF;
 
-/// 快速新增窗口的逻辑尺寸：便签额外带可选标题，因此比待办略高。
+/// 快速新增窗口的逻辑尺寸：便签额外带可选标题，待办额外带时间与提醒入口，
+/// 因此都比基础内容略高。
 Size deskComposerSize(DeskKind kind) =>
-    Size(410, kind == DeskKind.note ? 496 : 414);
+    Size(410, kind == DeskKind.note ? 496 : 470);
 
 int _setDwmAttribute(int handle, int attribute, int value) {
   final data = calloc<Uint32>();

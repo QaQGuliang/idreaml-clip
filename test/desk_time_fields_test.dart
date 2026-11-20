@@ -3,6 +3,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:idreaml_clip/src/desk/desk_models.dart';
+import 'package:idreaml_clip/src/desk/desk_pages.dart';
 import 'package:idreaml_clip/src/desk/desk_repository.dart';
 import 'package:idreaml_clip/src/desk/desktop_notes.dart';
 import 'package:path/path.dart' as p;
@@ -312,5 +313,61 @@ void main() {
     expect(imported.body, '更旧的待办');
     expect(imported.startAt, isNull);
     expect(imported.remindAt, isNull);
+  });
+
+  test('界面字段校验与提醒预览复用同一套时间规则', () {
+    expect(validateDeskScheduleFields(DeskSchedule.empty).isEmpty, isTrue);
+    expect(
+      validateDeskScheduleFields(DeskSchedule(startAt: start, endAt: start - 1))
+          .end,
+      '结束时间不能早于开始时间',
+    );
+    expect(
+      validateDeskScheduleFields(DeskSchedule(startAt: start, endAt: start))
+          .isEmpty,
+      isTrue,
+    );
+    expect(
+      validateDeskScheduleFields(const DeskSchedule(remindBeforeMinutes: 15))
+          .remind,
+      '提前提醒需要先设置开始时间',
+    );
+    expect(
+      validateDeskScheduleFields(
+        DeskSchedule(startAt: start, remindAt: start, remindBeforeMinutes: 15),
+      ).remind,
+      '提醒只能保留一种方式，请清除后重新设置',
+    );
+    expect(
+      validateDeskScheduleFields(
+        DeskSchedule(startAt: start, remindBeforeMinutes: 0),
+      ).remind,
+      '提前提醒须为 1–10080 分钟',
+    );
+    expect(
+      deskScheduleReminderAt(
+        DeskSchedule(startAt: start, remindBeforeMinutes: 15),
+      ),
+      start - 15 * Duration.millisecondsPerMinute,
+    );
+    expect(deskScheduleReminderAt(const DeskSchedule(remindAt: start)), start);
+    expect(deskScheduleReminderAt(DeskSchedule.empty), isNull);
+    expect(
+      deskReminderPreview(DeskSchedule(startAt: start, remindBeforeMinutes: 5)),
+      contains('提醒'),
+    );
+    expect(parseDeskDate('2026-02-30'), isNull);
+    expect(parseDeskDate('2026-2-28'), isNotNull);
+    expect(parseDeskDate('2026/02/28'), isNull);
+    expect(
+      deskScheduleStamp(start),
+      matches(RegExp(r'^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$')),
+    );
+    expect(
+      deskScheduleSummary(
+        DeskSchedule(startAt: start, endAt: start, remindBeforeMinutes: 5),
+      ),
+      contains('提前 5 分钟提醒'),
+    );
   });
 }

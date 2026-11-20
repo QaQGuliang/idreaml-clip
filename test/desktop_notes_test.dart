@@ -632,4 +632,39 @@ void main() {
     expect((await a.load()).length, 1);
     notes.dispose();
   });
+
+  test('草稿携带待办时间与提醒字段，便签草稿不受影响', () async {
+    final notes = DesktopNotes(a);
+    addTearDown(notes.dispose);
+    await notes.initialize();
+    const start = 4102444800000;
+    const end = start + 3600000;
+    const remind = start - 900000;
+    await notes.storeDraft(
+      DeskKind.todo,
+      '提醒草稿',
+      '正文',
+      startAt: start,
+      endAt: end,
+      remindBeforeMinutes: 15,
+    );
+    var draft = await notes.draft(DeskKind.todo);
+    expect(draft['startAt'], start);
+    expect(draft['endAt'], end);
+    expect(draft['remindBeforeMinutes'], 15);
+    expect(draft.containsKey('remindAt'), isFalse);
+
+    await notes.storeDraft(DeskKind.todo, '', '', remindAt: remind);
+    draft = await notes.draft(DeskKind.todo);
+    expect(draft['remindAt'], remind);
+    for (final key in ['startAt', 'endAt', 'remindBeforeMinutes']) {
+      expect(draft.containsKey(key), isFalse, reason: key);
+    }
+
+    await notes.storeDraft(DeskKind.note, '', '便签');
+    final noteDraft = await notes.draft(DeskKind.note);
+    for (final key in ['startAt', 'endAt', 'remindAt', 'remindBeforeMinutes']) {
+      expect(noteDraft.containsKey(key), isFalse, reason: key);
+    }
+  });
 }
