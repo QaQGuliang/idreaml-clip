@@ -5,6 +5,7 @@
 list(APPEND FLUTTER_PLUGIN_LIST
   git2dart_binaries
   hotkey_manager_linux
+  local_notifier
   screen_retriever_linux
   tray_manager
   window_manager

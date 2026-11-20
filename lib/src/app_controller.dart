@@ -19,6 +19,7 @@ import 'models/workspace_layout.dart';
 import 'services/sync_service.dart';
 import 'services/clipboard_service.dart';
 import 'services/async_gate.dart';
+import 'services/reminder_service.dart';
 
 enum AppPage {
   history,
@@ -45,8 +46,16 @@ class AppController extends ChangeNotifier {
   final SyncService syncService;
   final ClipboardService clipboard;
   DesktopNotes? desktopNotes;
+  ReminderService? reminderService;
   String? selectedDeskId;
   int deskViewRequest = 0;
+
+  /// 接线待办提醒调度；重复调用会先释放旧实例。
+  Future<void> attachReminders(ReminderService service) async {
+    reminderService?.dispose();
+    reminderService = service;
+    await service.start();
+  }
 
   bool reservesDesktopShortcut(QuickShortcut shortcut) =>
       desktopNotes != null &&
@@ -739,6 +748,8 @@ class AppController extends ChangeNotifier {
 
   @override
   void dispose() {
+    reminderService?.dispose();
+    reminderService = null;
     desktopNotes?.removeListener(_onNotesChanged);
     desktopNotes?.dispose();
     _disposed = true;

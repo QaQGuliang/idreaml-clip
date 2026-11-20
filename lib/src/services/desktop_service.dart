@@ -399,6 +399,13 @@ class DesktopService with TrayListener, WindowListener {
     await showMain();
   }
 
+  /// 点击待办提醒后聚焦主窗口并打开待办管理页；模块关闭时只聚焦主窗口。
+  Future<void> showTodoReminders() async {
+    await showHistory();
+    if (controller.desktopNotes?.enabled(DeskKind.todo) != true) return;
+    await controller.setPage(AppPage.todos);
+  }
+
   Future<void> setLaunchAtStartup(bool value) async {
     if (controller.launchAtStartupChanging) return;
     _startupRevision++;

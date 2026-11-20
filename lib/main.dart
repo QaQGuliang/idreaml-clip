@@ -9,6 +9,8 @@ import 'src/data/clipboard_repository.dart';
 import 'src/data/data_storage.dart';
 import 'src/services/desktop_service.dart';
 import 'src/services/credential_service.dart';
+import 'src/services/reminder_service.dart';
+import 'src/services/windows_toast_reminder_sink.dart';
 import 'src/services/sync_service.dart';
 import 'src/services/clipboard_service.dart';
 import 'src/services/windows_clipboard_service.dart';
@@ -155,6 +157,7 @@ Future<void> _startApplication(
     return;
   }
   await desktopService.initialize();
+  await _startReminders(controller, desktopService);
 
   runApp(
     IdreamlClipApp(controller: controller, desktopService: desktopService),
@@ -163,4 +166,25 @@ Future<void> _startApplication(
     onActivate: desktopService.showHistory,
     onShutdown: desktopService.exitApp,
   );
+}
+
+/// 待办提醒：仅在桌面待办模块存在（Windows）时接线，点击通知打开待办页。
+Future<void> _startReminders(
+  AppController controller,
+  DesktopService desktopService,
+) async {
+  final notes = controller.desktopNotes;
+  if (notes == null) return;
+  final service = ReminderService(
+    notes: notes,
+    sink: WindowsToastReminderSink(onOpen: desktopService.showTodoReminders),
+    store: DeskReminderStateStore(notes.repository),
+  );
+  try {
+    await controller.attachReminders(service);
+  } catch (error) {
+    // 提醒调度失败不能阻断主功能。
+    service.dispose();
+    debugPrint('待办提醒初始化失败：$error');
+  }
 }
