@@ -2,7 +2,7 @@
 
 <img src="/idreaml/idreaml-clip/raw/branch/main/website/assets/logo.png" alt="理梦剪藏标志" width="76" height="76">
 
-**Windows 10 / 11 x64 · 1.1.8+1**
+**Windows 10 / 11 x64 · 1.1.9+8**
 
 [返回项目首页](/idreaml/idreaml-clip) · [详细功能与操作边界](../docs/user-guide.md) · [离线 HTML 指南源文件（右键另存为）][offline]
 
@@ -16,12 +16,12 @@
 
 ## 下载安装
 
-本次发布为 Windows 1.1.8+1，统一应用 Logo、托盘与系统图标，以及网站和指南中的品牌素材。运行所需组件已随包提供，无需另外安装 Flutter、Dart 或 Git。
+本次发布为 Windows 1.1.9+8。本版为待办增加可选的时间与提醒，同步记录改为折叠摘要并可打开明细页；截图编辑器默认使用“选择 / 调整”工具，工具栏收拢为单行优先并避免遮挡选区；便签、待办与设置统一使用 18 色色板和 HEX 自定义颜色。运行所需组件已随包提供，无需另外安装 Flutter、Dart 或 Git。
 
 | 版本 | 安装方式 |
 | --- | --- |
 | [Windows 安装版 EXE][setup] · 约 16.2 MB | 跟随安装向导选择目录和快捷方式。适合首次安装或覆盖升级。 |
-| [Windows 便携 ZIP][portable] · 约 18.8 MB | 完整解压到固定目录，再运行 `idreaml_clip.exe`。保留旁边的 DLL 和 `data` 目录。 |
+| [Windows 便携 ZIP][portable] · 约 18.4 MB | 完整解压到固定目录，再运行 `idreaml_clip.exe`。保留旁边的 DLL 和 `data` 目录。 |
 
 [完整发布说明][release] · [安装版 SHA-256][setup-checksum] · [便携版 SHA-256][portable-checksum]
 
@@ -40,7 +40,7 @@
 快捷面板在鼠标附近打开，可以直接搜索和选取剪切板记录。
 
 1. 点击需要输入内容的位置，按 `Ctrl + Shift + V` 打开面板。
-2. 输入关键词筛选，或切到“收藏”。悬停图片和 JSON 可查看预览。
+2. 输入关键词筛选，或切到“收藏”。悬停图片和 JSON 可查看预览；图片预览直接显示图片本身，没有卡片底色、边框或投影。
 3. 单击记录，或用 `↑`、`↓` 选中后按 `Enter` 使用。按 `Esc` 收起面板。
 
 <img src="/idreaml/idreaml-clip/raw/branch/main/website/assets/quick-panel.png" alt="快捷剪切板：顶部便签、待办与截图入口，下方提供搜索、最近和收藏">
@@ -52,6 +52,7 @@
 <img src="/idreaml/idreaml-clip/raw/branch/main/website/assets/capture-toolbar.png" alt="截图工具栏：选择、标注、长截图、撤销重做、贴图和完成">
 
 - **截图与标注。** 按 `F1` 或点击快捷面板顶部的截图图标。选择区域、窗口或全屏，添加箭头、文字、马赛克等标注，点击“完成”复制图片并保存历史。
+- **调整选区与工具栏。** 进入截图默认使用“选择 / 调整”工具，可先拖动选区或边缘手柄调整范围。工具栏优先排成一行（最多两行），颜色、粗细和字号收进“标注样式”弹层；它在选区四周自动找位，接近全屏时贴屏幕边缘显示，也可拖动工具栏空白处移开。
 - **取色。** 普通截图时，鼠标旁显示 HEX 和 RGB 色值。按 `F2` 隐藏或显示取色框，取色框显示时按 `C` 复制 HEX 并结束截图。文字输入和长图编辑期间停用取色快捷键。
 - **贴图。** 点击“贴图”把当前截图放到桌面，同时记录历史并保留原剪切板内容。拖动调整位置，滚轮缩放。通过右键菜单复制、关闭或设置边框。
 
@@ -80,9 +81,11 @@
 
 <img src="/idreaml/idreaml-clip/raw/branch/main/website/assets/desk-settings.png" alt="便签与待办设置：模块开关、预览、显示器与展示区域">
 
-普通应用可以遮住列表。按 `Win + D` 显示桌面后仍可查看。快捷键添加时窗口临时置顶，结束后回到底层。快速新增时按 `Ctrl + Enter` 保存，按 `Esc` 取消并清除本次草稿。直接离开快速新增窗口会保留本机草稿。
+普通应用可以遮住列表。按 `Win + D` 显示桌面后仍可查看。快捷键添加时窗口临时置顶，结束后回到底层。快速新增时按 `Ctrl + Enter` 保存；按 `Esc` 或直接离开窗口会保留本机草稿，点击“取消”才会清除。
 
-便签和待办可分别设置默认字体、10–32 字号及文字颜色。单条内容可自定义这些设置，或恢复“跟随列表”。快速新增同样支持选色。卡片支持调整毛玻璃底色、渐变和透明度，文字保持不透明。毛玻璃基于静态壁纸。
+新建或编辑待办时，可设置可选的开始、结束时间与提醒。应用运行期间到点会弹出 Windows 系统通知，点击通知进入待办管理页；错过的提醒在下次启动时汇总提示一次，完成后不再提醒。管理页显示“今天/明天”、跨天或截止时间，桌面卡片显示日期与时分；逾期标红，有开始时间的未完成待办排在前面。保存时字段错误会标红并在附近提示，便签标题最多 120 字。
+
+便签和待办可分别设置默认字体、10–32 字号及文字颜色。单条内容可自定义这些设置，或恢复“跟随列表”。快速新增同样支持选色。选色使用应用内 18 色色板，也可输入 6 位 HEX 值。卡片支持调整毛玻璃底色、渐变和透明度，文字保持不透明。毛玻璃基于静态壁纸。
 
 <img src="/idreaml/idreaml-clip/raw/branch/main/website/assets/desk-settings-style.png" alt="文字样式与卡片外观设置：字体、字号、背景色和透明度">
 
@@ -105,7 +108,7 @@
 
 <img src="/idreaml/idreaml-clip/raw/branch/main/website/assets/cloud-sync.png" alt="云同步页面：平台选择和本地与云端状态">
 
-便签与待办分别开启同步，覆盖内容、单条文字样式、完成和删除状态。模块关闭时暂停该模块同步。多设备同时修改会保留双方版本，可在管理页处理。显示器、展示位置、列表默认主题和草稿保存在各台电脑上。
+便签与待办分别开启同步，覆盖内容、时间与提醒、单条文字样式、完成和删除状态。模块关闭时暂停该模块同步。多设备同时修改会保留双方版本，可在管理页处理。显示器、展示位置、列表默认主题、草稿和已提醒状态保存在各台电脑上。同步记录默认折叠显示最近结果，点击“查看全部”可按天查看，并筛选成功或失败记录。
 
 ## 快捷键
 
@@ -124,7 +127,7 @@
 | 单按 `F3` | 新建便签 | 开启便签功能后 |
 | 快速双按 `F3` | 新建待办 | 开启待办功能后，两次间隔约 330 毫秒以内 |
 | `Ctrl + Enter` | 保存 | 快速新增窗口 |
-| `Esc` | 取消并清除本次草稿 | 快速新增窗口 |
+| `Esc` | 关闭快速新增并保留本次草稿 | 快速新增窗口 |
 
 ## 常见问题
 
@@ -162,13 +165,13 @@
 
 ### 这次也有 macOS 和 Linux 安装包吗？
 
-1.1.8+1 本次仅发布 Windows x64 版本，便签与待办首期也在 Windows 上实现和验证。其他平台以后再适配；本页的操作步骤以当前 Windows 版为准。
+1.1.9+8 本次仅发布 Windows x64 版本，便签与待办首期也在 Windows 上实现和验证。其他平台以后再适配；本页的操作步骤以当前 Windows 版为准。
 
 [下载 Windows 版并查看完整发布说明][release]
 
-[release]: /idreaml/idreaml-clip/releases/tag/v1.1.8
-[setup]: /idreaml/idreaml-clip/releases/download/v1.1.8/Idreaml-Clip-1.1.8%2B1-windows-x64-setup.exe
-[portable]: /idreaml/idreaml-clip/releases/download/v1.1.8/Idreaml-Clip-1.1.8%2B1-windows-x64.zip
-[setup-checksum]: /idreaml/idreaml-clip/releases/download/v1.1.8/Idreaml-Clip-1.1.8%2B1-windows-x64-setup.exe.sha256
-[portable-checksum]: /idreaml/idreaml-clip/releases/download/v1.1.8/Idreaml-Clip-1.1.8%2B1-windows-x64.zip.sha256
-[offline]: /idreaml/idreaml-clip/releases/download/v1.1.8/Idreaml-Clip-user-guide.html
+[release]: /idreaml/idreaml-clip/releases/tag/v1.1.9
+[setup]: /idreaml/idreaml-clip/releases/download/v1.1.9/Idreaml-Clip-1.1.9%2B8-windows-x64-setup.exe
+[portable]: /idreaml/idreaml-clip/releases/download/v1.1.9/Idreaml-Clip-1.1.9%2B8-windows-x64.zip
+[setup-checksum]: /idreaml/idreaml-clip/releases/download/v1.1.9/Idreaml-Clip-1.1.9%2B8-windows-x64-setup.exe.sha256
+[portable-checksum]: /idreaml/idreaml-clip/releases/download/v1.1.9/Idreaml-Clip-1.1.9%2B8-windows-x64.zip.sha256
+[offline]: /idreaml/idreaml-clip/releases/download/v1.1.9/Idreaml-Clip-user-guide.html
